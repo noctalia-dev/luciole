@@ -1141,7 +1141,11 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
   // Client-side window controls keep the strip when tabs are hidden.
   const bool tabsHidden = labels.size() <= 1 && !m_defaults.alwaysShowTabBar;
   const bool stripVisible = !tabsHidden || decorated;
-  if (host.strip && labels == host.labels && decorated == host.decorated && stripVisible == host.stripVisible && tabsHidden == host.tabsHidden) {
+  if (host.strip
+      && labels == host.labels
+      && decorated == host.decorated
+      && stripVisible == host.stripVisible
+      && tabsHidden == host.tabsHidden) {
     return;
   }
   host.decorated = decorated;
