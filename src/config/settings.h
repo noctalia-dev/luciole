@@ -22,7 +22,7 @@ namespace luciole {
     ViewMode viewMode = ViewMode::List;
     bool showHidden = false;
     bool showBackups = true;
-    bool showTabBarWithSingleTab = true;
+    bool alwaysShowTabBar = true;
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
     int sidebarWidth = kDefaultSidebarWidth;
@@ -60,7 +60,7 @@ namespace luciole {
     TypingMode,
     ShowHidden,
     ShowBackups,
-    ShowTabBarWithSingleTab,
+    AlwaysShowTabBar,
     SortBy,
     SortDescending,
     DirectoriesFirst,
@@ -131,7 +131,7 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::TypingMode> TypingMode{Id::TypingMode};
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};
     static constexpr PreferenceKey<bool> ShowBackups{Id::ShowBackups};
-    static constexpr PreferenceKey<bool> ShowTabBarWithSingleTab{Id::ShowTabBarWithSingleTab};
+    static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};
     static constexpr PreferenceKey<bool> SortDescending{Id::SortDescending};
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
