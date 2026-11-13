@@ -2499,7 +2499,7 @@ LayoutRect BrowserPage::menuAnchor() const { return sceneRect(*m_menuButton); }
 
 void BrowserPage::showPopup(
     std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height, bool alignLeft,
-    PopupMode mode
+    PopupMode mode, bool openAbove
 ) {
   m_fileKeys.clearTypeahead();
   m_locationBar.clearCompletions();
@@ -2585,8 +2585,9 @@ void BrowserPage::showPopup(
       .anchorHeight = std::max(1, static_cast<int>(anchor.height)),
       .width = static_cast<std::uint32_t>(width),
       .height = static_cast<std::uint32_t>(height),
-      .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
-      .gravity = alignLeft ? XDG_POSITIONER_GRAVITY_BOTTOM_LEFT : XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
+      .anchor = openAbove ? XDG_POSITIONER_ANCHOR_TOP_RIGHT : XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+      .gravity = openAbove ? (alignLeft ? XDG_POSITIONER_GRAVITY_TOP_LEFT : XDG_POSITIONER_GRAVITY_TOP_RIGHT)
+                           : (alignLeft ? XDG_POSITIONER_GRAVITY_BOTTOM_LEFT : XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT),
       .constraintAdjustment =
           XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y,
       .serial = m_popupSerial != 0 ? m_popupSerial : m_connection.lastInputSerial(),

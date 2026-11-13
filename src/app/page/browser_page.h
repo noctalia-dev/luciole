@@ -282,7 +282,7 @@ private:
 
   void showPopup(
       std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
-      bool alignLeft = false, PopupMode mode = PopupMode::Transient
+      bool alignLeft = false, PopupMode mode = PopupMode::Transient, bool openAbove = false
   ) override;
   void setDialogSize(float width, float height) override;
   PopupSurface* menuSurface() override;

@@ -142,7 +142,7 @@ public:
   // Replaces the active popup with `root`; Dialog mode retains form state across focus loss and outside clicks.
   virtual void showPopup(
       std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
-      bool alignLeft, PopupMode mode = PopupMode::Transient
+      bool alignLeft, PopupMode mode = PopupMode::Transient, bool openAbove = false
   ) = 0;
   // Shows `root` centered on the window, at most `preferredWidth` wide, and focuses its first control.
   virtual void showCenteredDialog(std::unique_ptr<Flex> root, float preferredWidth) = 0;
