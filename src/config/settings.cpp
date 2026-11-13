@@ -208,6 +208,7 @@ namespace {
       describe(P::TypingMode, "typing_mode", [](S& s) -> auto& { return s.typingMode; }, {kTypingModes}),
       describe(P::ShowHidden, "show_hidden", [](S& s) -> auto& { return s.showHidden; }),
       describe(P::ShowBackups, "show_backups", [](S& s) -> auto& { return s.showBackups; }),
+      describe(P::ShowTabBarWithSingleTab, "show_tab_bar_with_single_tab", [](S& s) -> auto& { return s.showTabBarWithSingleTab; }),
       describe(P::SortBy, "sort_by", [](S& s) -> auto& { return s.sort.field; }, {kSortFields}),
       describe(P::SortDescending, "sort_descending", [](S& s) -> auto& { return s.sort.descending; }),
       describe(P::DirectoriesFirst, "directories_first", [](S& s) -> auto& { return s.sort.directoriesFirst; }),

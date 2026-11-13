@@ -1138,10 +1138,15 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
     labels.emplace_back(id, m_pages.at(m_model.layout(id)->active)->title());
   }
   const bool decorated = !host.surface.serverDecorated() && !host.surface.fullscreen();
-  if (host.strip && labels == host.labels && decorated == host.decorated) {
+  // Client-side window controls keep the strip when tabs are hidden.
+  const bool tabsHidden = labels.size() <= 1 && !m_defaults.showTabBarWithSingleTab;
+  const bool stripVisible = !tabsHidden || decorated;
+  if (host.strip && labels == host.labels && decorated == host.decorated && stripVisible == host.stripVisible && tabsHidden == host.tabsHidden) {
     return;
   }
   host.decorated = decorated;
+  host.stripVisible = stripVisible;
+  host.tabsHidden = tabsHidden;
   const float scrollOffset = host.tabScroll ? host.tabScroll->scrollOffset() : 0.0F;
   // Only a press held on the strip is lost with it; presses held in the panes survive the rebuild.
   if (host.dispatcher.pointerCaptured() && !host.pointerPage) {
@@ -1164,6 +1169,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
        .fillHeight = true,
        .flexGrow = 1}
   );
+  scroll->setVisible(!host.tabsHidden);
   auto tabs = ui::row({.align = FlexAlign::Center, .gap = Style::spaceXs, .height = kTabStripHeight});
   scroll->content()->setDirection(FlexDirection::Horizontal);
   const auto windowId = host.id;
@@ -1280,6 +1286,9 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
         )
     );
   }
+  host.splitButton->setVisible(!host.tabsHidden);
+  strip->setJustify(host.tabsHidden ? FlexJustify::End : FlexJustify::Start);
+  strip->setVisible(host.stripVisible);
   strip->setZIndex(50);
   host.root->addChild(std::move(strip));
 }
@@ -1424,6 +1433,7 @@ void WorkspaceApplication::prepare(Host& host) {
     host.chromeOwner = window.active;
   }
   rebuildStrip(host, window);
+  const float stripHeight = host.stripVisible ? kTabStripHeight : 0.0F;
   host.splitButton->setSelected(window.secondary.has_value());
   std::vector<luciole::TabId> visible{window.primary};
   if (window.secondary && !active.overlay()) {
@@ -1475,14 +1485,14 @@ void WorkspaceApplication::prepare(Host& host) {
     host.activePaneBar->setVisible(false);
     host.previewDivider->setVisible(false);
     active.setPreviewBounds(std::nullopt);
-    active.prepare({0, kTabStripHeight, width, height - kTabStripHeight}, true, false);
+    active.prepare({0, stripHeight, width, height - stripHeight}, true, false);
     syncTooltip(host);
     return;
   }
-  host.toolbarNode->arrange(renderer, {0, kTabStripHeight, width, kNavigationToolbarHeight});
+  host.toolbarNode->arrange(renderer, {0, stripHeight, width, kNavigationToolbarHeight});
   // Chrome (tabs, toolbar, sidebar) wraps one flush content plane: panes and the docked preview touch, separated
   // only by 1px lines; the plane's top-left corner is rounded where it meets the sidebar.
-  const float top = kTabStripHeight + kNavigationToolbarHeight;
+  const float top = stripHeight + kNavigationToolbarHeight;
   const float bodyHeight = std::max(1.0F, height - top);
   const float sidebar = active.sidebarWidth();
   active.sidebar()->arrange(renderer, {0, top, active.sidebarControlWidth(), bodyHeight});

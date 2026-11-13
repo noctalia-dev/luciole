@@ -46,6 +46,8 @@ class WorkspaceApplication {
     float pressX = 0, pressY = 0;
     bool tabDrag = false, resizing = false, closed = false;
     bool decorated = false;
+    bool stripVisible = true;
+    bool tabsHidden = false;
     float pointerX = 0, pointerY = 0;
     float resizeStart = 0.5F;
     std::optional<int> previewDragWidth;
