@@ -22,6 +22,8 @@ Callbacks schedule the required phase. They do not synchronously rebuild a scene
 
 Luciole owns icon selection and monitoring in `src/system/icon_resolver.*` and `icon_theme_poll_source.*`. Desktop GSettings selects the theme when its schema is available; GTK settings.ini provides a fallback. The main-loop watcher observes `changed::icon-theme`, reads the key after connecting, and debounces selection changes alongside existing artwork file watches. Accepted changes invalidate the application icon cache and rebind browser artwork. GSettings objects are optional when the schema is absent; observer teardown disconnects callbacks. The `icon-theme` suite uses private schemas/settings and artwork to exercise selection, fallback, live changes and file replacement.
 
+Resolver instances retain a shared immutable search plan and per-instance result/missing caches. A published plan owns a cached immutable watch-path snapshot; callers may keep old snapshots safely across theme/content generations. Temporary hash sets deduplicate search/watch paths while ordered vectors retain first-match theme, inheritance and size precedence. Generation changes clear local results and acquire the new plan. Filesystem discovery, signatures and watch installation remain synchronous for now; this increment changes neither watch coverage nor reload timing.
+
 ## Thumbnail and preview pipeline
 
 [ThumbnailService](../../src/thumbnails/thumbnail_service.h) owns bounded generation requests, revisions, visibility priority and cancellation. [PreviewService](../../src/thumbnails/preview_service.h) requests appropriate preview content. Their generation policy, freedesktop disk store and FFmpeg/Poppler providers remain Luciole-owned.

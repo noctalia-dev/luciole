@@ -10,6 +10,7 @@ class Button;
 class Label;
 class OperationJob;
 class PageContext;
+struct KeyboardEvent;
 
 // Moving items to Trash, emptying Trash or deleting from it, and reporting restored items.
 class TrashController {
@@ -20,6 +21,8 @@ public:
   void restore(const std::vector<luciole::DirectoryEntry>& targets);
   // Empties Trash, or deletes `selection` from it, after the user confirms.
   void openEmptyTrash(std::optional<std::vector<luciole::DirectoryEntry>> selection = std::nullopt);
+  // Without an explicitly focused control, Enter safely cancels the confirmation.
+  bool key(const KeyboardEvent& event);
   // Owned job changes: sync the confirmation dialog, or report a finished job.
   void trashChanged(OperationJob& job);
   void emptyTrashChanged(OperationJob& job);

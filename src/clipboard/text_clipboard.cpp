@@ -19,6 +19,7 @@
 
 namespace {
   constexpr std::size_t kTextLimit = 1024 * 1024;
+  constexpr auto kFileDropReadTimeout = std::chrono::seconds(120);
   struct DragIcon {
     wl_surface* surface = nullptr;
     wl_buffer* buffer = nullptr;
@@ -88,6 +89,7 @@ namespace {
     std::string text;
     bool sending;
     bool valid = true;
+    std::chrono::seconds timeout{5};
     ~PipeTransfer() {
       if (fd >= 0) {
         ::close(fd);
@@ -108,7 +110,7 @@ namespace {
     if (flags < 0 || fcntl(pipe.fd, F_SETFL, flags | O_NONBLOCK) < 0) {
       pipe.valid = false;
     }
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto deadline = std::chrono::steady_clock::now() + pipe.timeout;
     std::size_t offset = 0;
     std::array<char, 8192> buffer{};
     while (pipe.valid && !g_cancellable_is_cancelled(cancellable)) {
@@ -175,6 +177,7 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
     std::uint32_t actions = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
     std::uint32_t action = 0;
     std::shared_ptr<int> lifetime = std::make_shared<int>(0);
+    GioPtr<GCancellable> reading{g_cancellable_new()};
   };
   struct Reconciliation {
     std::uint64_t revision;
@@ -240,7 +243,10 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
   std::vector<std::function<void(std::optional<std::string>)>> callbacks;
 
   void discard(wl_data_offer* offer) {
-    if (offer && offers.erase(offer)) {
+    const auto found = offers.find(offer);
+    if (found != offers.end()) {
+      g_cancellable_cancel(found->second.reading.get());
+      offers.erase(found);
       wl_data_offer_destroy(offer);
     }
   }
@@ -272,7 +278,7 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
   }
   void read(
       wl_data_offer* offer, const char* mime, GCancellable* cancel,
-      std::function<void(std::optional<std::string>)> callback
+      std::function<void(std::optional<std::string>)> callback, std::chrono::seconds timeout = std::chrono::seconds(5)
   ) {
     int fds[2];
     if (!offer || !offers.contains(offer) || ::pipe2(fds, O_CLOEXEC) != 0) {
@@ -291,9 +297,10 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
         },
         new Callback(std::move(callback))
     );
-    g_task_set_task_data(task, new PipeTransfer{fds[0], {}, false}, [](gpointer data) {
-      delete static_cast<PipeTransfer*>(data);
-    });
+    g_task_set_task_data(
+        task, new PipeTransfer{.fd = fds[0], .text = {}, .sending = false, .timeout = timeout},
+        [](gpointer data) { delete static_cast<PipeTransfer*>(data); }
+    );
     g_task_run_in_thread(task, transfer);
     g_object_unref(task);
   }
@@ -479,21 +486,35 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
       return;
     }
     auto& offer = offers.at(dragging);
-    if (offer.types.contains(std::string(kUriListMime)) && hover) {
+    const bool files = offer.types.contains(std::string(kUriListMime));
+    const bool extraction = !files
+        && offer.types.contains(std::string(kExtractionServiceMime))
+        && offer.types.contains(std::string(kExtractionPathMime));
+    if ((files || extraction) && hover) {
       target = hover(dragSurface, dragX, dragY);
     }
-    if (target.receive && !target.copyOnly && offer.types.contains(std::string(kAskDropMime))) {
+    if (extraction) {
+      if (!target.extract || target.copyOnly) {
+        target = {};
+      }
+      target.preferred = DragAction::Copy;
+    }
+    const bool acceptedTarget = extraction ? static_cast<bool>(target.extract) : static_cast<bool>(target.receive);
+    if (files && target.receive && !target.copyOnly && offer.types.contains(std::string(kAskDropMime))) {
       target.preferred = DragAction::Ask;
     }
     const bool modern = wl_data_offer_get_version(dragging) >= WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION;
-    const auto mask = target.copyOnly ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
-                                      : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+    const auto mask = target.copyOnly || extraction ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+                                                    : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
             | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE
             | WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
     const auto supported = offer.actions & mask;
     if (!(supported & (WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE))) {
       target = {};
     }
+    const bool acceptedOffer = acceptedTarget
+        && (supported & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+            || (!extraction && (supported & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)));
     if (modern) {
       std::uint32_t preferred = target.preferred == DragAction::Copy ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
           : target.preferred == DragAction::Ask                      ? WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK
@@ -504,13 +525,69 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
       }
       // Request Ask exclusively when selected, while preserving the source's final action mask.
       const auto accepted = preferred == WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK ? preferred : supported;
-      wl_data_offer_set_actions(dragging, target.receive ? accepted : 0, target.receive ? preferred : 0);
+      wl_data_offer_set_actions(dragging, acceptedOffer ? accepted : 0, acceptedOffer ? preferred : 0);
     }
-    wl_data_offer_accept(dragging, dragSerial, target.receive ? kUriListMime.data() : nullptr);
+    const auto mime = extraction ? kExtractionServiceMime : kUriListMime;
+    wl_data_offer_accept(dragging, dragSerial, acceptedOffer ? mime.data() : nullptr);
+  }
+  void extractionDrop(
+      wl_data_offer* offer, const std::shared_ptr<int>& token,
+      std::function<void(ExtractionOffer, DropCompletion)> receiver, std::function<void(std::string)> failed,
+      bool modern
+  ) {
+    const auto live = [self = shared_from_this(), offer, token] {
+      const auto current = self->offers.find(offer);
+      return self->active && current != self->offers.end() && current->second.lifetime == token;
+    };
+    read(
+        offer, kExtractionServiceMime.data(), offers.at(offer).reading.get(),
+        [self = shared_from_this(), offer, modern, live, receiver = std::move(receiver),
+         failed = std::move(failed)](auto service) mutable {
+          if (!live()) {
+            return;
+          }
+          if (!service || service->empty() || service->size() > 4096) {
+            if (failed) {
+              failed("Invalid archive extraction offer.");
+            }
+            self->discard(offer);
+            return;
+          }
+          self->read(
+              offer, kExtractionPathMime.data(), self->offers.at(offer).reading.get(),
+              [self, offer, modern, live, service = std::move(*service), receiver = std::move(receiver),
+               failed = std::move(failed)](auto path) {
+                if (!live()) {
+                  return;
+                }
+                if (!path || path->empty() || path->size() > 4096) {
+                  if (failed) {
+                    failed("Invalid archive extraction offer.");
+                  }
+                  self->discard(offer);
+                  return;
+                }
+                const auto finished = std::make_shared<bool>(false);
+                const auto finish = [self, offer, modern, live, finished](bool success) {
+                  if (!live() || std::exchange(*finished, true)) {
+                    return;
+                  }
+                  if (success && modern) {
+                    wl_data_offer_finish(offer);
+                  }
+                  self->discard(offer);
+                };
+                receiver({service, std::move(*path)}, finish);
+              }
+          );
+        }
+    );
   }
   void drop() {
     auto* offer = std::exchange(dragging, nullptr);
     auto receiver = std::move(target.receive);
+    auto extractor = std::move(target.extract);
+    auto failed = std::move(target.failed);
     const bool prompt = target.preferred == DragAction::Ask;
     const auto found = offers.find(offer);
     const auto action = found == offers.end() ? 0 : found->second.action;
@@ -518,9 +595,13 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
     if (leave) {
       leave();
     }
+    const bool extraction = found != offers.end()
+        && !found->second.types.contains(std::string(kUriListMime))
+        && found->second.types.contains(std::string(kExtractionServiceMime))
+        && found->second.types.contains(std::string(kExtractionPathMime));
     if (!offer
         || found == offers.end()
-        || !receiver
+        || (extraction ? !extractor : !receiver)
         || (modern
             && action != WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
             && action != WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE
@@ -529,21 +610,35 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
       return;
     }
     const auto token = found->second.lifetime;
+    if (extraction) {
+      if (modern && action != WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) {
+        discard(offer);
+      } else {
+        extractionDrop(offer, token, std::move(extractor), std::move(failed), modern);
+      }
+      return;
+    }
     const auto supported = found->second.actions;
     const auto live = [self = shared_from_this(), offer, token] {
       const auto current = self->offers.find(offer);
       return self->active && current != self->offers.end() && current->second.lifetime == token;
     };
     read(
-        offer, kUriListMime.data(), cancellable.get(),
-        [self = shared_from_this(), offer, action, modern, prompt, supported, live,
-         receiver = std::move(receiver)](auto bytes) {
+        offer, kUriListMime.data(), found->second.reading.get(),
+        [self = shared_from_this(), offer, action, modern, prompt, supported, live, receiver = std::move(receiver),
+         failed = std::move(failed)](auto bytes) {
           if (!live()) {
             return;
           }
           auto payload = bytes ? parseFilePayload(kUriListMime, *bytes)
                                : std::expected<FilePayload, std::string>(std::unexpected("Transfer failed."));
           if (!payload) {
+            if (failed) {
+              failed(
+                  bytes ? "Invalid dropped file list: " + payload.error()
+                        : "Could not read the dropped file list from the source application."
+              );
+            }
             self->discard(offer);
             return;
           }
@@ -592,7 +687,8 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
             self->discard(offer);
           };
           receiver(std::move(*payload), std::move(options), finish);
-        }
+        },
+        kFileDropReadTimeout
     );
   }
 };
@@ -678,7 +774,8 @@ luciole::WaylandTextClipboard::~WaylandTextClipboard() {
   state.changed = {};
   g_cancellable_cancel(state.reading.get());
   g_cancellable_cancel(state.cancellable.get());
-  for (const auto& [offer, unused] : state.offers) {
+  for (const auto& [offer, offered] : state.offers) {
+    g_cancellable_cancel(offered.reading.get());
     wl_data_offer_destroy(offer);
   }
   for (const auto& [source, unused] : state.sources) {

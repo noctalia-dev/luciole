@@ -4,6 +4,9 @@
 enum class WorkspaceCommand {
   ClosePane,
   NewTab,
+  // Folder opening follows the preference; explicit NewTab always activates.
+  OpenTab,
+  NewBackgroundTab,
   Duplicate,
   Close,
   Reopen,

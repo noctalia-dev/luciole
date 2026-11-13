@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <gio/gio.h>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -25,6 +26,8 @@ struct IconThemeWatchPaths {
   std::vector<std::string> settingsFiles;
 };
 
+struct IconThemePlan;
+
 class IconResolver {
 public:
   IconResolver();
@@ -43,7 +46,7 @@ public:
   static bool checkThemeChanged();
   static bool checkThemePlanChanged();
   static void invalidateThemeContent();
-  static IconThemeWatchPaths themeWatchPaths();
+  static std::shared_ptr<const IconThemeWatchPaths> themeWatchPaths();
   static std::uint64_t themeGeneration();
   static std::string activeThemeName();
 
@@ -54,9 +57,7 @@ private:
 
   std::unordered_map<std::string, std::string> m_cache;
   std::unordered_set<std::string> m_missingCache;
-  std::vector<std::string> m_baseDirs;     // XDG icon base dirs: theme roots and unthemed fallback
-  std::vector<IconSearchDir> m_searchDirs; // Ordered list of concrete theme dirs to search
-  std::vector<std::string> m_pixmapDirs;   // XDG pixmap fallback roots
+  std::shared_ptr<const IconThemePlan> m_plan;
   std::string m_empty;
   std::uint64_t m_generation = 0;
   bool m_cacheMissing = false;

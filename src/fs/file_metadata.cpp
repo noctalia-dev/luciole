@@ -24,6 +24,41 @@ std::optional<std::string> luciole::readContentType(GFileInfo* info) {
   return std::nullopt;
 }
 
+std::string luciole::fileTypeDescription(FileType type, bool symlink, const std::optional<std::string>& contentType) {
+  if (symlink || type == FileType::Symlink) {
+    return "Link";
+  }
+  switch (type) {
+  case FileType::Directory:
+    return "Folder";
+  case FileType::Special:
+    return "Special";
+  case FileType::Shortcut:
+    return "Shortcut";
+  case FileType::Mountable:
+    return "Mount";
+  case FileType::Regular:
+    if (contentType && !g_content_type_is_unknown(contentType->c_str())) {
+      const GString description(g_content_type_get_description(contentType->c_str()));
+      return description && *description ? description.get() : *contentType;
+    }
+    return "File";
+  default:
+    return "Unknown";
+  }
+}
+
+bool luciole::contentTypeIsText(const std::string& contentType) {
+  if (contentType.starts_with("image/") || contentType.starts_with("video/") || contentType.starts_with("audio/")) {
+    return false;
+  }
+  return !contentType.empty()
+      && (contentType.starts_with("text/")
+          || g_content_type_is_a(contentType.c_str(), "text/plain")
+          // Retain the existing Nix-provider spelling even when absent from the installed MIME database.
+          || contentType == "application/x-nix");
+}
+
 luciole::FileAccess luciole::readFileAccess(GFileInfo* info) {
   return {
       .read = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_READ),

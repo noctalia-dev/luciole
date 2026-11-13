@@ -116,6 +116,10 @@ namespace {
     fixture.write(".bash_history", "cd Documents\nprintf hello\n");
     fixture.write("extensionless", "ordinary text without an extension\n");
     fixture.write("binary", std::string("\0\1\2\3\0\xff", 6));
+    fixture.write(
+        "launcher.desktop", "[Desktop Entry]\nType=Application\nName=Mail App\nExec=false\nMimeType=text/html;\n"
+    );
+    fixture.write("record.yaml", "message: hello\n");
     gsize pngSize = 0;
     const luciole::GString png(
         reinterpret_cast<char*>(g_base64_decode(
@@ -131,6 +135,20 @@ namespace {
     TEST_CHECK(entry(session, ".bash_history").contentType == "text/plain");
     TEST_CHECK(entry(session, "extensionless").contentType == "text/plain");
     TEST_CHECK(entry(session, "binary").contentType == "application/octet-stream");
+    TEST_CHECK(entry(session, "launcher.desktop").contentType == "application/x-desktop");
+    TEST_CHECK(entry(session, "record.yaml").contentType == "application/yaml");
+    const luciole::GString launcherDescription(g_content_type_get_description("application/x-desktop"));
+    const auto launcherDetails =
+        luciole::readFileDetails(Location::fromPath((fixture.path / "launcher.desktop").native()), {});
+    TEST_CHECK(launcherDetails.typeDescription == launcherDescription.get());
+    TEST_CHECK(launcherDetails.displayName == "launcher.desktop");
+    TEST_CHECK(
+        luciole::readFileDetails(Location::fromPath((fixture.path / "binary").native()), {}).typeDescription == "File"
+    );
+    TEST_CHECK(
+        luciole::readFileDetails(Location::fromPath((fixture.path / "history-link").native()), {}).typeDescription
+        == "Link"
+    );
     TEST_CHECK(entry(session, "image-without-extension").contentType == "image/png");
     TEST_CHECK(entry(session, "history-link").symlink && entry(session, "history-link").contentType == "inode/symlink");
     TEST_CHECK(entry(session, "pipe").type == luciole::FileType::Special);

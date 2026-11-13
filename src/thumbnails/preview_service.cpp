@@ -11,15 +11,6 @@
 #include <unistd.h>
 
 namespace {
-  bool textType(const std::string& mime) {
-    return mime.starts_with("text/")
-        || mime == "application/json"
-        || mime == "application/xml"
-        || mime == "application/javascript"
-        || mime == "application/x-shellscript"
-        || mime == "application/toml"
-        || mime == "application/x-nix";
-  }
   bool sameSource(const luciole::DirectoryEntry& a, const luciole::DirectoryEntry& b) {
     return a.id == b.id
         && a.location == b.location
@@ -295,7 +286,7 @@ void luciole::PreviewService::show(
   if (unchanged
       && (pixels == m_state->pixels
           || (pixels < m_state->pixels && !m_state->view.imageUpgradeFailed)
-          || textType(entry->contentType.value_or("")))) {
+          || luciole::contentTypeIsText(entry->contentType.value_or("")))) {
     if (prepared && prepared->pixels && (!m_state->view.image || !m_state->view.image->pixels)) {
       m_state->view.image = std::move(prepared);
       m_state->view.status = PreviewStatus::Ready;
@@ -319,7 +310,7 @@ void luciole::PreviewService::show(
   if (entry->type == luciole::FileType::Regular && !entry->symlink && entry->access.read != false) {
     state.view.status = PreviewStatus::Loading;
     state.view.message = "Loading preview…";
-    if (textType(entry->contentType.value_or(""))) {
+    if (luciole::contentTypeIsText(entry->contentType.value_or(""))) {
       state.pending = true;
       state.start();
     } else {

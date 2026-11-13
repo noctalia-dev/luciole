@@ -29,6 +29,9 @@ class PageJobs;
 class PopupSurface;
 class VirtualGridView;
 
+// Menus dismiss on focus/outside clicks; forms remain until explicitly closed.
+enum class PopupMode : std::uint8_t { Transient, Dialog };
+
 // The part of BrowserPage that feature controllers use. BrowserPage implements it.
 //
 // A controller (`page/<feature>_controller.{h,cpp}`) owns one feature of the page:
@@ -136,9 +139,10 @@ public:
   // Cancels file pointer gestures, drops the view anchor and scrolls the file list to the top.
   virtual void resetFileView() = 0;
 
-  // Replaces the active dialog with `root` on a new popup surface anchored at `anchor`.
+  // Replaces the active popup with `root`; Dialog mode retains form state across focus loss and outside clicks.
   virtual void showPopup(
-      std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height, bool alignLeft
+      std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
+      bool alignLeft, PopupMode mode = PopupMode::Transient
   ) = 0;
   // Shows `root` centered on the window, at most `preferredWidth` wide, and focuses its first control.
   virtual void showCenteredDialog(std::unique_ptr<Flex> root, float preferredWidth) = 0;

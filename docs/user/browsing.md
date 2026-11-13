@@ -15,10 +15,13 @@ The field next to the location bar shows Search files… for recursive search, o
 | Back / Forward | Alt+Left / Alt+Right |
 | Parent folder / Home | Alt+Up / Alt+Home |
 | Edit location / Focus search | Ctrl+L / Ctrl+F |
+| Open terminal in current folder | F4 |
 | Refresh | F5 |
 | Undo / Redo | Ctrl+Z / Ctrl+Shift+Z |
 | Show hidden files | Ctrl+H |
 | Show sidebar / Show preview | F9 / F8 |
+
+Open Terminal Here is near the top of the folder background menu. A single folder's context menu offers Open in Terminal directly, targeting that folder. F4 always uses the active pane's current folder, regardless of selection; it also works while editing the location/search field, without submitting or clearing its text. Dialogs block the shortcut. Terminal actions require an accessible native folder and use Settings → General → Terminal, then the existing environment/discovery fallback.
 
 ## Views and selection
 
@@ -40,6 +43,10 @@ Settings → Sidebar & preview controls sidebar visibility, width, drive rows an
 
 Each tab can contain one or two browsing panes. A split belongs to its tab; it does not create another tab. Navigation, search, selection and scroll belong to each pane. Actions target the focused pane.
 
+Middle-click a folder, breadcrumb or Places row, or use a folder's Open In → New Tab menu, to open it in another tab. Settings → General → Switch to new folder tabs is on by default. Turn it off to load those folders in background tabs while keeping your current tab, focused pane, search, selection and scroll. Shift+middle-click reverses the preference for that one opening. Click the tab or use Ctrl+Tab to visit it when ready.
+
+Ctrl+T, the plus button and explicit New Tab menu actions always switch to the new tab. Duplicating or reopening a tab also selects it, and New Window retains its normal focus behavior. The folder-tab preference does not change those actions.
+
 | Action | Shortcut |
 | --- | --- |
 | New tab / New window | Ctrl+T / Ctrl+N |
@@ -60,9 +67,9 @@ Show parent folders is enabled by default in Settings → Views. Disable it to s
 
 The side preview is on by default. Resize its divider to change the saved width; small windows temporarily collapse it when there is insufficient room. F8 toggles it, and Space opens a quick preview for one selected item. Images, video stills, the first PDF page and embedded audio artwork depend on installed providers. Video previews are still images, not playback.
 
-The preview shows essential content facts such as file size, dimensions, format and duration when available. Properties (Alt+Return) includes additional technical and permission information. See [file operations](file-operations.md#properties-and-permissions).
+The preview shows essential content facts such as file size, dimensions, format and duration when available. Properties (Alt+Return) includes additional technical and permission information. Properties and file-operation dialogs stay open when you switch windows; use their buttons or Escape to close them. See [file operations](file-operations.md#properties-and-permissions).
 
-File types use the system MIME database and GIO content detection when the name alone is insufficient. For example, a text `.bash_history` can show as Plain text document with MIME `text/plain`; an unrecognized binary stays a generic file. The detected type is shared by the list, preview and Properties.
+File types use the system MIME database and GIO content detection when the name alone is insufficient. For example, a text `.bash_history` can show as Plain text document with MIME `text/plain`; an unrecognized binary stays a generic file. The detected type is shared by the list, preview and Properties. Readable local UTF-8 text formats, including YAML and desktop-entry contents, support text previews. Desktop entries also show their localized application or link name and description in preview and Properties.
 
 ## Background operations
 

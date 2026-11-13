@@ -80,8 +80,10 @@ private:
   void clearExternalDrops();
   static void dispatch(InputDispatcher& dispatcher, const PointerEvent& event);
   luciole::WindowId newWindow();
-  luciole::TabId
-  newTab(luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate = 0);
+  luciole::TabId newTab(
+      luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate = 0,
+      bool activate = true
+  );
   luciole::TabId
   newPane(luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate = 0);
   luciole::TabId createPage(

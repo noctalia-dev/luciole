@@ -120,7 +120,7 @@ void CreateController::openCreateItem(
   const float height = editor->measure(surface.renderTarget().renderer(), constraints).height;
   m_page.showPopup(
       std::move(editor), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false
+      height, false, PopupMode::Dialog
   );
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::CreateItem, [this] { closeCreation(); });
@@ -207,7 +207,7 @@ void CreateController::openLinkDialog(const luciole::DirectoryEntry& target) {
   );
   m_page.showPopup(
       std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false
+      height, false, PopupMode::Dialog
   );
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::Link, [this] { closeCreation(); });

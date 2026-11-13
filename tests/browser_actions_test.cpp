@@ -110,6 +110,45 @@ namespace {
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::CopyFiles, c, R::capture(c)).enabled);
   }
+  void testTerminalActions() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    model.applySnapshot(data);
+    model.select(6);
+    luciole::ActionContext context{.model = model, .context = 11, .query = {}, .pinned = {}};
+    const auto request = R::capture(context);
+    TEST_CHECK(!R::state(A::Terminal, context, request).enabled);
+    TEST_CHECK(!R::state(A::TargetTerminal, context, request).enabled);
+    context.terminalAvailable = true;
+    TEST_CHECK(R::state(A::Terminal, context, request).enabled);
+    TEST_CHECK(R::state(A::TargetTerminal, context, request).enabled);
+    model.select(1);
+    TEST_CHECK(R::state(A::Terminal, context, R::capture(context)).enabled);
+    TEST_CHECK(!R::state(A::TargetTerminal, context, R::capture(context)).enabled);
+    model.select(6);
+    data.entries.back().access.execute = false;
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(R::state(A::Terminal, context, request).enabled);
+    TEST_CHECK(!R::state(A::TargetTerminal, context, request).enabled);
+    data.metadata.access.execute = false;
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::Terminal, context, request).enabled);
+    data.metadata.access.execute = true;
+    data.location = luciole::Location::fromUri("sftp://example.invalid/folder");
+    data.entries.back().location = luciole::Location::fromUri("sftp://example.invalid/folder/child");
+    data.entries.back().access.execute = true;
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::Terminal, context, R::capture(context)).enabled);
+    TEST_CHECK(!R::state(A::TargetTerminal, context, R::capture(context)).enabled);
+    TEST_CHECK(!R::state(A::TargetTerminal, context, request).enabled);
+    data.location = luciole::Location::trash();
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::Terminal, context, R::capture(context)).enabled);
+  }
   void testExecutionActions() {
     luciole::DirectoryModel model;
     auto data = snapshot();
@@ -184,6 +223,61 @@ namespace {
     ++data.generation;
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
+  }
+  void testEmptyTrashAvailability() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    data.location = luciole::Location::trash();
+    data.entries.clear();
+    model.applySnapshot(data);
+    luciole::ActionContext context{.model = model, .context = 35, .query = {}, .canEmptyTrash = true, .pinned = {}};
+    const auto state = [&] { return R::state(A::EmptyTrash, context, R::capture(context)); };
+    TEST_CHECK(!state().enabled && state().reason == "Trash is already empty.");
+    auto hidden = entry(1, ".hidden");
+    hidden.location = luciole::Location::trash().child(hidden.name);
+    hidden.hidden = true;
+    data.entries = {hidden};
+    ++data.generation;
+    model.applySnapshot(data);
+    model.setFilter({});
+    TEST_CHECK(model.rows().empty() && state().enabled);
+    model.setFilter({.showHidden = true, .text = "unmatched"});
+    TEST_CHECK(model.rows().empty() && state().enabled);
+    context.operationsBusy = true;
+    TEST_CHECK(!state().enabled);
+    context.operationsBusy = false;
+    context.canEmptyTrash = false;
+    TEST_CHECK(!state().enabled);
+    context.canEmptyTrash = true;
+    data.status = luciole::DirectoryStatus::Loading;
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!state().enabled);
+    data.status = luciole::DirectoryStatus::Error;
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!state().enabled);
+    data.status = luciole::DirectoryStatus::Ready;
+    data.entries.clear();
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!state().enabled);
+    context.query = "search without matches";
+    TEST_CHECK(state().enabled);
+    context.query = {};
+    data.location = luciole::Location::trash().child("nested");
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(state().enabled);
+    data.location = luciole::Location::fromPath("/tmp/action-fixture/Trash");
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(state().enabled);
+    data.location = luciole::Location::trash();
+    data.entries = {hidden};
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(state().enabled);
   }
   void testLinkActions() {
     luciole::DirectoryModel model;
@@ -605,6 +699,9 @@ namespace {
         && !luciole::shortcutMatches(A::CopyFiles, XKB_KEY_C, KeyMod::Ctrl)
         && !luciole::shortcutMatches(A::CopyFiles, XKB_KEY_c, KeyMod::Ctrl | KeyMod::Alt)
     );
+    TEST_CHECK(luciole::shortcutMatches(A::Terminal, XKB_KEY_F4, 0));
+    TEST_CHECK(!luciole::shortcutMatches(A::Terminal, XKB_KEY_F4, KeyMod::Shift));
+    TEST_CHECK(!luciole::shortcutMatches(A::Terminal, XKB_KEY_F4, KeyMod::Ctrl));
     TEST_CHECK(!luciole::shortcutMatches(A::Root, 0, 0));
     TEST_CHECK(luciole::shortcutAction({A::Grid, A::List, A::Miller}, XKB_KEY_2, KeyMod::Ctrl) == A::List);
     TEST_CHECK(luciole::shortcutAction({A::DeletePermanently, A::Trash}, XKB_KEY_Delete, 0) == A::DeletePermanently);
@@ -615,11 +712,13 @@ int main() {
   try {
     testActionTable();
     testShortcuts();
+    testTerminalActions();
     testArchiveActions();
     testSplitArchiveActions();
     testCompressedArchiveActions();
     testExecutionActions();
     testTrashActions();
+    testEmptyTrashAvailability();
     testLinkActions();
     testFileClipboardActions();
     testPreviewActions();

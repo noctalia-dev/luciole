@@ -2,7 +2,7 @@
 
 Open Settings with Ctrl+, or the main menu. It is a page inside the existing window. Changes save automatically; no manual reload is needed. Reset removes a GUI override so the base configuration or built-in default applies again. Reset all settings removes the browser override set.
 
-Settings follows the available window size while open. Enlarging the window restores its normal dialog size; narrowing it switches to compact category navigation without resetting your selected category or edits.
+Settings stays open when another window gains focus, preserving your selected category and unfinished edits. Close it with Escape or its close button. Settings follows the available window size while open. Enlarging the window restores its normal dialog size; narrowing it switches to compact category navigation without resetting your selected category or edits.
 
 Luciole uses `luciole/` for its application-owned directories. Existing data under the previous application name is not imported automatically. To retain settings or Places, move the corresponding files into the paths documented below while the application is closed.
 
@@ -30,6 +30,7 @@ show_preview = true
 preview_width = 320
 activation_mode = "double_click"
 typing_mode = "search"
+switch_to_new_tab = true
 sort_by = "name"
 directories_first = true
 ```
@@ -63,6 +64,7 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `show_backups` | `true` | Non-directory backup names ending in `~` |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
+| `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |
 | `terminal_command` | `""` | Terminal command and optional arguments, for example `"foot"`; empty uses `$TERMINAL`, then automatic discovery |
 | `sort_by` | `"name"` | `"name"`, `"type"`, `"size"`, `"modified"`, `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"` |
 | `sort_descending` | `false` | Reverse sort direction |

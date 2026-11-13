@@ -117,10 +117,9 @@ void FilePreviewView::sync(
   luciole::MetadataFields metadata;
   luciole::MetadataFields fileFacts;
   if (entry) {
-    const auto type = !typeLabel.empty()              ? std::string(typeLabel)
-        : entry->symlink                              ? "Symbolic link"
-        : entry->type == luciole::FileType::Directory ? "Folder"
-                                                      : entry->contentType.value_or("File");
+    const auto type = !typeLabel.empty()
+        ? std::string(typeLabel)
+        : luciole::fileTypeDescription(entry->type, entry->symlink, entry->contentType);
     metadata.push_back({"Type", type});
     if (entry->size && entry->type != luciole::FileType::Directory) {
       const luciole::GString size(g_format_size_full(*entry->size, G_FORMAT_SIZE_IEC_UNITS));

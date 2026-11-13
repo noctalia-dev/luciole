@@ -67,6 +67,39 @@ namespace {
     TEST_CHECK(workspace.move(a, left, 0) && workspace.windows().at(left).tabs.front() == a);
     invariant(workspace);
   }
+  void backgroundTabs() {
+    luciole::TabWorkspace workspace;
+    const auto window = workspace.addWindow(), other = workspace.addWindow();
+    const auto original = workspace.addTab(window, false);
+    TEST_CHECK(original && workspace.windows().at(window).selected == original);
+    const auto split = workspace.addPane(window);
+    TEST_CHECK(workspace.resize(window, 0.35F));
+    const auto before = workspace.windows().at(window);
+    const auto background = workspace.addTab(window, false);
+    const auto& after = workspace.windows().at(window);
+    TEST_CHECK(background && after.tabs == std::vector({original, background}));
+    TEST_CHECK(
+        after.selected == before.selected
+        && after.primary == before.primary
+        && after.secondary == split
+        && after.active == split
+        && after.fraction == before.fraction
+    );
+    const auto firstOther = workspace.addTab(other, false);
+    TEST_CHECK(firstOther && workspace.windows().at(window).selected == original);
+    TEST_CHECK(workspace.close(background) && workspace.windows().at(window).active == split);
+    TEST_CHECK(workspace.reopen(window) && workspace.windows().at(window).selected == background);
+    TEST_CHECK(workspace.select(window, original) && workspace.windows().at(window).active == split);
+    const auto foreground = workspace.addTab(window);
+    TEST_CHECK(workspace.windows().at(window).selected == foreground && !workspace.windows().at(window).secondary);
+    TEST_CHECK(workspace.select(window, original) && workspace.windows().at(window).active == split);
+    invariant(workspace);
+    while (workspace.addTab(window, false)) {
+    }
+    TEST_CHECK(workspace.windows().at(window).selected == original && workspace.windows().at(window).active == split);
+    TEST_CHECK(!workspace.addTab(other, false) && !workspace.addTab(999, false));
+    invariant(workspace);
+  }
   void closeEitherPane() {
     luciole::TabWorkspace workspace;
     const auto window = workspace.addWindow();
@@ -98,7 +131,7 @@ namespace {
       const auto page = 1 + random() % 500;
       switch (random() % 10) {
       case 0:
-        workspace.addTab(window);
+        workspace.addTab(window, random() % 2 != 0);
         break;
       case 1:
         workspace.close(page);
@@ -136,6 +169,7 @@ namespace {
 int main() {
   try {
     workflows();
+    backgroundTabs();
     closeEitherPane();
     transitions();
     std::println("tab workspace checks passed");

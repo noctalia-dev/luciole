@@ -95,9 +95,15 @@ MenuController::actionEntry(Action action, const luciole::ActionRequest& request
 std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luciole::ActionRequest& request) const {
   std::vector<ContextMenuControlEntry> entries;
   const auto add = [&](Action action) { entries.push_back(actionEntry(action, request)); };
+  if (request.folder == luciole::Location::trash()) {
+    add(Action::EmptyTrash);
+    addSeparator(entries);
+  }
   if (m_page.hasOtherPane()) {
     entries.push_back({.id = ClosePane, .label = "Close Pane", .shortcut = "Ctrl+Alt+W"});
   }
+  add(Action::Terminal);
+  addSeparator(entries);
   add(Action::CreateFolder);
   add(Action::NewDocument);
   entries.back().hasSubmenu = true;
@@ -117,7 +123,6 @@ std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luc
   add(Action::ReloadPins);
   addSeparator(entries);
   entries.push_back({.id = CopyLocation, .label = "Copy Location", .hasSubmenu = true});
-  add(Action::Terminal);
   add(Action::Scripts);
   entries.back().hasSubmenu = true;
   return entries;
@@ -153,6 +158,9 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   }
   if (singleFolder) {
     entries.push_back({.id = OpenIn, .label = "Open In", .hasSubmenu = true});
+    if (!trash) {
+      add(Action::TargetTerminal);
+    }
   }
   addSeparator(entries);
   add(Action::CutFiles);
@@ -283,10 +291,6 @@ void MenuController::showOpenInMenu(const luciole::ActionRequest& request) {
       {.id = OtherPane, .label = m_page.hasOtherPane() ? "Other Pane" : "New Pane"},
       {.id = NewWindow, .label = "New Window"}
   };
-  if (!request.targets.front().location.isTrash()) {
-    entries.push_back(actionEntry(Action::TargetTerminal, request));
-    entries.back().label = "Terminal";
-  }
   m_submenus.show(
       std::move(entries),
       [this, request](int id) {
@@ -298,7 +302,7 @@ void MenuController::showOpenInMenu(const luciole::ActionRequest& request) {
           return;
         }
         m_page.requestWorkspace(
-            id == NewTab          ? WorkspaceCommand::NewTab
+            id == NewTab          ? WorkspaceCommand::OpenTab
                 : id == NewWindow ? WorkspaceCommand::NewWindow
                                   : WorkspaceCommand::OpenOther,
             request.targets.front().location, std::nullopt
@@ -340,17 +344,12 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
   }
   entries.push_back({.label = "", .separator = true});
   if (bookmark.location == luciole::Location::trash()) {
-    entries.push_back(
-        {.id = 7,
-         .label = "Empty Trash…",
-         .enabled = m_page.actionState(Action::EmptyTrash, m_page.actionRequest(false)).enabled,
-         .destructive = true}
-    );
+    entries.push_back({.id = 7, .label = "Empty Trash…", .enabled = false, .destructive = true});
     entries.push_back({.label = "", .separator = true});
   }
   entries.push_back({.id = 5, .label = "Properties"});
   showContextMenu(
-      std::move(entries),
+      entries,
       [this, bookmark](int action) {
         if (!m_pins.contains(bookmark.location)) {
           m_page.actionError("This pin is no longer available.");
@@ -387,6 +386,22 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
       },
       {x, y, 1, 1}
   );
+  if (bookmark.location == luciole::Location::trash() && m_menu) {
+    const auto generation = m_page.activeDialog().generation();
+    const std::weak_ptr<int> lifetime = m_lifetime;
+    m_trashAvailability.query([this, lifetime, generation, entries = std::move(entries)](auto count) mutable {
+      if (lifetime.expired() || generation != m_page.activeDialog().generation() || !m_menu || !m_page.menuSurface()) {
+        return;
+      }
+      const auto empty = std::ranges::find(entries, 7, &ContextMenuControlEntry::id);
+      if (empty != entries.end()) {
+        empty->enabled =
+            count && *count > 0 && m_page.actionState(Action::EmptyTrash, m_page.actionRequest(false)).enabled;
+      }
+      m_menu->setEntries(std::move(entries));
+      m_page.menuSurface()->requestLayout();
+    });
+  }
 }
 
 void MenuController::openBreadcrumbMenu(const luciole::Location& target, LayoutRect anchor) {
@@ -523,6 +538,7 @@ void MenuController::key(const KeyboardEvent& event) {
 }
 
 void MenuController::menuClosed() {
+  m_trashAvailability.cancel();
   m_menu = nullptr;
   m_scroll = nullptr;
 }

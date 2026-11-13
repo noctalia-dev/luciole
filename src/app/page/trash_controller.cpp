@@ -4,6 +4,7 @@
 #include "app/page/active_dialog.h"
 #include "app/page/page_context.h"
 #include "browser/browser_controller.h"
+#include "core/input/key_symbols.h"
 #include "core/ui_phase.h"
 #include "fs/gio_ptr.h"
 #include "platform/desktop_integration.h"
@@ -14,6 +15,7 @@
 #include "ui/palette.h"
 #include "ui/style.h"
 #include "wayland/popup_surface.h"
+#include "wayland/wayland_seat.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
@@ -91,7 +93,6 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
   m_page.cancelDrag();
   auto& surface = m_page.surface();
   const float width = std::min(420.0F, static_cast<float>(surface.width()) - 32.0F);
-  Button* cancel = nullptr;
   Label* message = nullptr;
   Label* size = nullptr;
   Button* confirm = nullptr;
@@ -118,10 +119,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
       ui::row(
           {.align = FlexAlign::Center, .justify = FlexJustify::End, .gap = Style::spaceSm},
           ui::button(
-              {.out = &cancel,
-               .text = "Cancel",
-               .variant = ButtonVariant::Default,
-               .onClick = [this] { m_page.dismissMenu(); }}
+              {.text = "Cancel", .variant = ButtonVariant::Default, .onClick = [this] { m_page.dismissMenu(); }}
           ),
           ui::button(
               {.out = &confirm,
@@ -139,7 +137,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
   const float height = root->measure(surface.renderTarget().renderer(), constraints).height;
   m_page.showPopup(
       std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false
+      height, false, PopupMode::Dialog
   );
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::EmptyTrash, [this] {
@@ -154,12 +152,24 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
     m_emptyTrashMessage = message;
     m_emptyTrashSize = size;
     m_emptyTrashConfirm = confirm;
-    m_page.menuDispatcher().setFocus(cancel->inputArea());
     auto& emptyTrash = m_emptyTrash->service<luciole::EmptyTrashService>();
     if (!(selection ? emptyTrash.prepareSelection(std::move(*selection)) : emptyTrash.prepare())) {
       message->setText("Another Trash deletion is still finishing.");
     }
   }
+}
+
+bool TrashController::key(const KeyboardEvent& event) {
+  if (m_page.activeDialog().kind() == ActiveDialog::Kind::EmptyTrash
+      && !m_page.menuDispatcher().focusedArea()
+      && event.pressed
+      && !event.preedit
+      && event.modifiers == 0
+      && KeySymbol::isEnter(event.sym)) {
+    m_page.dismissMenu();
+    return true;
+  }
+  return false;
 }
 
 void TrashController::confirmEmptyTrash() {

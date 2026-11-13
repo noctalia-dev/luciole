@@ -17,13 +17,17 @@ def run_case(binary, mode):
             theme = root / "data/icons" / name
             (theme / "scalable/places").mkdir(parents=True)
             (theme / "index.theme").write_text(
-                f"[Icon Theme]\nName={name}\nDirectories=scalable/places\n"
+                f"[Icon Theme]\nName={name}\nDirectories=scalable/places,scalable/places\n"
                 "[scalable/places]\nSize=48\nType=Scalable\n"
             )
             (theme / "scalable/places/folder.svg").write_text(
                 "<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48'>"
                 f"<path fill='{color}' d='M0 0h48v48H0z'/></svg>"
             )
+        # Keep artwork behind a linked root while preserving its logical theme path.
+        (root / "artwork").mkdir()
+        (root / "data/icons/Blue").rename(root / "artwork/Blue")
+        (root / "data/icons/Blue").symlink_to(root / "artwork/Blue", target_is_directory=True)
         if mode == "schema":
             (root / "schemas/desktop.gschema.xml").write_text(
                 "<schemalist><schema id='org.gnome.desktop.interface' path='/org/gnome/desktop/interface/'>"

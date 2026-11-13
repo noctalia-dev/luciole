@@ -21,25 +21,26 @@
 
 namespace fs = std::filesystem;
 
+struct IconThemePlan {
+  std::vector<std::string> baseDirs;
+  std::vector<std::string> themeRoots;
+  std::vector<IconSearchDir> searchDirs;
+  std::vector<std::string> pixmapDirs;
+  std::string activeTheme;
+  std::string planSignature;
+  std::string contentSignature;
+  std::shared_ptr<const IconThemeWatchPaths> watchPaths;
+};
+
 namespace {
 
   constexpr Logger kLog("icon-resolver");
 
-  struct IconThemePlan {
-    std::vector<std::string> baseDirs;
-    std::vector<std::string> themeRoots;
-    std::vector<IconSearchDir> searchDirs;
-    std::vector<std::string> pixmapDirs;
-    std::string activeTheme;
-    std::string planSignature;
-    std::string contentSignature;
-  };
-
-  void pushUniqueDir(std::vector<IconSearchDir>& dirs, IconSearchDir dir) {
+  void pushUniqueDir(std::vector<IconSearchDir>& dirs, std::unordered_set<std::string>& seen, IconSearchDir dir) {
     if (dir.path.empty()) {
       return;
     }
-    if (!std::ranges::contains(dirs, dir.path, &IconSearchDir::path)) {
+    if (seen.emplace(dir.path).second) {
       dirs.push_back(std::move(dir));
     }
   }
@@ -66,7 +67,7 @@ namespace {
     std::mutex mutex;
     bool initialized = false;
     std::uint64_t generation = 1;
-    IconThemePlan plan;
+    std::shared_ptr<const IconThemePlan> plan;
   };
 
   IconThemeState& iconThemeState() {
@@ -437,7 +438,8 @@ namespace {
 
   void buildThemeSearchPaths(
       const std::string& themeName, const std::vector<std::string>& baseDirs, std::set<std::string>& visited,
-      std::vector<std::string>& themeRoots, std::vector<IconSearchDir>& searchDirs
+      std::vector<std::string>& themeRoots, std::vector<IconSearchDir>& searchDirs,
+      std::unordered_set<std::string>& seenDirs
   ) {
     if (visited.contains(themeName)) {
       return;
@@ -476,7 +478,7 @@ namespace {
               "/32x32/apps/", "/"}) {
           const std::string_view name(path);
           pushUniqueDir(
-              searchDirs,
+              searchDirs, seenDirs,
               IconSearchDir{
                   .path = themeRoot + path,
                   .size = sizeFromDirName(name),
@@ -490,7 +492,7 @@ namespace {
       } else {
         for (const auto& dir : dirs) {
           pushUniqueDir(
-              searchDirs,
+              searchDirs, seenDirs,
               IconSearchDir{
                   .path = themeRoot + "/" + dir.path + "/",
                   .size = dir.size,
@@ -504,7 +506,7 @@ namespace {
       }
     }
     for (const auto& parent : parents) {
-      buildThemeSearchPaths(parent, baseDirs, visited, themeRoots, searchDirs);
+      buildThemeSearchPaths(parent, baseDirs, visited, themeRoots, searchDirs, seenDirs);
     }
   }
 
@@ -515,6 +517,7 @@ namespace {
     plan.pixmapDirs = pixmapDirs(dataDirs);
 
     std::set<std::string> visited;
+    std::unordered_set<std::string> seenDirs;
 
     // Use the first candidate theme that actually exists on disk
     for (const auto& candidate : readGtkThemeCandidates()) {
@@ -527,40 +530,60 @@ namespace {
       }
       if (exists) {
         plan.activeTheme = candidate;
-        buildThemeSearchPaths(candidate, plan.baseDirs, visited, plan.themeRoots, plan.searchDirs);
+        buildThemeSearchPaths(candidate, plan.baseDirs, visited, plan.themeRoots, plan.searchDirs, seenDirs);
         break;
       }
     }
 
     // hicolor is the mandatory base theme , always include it last
-    buildThemeSearchPaths("hicolor", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs);
-    buildThemeSearchPaths("Adwaita", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs);
+    buildThemeSearchPaths("hicolor", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs, seenDirs);
+    buildThemeSearchPaths("Adwaita", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs, seenDirs);
     plan.planSignature = planSignatureFor(plan);
     plan.contentSignature = contentSignatureFor(plan);
+    auto paths = std::make_shared<IconThemeWatchPaths>(IconThemeWatchPaths{
+        .baseDirs = plan.baseDirs,
+        .themeRoots = plan.themeRoots,
+        .iconDirs = plan.pixmapDirs,
+        .settingsFiles = {},
+    });
+    paths->iconDirs.reserve(paths->iconDirs.size() + plan.searchDirs.size());
+    std::unordered_set<std::string> seenPaths(paths->iconDirs.begin(), paths->iconDirs.end());
+    seenPaths.reserve(paths->iconDirs.capacity());
+    for (const auto& dir : plan.searchDirs) {
+      if (seenPaths.emplace(dir.path).second) {
+        paths->iconDirs.push_back(dir.path);
+      }
+    }
+    const auto configRoot = gtkConfigRoot();
+    if (!configRoot.empty()) {
+      paths->settingsFiles.push_back((configRoot / "gtk-3.0/settings.ini").string());
+      paths->settingsFiles.push_back((configRoot / "gtk-4.0/settings.ini").string());
+    }
+    plan.watchPaths = std::move(paths);
     return plan;
   }
 
   // Requires state.mutex to be held.
   void ensureThemeStateLocked(IconThemeState& state) {
     if (!state.initialized) {
-      state.plan = buildThemePlan();
+      state.plan = std::make_shared<const IconThemePlan>(buildThemePlan());
       state.initialized = true;
-      kLog.debug("active icon theme: {}", state.plan.activeTheme);
+      kLog.debug("active icon theme: {}", state.plan->activeTheme);
     }
   }
 
   bool updateThemeStateLocked(IconThemeState& state, bool includeContentChanges) {
     IconThemePlan next = buildThemePlan();
     if (!state.initialized) {
-      state.plan = std::move(next);
+      state.plan = std::make_shared<const IconThemePlan>(std::move(next));
       state.initialized = true;
       return false;
     }
-    const bool changed = next.planSignature != state.plan.planSignature
-        || (includeContentChanges && next.contentSignature != state.plan.contentSignature);
-    state.plan = std::move(next);
+    const bool changed = next.planSignature != state.plan->planSignature
+        || (includeContentChanges && next.contentSignature != state.plan->contentSignature);
+    state.plan = std::make_shared<const IconThemePlan>(std::move(next));
     if (changed) {
-      kLog.debug("icon theme refreshed: {}", state.plan.activeTheme);
+      kLog.debug("icon theme refreshed: {}", state.plan->activeTheme);
       ++state.generation;
     }
     return changed;
@@ -603,31 +626,16 @@ void IconResolver::invalidateThemeContent() {
   auto& state = iconThemeState();
   std::scoped_lock lock(state.mutex);
   IconThemePlan next = buildThemePlan();
-  state.plan = std::move(next);
+  state.plan = std::make_shared<const IconThemePlan>(std::move(next));
   state.initialized = true;
   ++state.generation;
 }
 
-IconThemeWatchPaths IconResolver::themeWatchPaths() {
+std::shared_ptr<const IconThemeWatchPaths> IconResolver::themeWatchPaths() {
   auto& state = iconThemeState();
   std::scoped_lock lock(state.mutex);
   ensureThemeStateLocked(state);
-  IconThemeWatchPaths paths{
-      .baseDirs = state.plan.baseDirs,
-      .themeRoots = state.plan.themeRoots,
-      .iconDirs = state.plan.pixmapDirs,
-      .settingsFiles = {},
-  };
-  paths.iconDirs.reserve(paths.iconDirs.size() + state.plan.searchDirs.size());
-  for (const auto& dir : state.plan.searchDirs) {
-    pushUnique(paths.iconDirs, dir.path);
-  }
-  const auto configRoot = gtkConfigRoot();
-  if (!configRoot.empty()) {
-    paths.settingsFiles.push_back((configRoot / "gtk-3.0/settings.ini").string());
-    paths.settingsFiles.push_back((configRoot / "gtk-4.0/settings.ini").string());
-  }
-  return paths;
+  return state.plan->watchPaths;
 }
 
 std::uint64_t IconResolver::themeGeneration() {
@@ -641,16 +649,14 @@ std::string IconResolver::activeThemeName() {
   auto& state = iconThemeState();
   std::scoped_lock lock(state.mutex);
   ensureThemeStateLocked(state);
-  return state.plan.activeTheme;
+  return state.plan->activeTheme;
 }
 
 void IconResolver::rebuild() {
   auto& state = iconThemeState();
   std::scoped_lock lock(state.mutex);
   ensureThemeStateLocked(state);
-  m_baseDirs = state.plan.baseDirs;
-  m_searchDirs = state.plan.searchDirs;
-  m_pixmapDirs = state.plan.pixmapDirs;
+  m_plan = state.plan;
   m_cache.clear();
   m_missingCache.clear();
   m_generation = state.generation;
@@ -699,7 +705,7 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
   if (targetSize <= 0) {
     // Legacy behavior: search dirs are pre-sorted scalable-first then largest;
     // return the first match. Callers with no size budget keep this exactly.
-    for (const auto& dir : m_searchDirs) {
+    for (const auto& dir : m_plan->searchDirs) {
       for (const char* ext : {".svg", ".png"}) {
         std::string path = dir.path + name + ext;
         if (pathExists(path)) {
@@ -716,7 +722,7 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
     std::string_view theme;
     int bestSize = 0;
     bool bestIsUpscale = true;
-    for (const auto& dir : m_searchDirs) {
+    for (const auto& dir : m_plan->searchDirs) {
       if (dir.theme != theme) {
         if (!best.empty()) {
           return best;
@@ -756,7 +762,7 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
 
   // Fallback: unthemed icons at the top of each base dir, then pixmaps (XDG
   // LookupFallbackIcon order).
-  for (const auto& dir : m_baseDirs) {
+  for (const auto& dir : m_plan->baseDirs) {
     for (const char* ext : {".svg", ".png"}) {
       std::string path = std::format("{}/{}{}", dir, name, ext);
       if (pathExists(path)) {
@@ -764,7 +770,7 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
       }
     }
   }
-  for (const auto& dir : m_pixmapDirs) {
+  for (const auto& dir : m_plan->pixmapDirs) {
     for (const char* ext : {".svg", ".png"}) {
       std::string path = std::format("{}/{}{}", dir, name, ext);
       if (pathExists(path)) {

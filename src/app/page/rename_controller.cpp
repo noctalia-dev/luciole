@@ -52,7 +52,7 @@ void RenameController::openFileRename(luciole::DirectoryEntry target) {
   constraints.setExactWidth(width);
   const float height = editor->measure(surface.renderTarget().renderer(), constraints).height;
   const LayoutRect anchor{(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1};
-  m_page.showPopup(std::move(editor), nullptr, anchor, width, height, false);
+  m_page.showPopup(std::move(editor), nullptr, anchor, width, height, false, PopupMode::Dialog);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::FileRename, [this] {
       if (m_fileRenameTarget) {
@@ -197,7 +197,7 @@ void RenameController::openPlaceRename(const luciole::Bookmark& bookmark) {
   );
   m_page.showPopup(
       std::move(editor), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false
+      height, false, PopupMode::Dialog
   );
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::PlaceRename, [this] {

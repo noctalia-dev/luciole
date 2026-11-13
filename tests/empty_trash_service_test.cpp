@@ -1,5 +1,6 @@
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
+#include "fs/trash_availability.h"
 #include "operations/empty_trash_service.h"
 #include "test_check.h"
 
@@ -283,6 +284,49 @@ namespace {
     );
     service.setChangedCallback({});
   }
+  void trashAvailability(Pump& pump) {
+    luciole::TrashAvailability status;
+    const auto count = [&] {
+      bool done = false;
+      std::optional<std::uint32_t> result;
+      status.query([&](auto value) {
+        result = value;
+        done = true;
+      });
+      TEST_CHECK(!done);
+      pump.until([&] { return done; });
+      return result;
+    };
+    TEST_CHECK(count() == 0);
+    bool obsolete = false;
+    status.query([&](auto) { obsolete = true; });
+    TEST_CHECK(count() == 0 && !obsolete);
+    status.query([&](auto) { obsolete = true; });
+    status.cancel();
+    TEST_CHECK(count() == 0 && !obsolete);
+    {
+      luciole::TrashAvailability retired;
+      retired.query([&](auto) { obsolete = true; });
+    }
+    TEST_CHECK(count() == 0 && !obsolete);
+    Fixture fixture;
+    write(fixture.root / ".hidden-status", "disposable");
+    trash(fixture.root / ".hidden-status");
+    TEST_CHECK(count() == 1);
+    luciole::EmptyTrashService service;
+    pump.prepare(service);
+    pump.empty(service);
+    TEST_CHECK(count() == 0);
+  }
+  void unavailableTrashAvailability(Pump& pump) {
+    luciole::TrashAvailability status;
+    bool done = false;
+    status.query([&](auto count) {
+      TEST_CHECK(!count);
+      done = true;
+    });
+    pump.until([&] { return done; });
+  }
   void incompleteSize(Pump& pump) {
     if (::geteuid() == 0) {
       return;
@@ -312,9 +356,11 @@ int main(int argc, char** argv) {
       cancellationBetweenItems(pump);
       confirmationDoesNotWaitForSize(pump);
       incompleteSize(pump);
+      trashAvailability(pump);
     } else {
       TEST_CHECK(argc == 1);
       unavailableAndLifetime(pump);
+      unavailableTrashAvailability(pump);
     }
     std::println("empty-trash-service checks passed");
     return 0;

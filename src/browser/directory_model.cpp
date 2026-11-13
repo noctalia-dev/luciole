@@ -61,35 +61,20 @@ bool luciole::DirectoryModel::applySnapshot(
     }
     presentation.sourceIndex = i;
     presentation.alternateSortKey = nullptr;
-    std::string typeLabel;
-    bool knownType = true;
-    if (entry.symlink || entry.type == luciole::FileType::Symlink) {
-      typeLabel = "Link";
-    } else if (entry.type == luciole::FileType::Directory) {
-      typeLabel = "Folder";
-    } else if (entry.type == luciole::FileType::Special) {
-      typeLabel = "Special";
-    } else if (entry.type == luciole::FileType::Shortcut) {
-      typeLabel = "Shortcut";
-    } else if (entry.type == luciole::FileType::Mountable) {
-      typeLabel = "Mount";
-    } else if (entry.type == luciole::FileType::Regular) {
-      knownType = entry.contentType && !g_content_type_is_unknown(entry.contentType->c_str());
-      typeLabel = "File";
-      if (knownType) {
-        auto [label, inserted] = typeLabels.try_emplace(*entry.contentType);
-        if (inserted) {
-          const GString description(g_content_type_get_description(entry.contentType->c_str()));
-          label->second = description && *description ? description.get() : *entry.contentType;
-        }
-        typeLabel = label->second;
+    const bool regular = entry.type == FileType::Regular && !entry.symlink;
+    if (regular && entry.contentType) {
+      auto [label, inserted] = typeLabels.try_emplace(*entry.contentType);
+      if (inserted) {
+        label->second = fileTypeDescription(entry.type, entry.symlink, entry.contentType);
       }
+      presentation.typeLabel = label->second;
     } else {
-      typeLabel = "Unknown";
-      knownType = false;
+      presentation.typeLabel = fileTypeDescription(entry.type, entry.symlink, entry.contentType);
     }
-    presentation.typeLabel = std::move(typeLabel);
-    presentation.knownType = knownType;
+    presentation.knownType = entry.symlink
+        || entry.type == FileType::Symlink
+        || (regular ? entry.contentType && !g_content_type_is_unknown(entry.contentType->c_str())
+                    : entry.type != FileType::Unknown);
   }
   // Surviving IDs now point into the incoming snapshot; remove rows that disappeared.
   std::erase_if(m_presentations, [&](const auto& item) {

@@ -24,7 +24,10 @@ namespace luciole {
   };
   using FileDropHandler = std::function<void(FilePayload, DropOptions, DropCompletion)>;
   struct FileDropTarget {
-    FileDropHandler receive;
+    FileDropHandler receive = nullptr;
+    // The source application performs extraction; completion acknowledges only the request handoff.
+    std::function<void(ExtractionOffer, DropCompletion)> extract = nullptr;
+    std::function<void(std::string)> failed = nullptr;
     DragAction preferred = DragAction::Move;
     bool copyOnly = false;
   };

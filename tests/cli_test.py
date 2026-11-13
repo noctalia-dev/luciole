@@ -16,12 +16,15 @@ class CliTest(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="luciole-cli-test-")
         self.addCleanup(temporary.cleanup)
         self.config_dir = Path(temporary.name)
+        self.runtime_dir = self.config_dir / "runtime"
+        self.runtime_dir.mkdir(mode=0o700)
 
     def invoke(self, *args, config_home=None):
         env = dict(os.environ)
-        for name in ("DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"):
+        for name in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "DBUS_SESSION_BUS_ADDRESS"):
             env.pop(name, None)
         env["WAYLAND_DISPLAY"] = "/luciole-test-missing-wayland-socket"
+        env["XDG_RUNTIME_DIR"] = str(self.runtime_dir)
         env["XDG_CONFIG_HOME"] = str(self.config_dir if config_home is None else config_home)
         return subprocess.run([BINARY, *args], check=False, capture_output=True, text=True, env=env, timeout=5)
 

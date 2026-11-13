@@ -7,6 +7,11 @@
 namespace luciole {
   enum class FileType : std::uint8_t { Unknown, Regular, Directory, Symlink, Special, Shortcut, Mountable };
 
+  // Shared presentation for list, tooltip, preview and Properties. Does not inspect file contents.
+  std::string fileTypeDescription(FileType type, bool symlink, const std::optional<std::string>& contentType);
+  // MIME inheritance includes application-based text formats; image/media renderers take precedence.
+  bool contentTypeIsText(const std::string& contentType);
+
   // Provider-reported access facts, not promises that an operation will succeed.
   // nullopt is unknown; false is a reported negative, not a missing attribute.
   struct FileIdentity {

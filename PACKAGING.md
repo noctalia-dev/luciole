@@ -112,6 +112,14 @@ Missing optional helpers make their associated feature unavailable where no alte
 
 Archive support uses the system libarchive and its enabled formats/filters. Unencrypted RAR input depends on that build's capabilities; encrypted RAR is outside the implemented scope. Encrypted 7z input uses the system CLI through the bounded worker transport. There is no py7zr requirement, 7-Zip SDK build dependency, `7z.so` path or private C++ ABI contract. `LUCIOLE_7Z` can select an absolute executable path for an unusual installation. File Roller, Ark, unrar and a Samba server are not required by Luciole.
 
+### Incoming archive drags
+
+Ordinary URI-list archive drags use existing transfer support. KDE deferred-extraction drags additionally use the existing GIO session D-Bus connection to reach the running source's advertised unique name and object path. The source must expose `org.kde.ark.DndExtract.extractSelectedFilesTo`; it owns extraction and its password/conflict/progress UI. The method acknowledgement is not extraction completion. This path requires a native destination directory and does not support provider-only URIs.
+
+Producers that extract to temporary files are responsible for their own helper programs. In the isolated LXQt Archiver 1.4.0 check, supplying its selected `7z` helper allows multi-entry preparation and Copy-only URI export. That does not make this specific helper mandatory for Luciole's incoming URI handling or require installing every external archiver. Preparation and export capabilities depend on the producer's build and runtime packages. Ordinary URI drops allow up to 120 seconds for source data; the shorter text/metadata read limits remain separate.
+
+No Ark, Qt, KIO, X11 library or separate helper package becomes a Luciole dependency. Do not add an archiver selector or install Ark merely to enable normal archive handling. A producer must export a supported drag contract. X11 Direct Save-only offers remain unsupported; an Xwayland source is not automatically compatible solely because its window appears in the compositor. The `extraction-launcher` check uses the existing test-only `dbus-daemon` requirement with a private bus and no desktop services.
+
 ### Shared video thumbnail appearance
 
 Recommend `ffmpegthumbnailer` when packaging video thumbnails. Luciole uses its `-f` filmstrip filter, matching the helper’s [standard desktop thumbnailer entry](https://github.com/dirkvdb/ffmpegthumbnailer/blob/master/dist/ffmpegthumbnailer.thumbnailer) commonly used by PCManFM-Qt. Those borders are cached PNG pixels, not icon-theme artwork. Only the executable and its ordinary runtime dependency closure are needed; do not add its development headers or link Luciole against its C++ library. Nix packages/development shells/checks expose it on PATH, and Arch CI installs it.

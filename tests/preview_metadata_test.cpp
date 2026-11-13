@@ -120,6 +120,39 @@ namespace {
     pdf += std::format("trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref);
     std::ofstream(path, std::ios::binary) << pdf;
   }
+  void launcherChecks(const fs::path& root) {
+    const auto path = root / "chrome-profile.desktop";
+    const auto sentinel = root / "SHOULD_NEVER_RUN";
+    std::ofstream(path)
+        << "[Desktop Entry]\nType=Application\nName=Mail <literal> café\n"
+           "Comment=Read your mail\nExec=touch "
+        << sentinel.native()
+        << "\nMimeType=text/html;\n";
+    auto fields = inspect(path, "application/x-desktop");
+    TEST_CHECK(value(fields, "Application") == "Mail <literal> café");
+    TEST_CHECK(value(fields, "Description") == "Read your mail");
+    TEST_CHECK(std::ranges::any_of(fields, [](const auto& field) {
+      return field.label == "Application" && field.preview;
+    }));
+    TEST_CHECK(!fs::exists(sentinel));
+    auto stale = entry(path, "application/x-desktop");
+    std::ofstream(path) << "[Desktop Entry]\nType=Application\nName=Changed launcher\nExec=false\n";
+    const GioPtr<GCancellable> cancel(g_cancellable_new());
+    TEST_CHECK(luciole::probePreviewMetadata(stale, {}, cancel.get()).empty());
+    TEST_CHECK(value(inspect(path, "application/x-desktop"), "Application") == "Changed launcher");
+    const auto link = root / "launcher-link.desktop";
+    fs::create_symlink(path, link);
+    TEST_CHECK(value(inspect(link, "application/x-desktop"), "Application").empty());
+    std::ofstream(path) << "[Desktop Entry]\nType=Application\nName=Too large\nComment=" << std::string(270000, 'x');
+    TEST_CHECK(value(inspect(path, "application/x-desktop"), "Application").empty());
+    std::ofstream(path) << "not a desktop entry";
+    TEST_CHECK(value(inspect(path, "application/x-desktop"), "Application").empty());
+    std::ofstream(path) << "[Desktop Entry]\nType=Link\nName=Example website\nURL=https://example.org/\n";
+    fields = inspect(path, "application/x-desktop");
+    TEST_CHECK(value(fields, "Link name") == "Example website" && value(fields, "Application").empty());
+    g_cancellable_cancel(cancel.get());
+    TEST_CHECK(luciole::probePreviewMetadata(entry(path, "application/x-desktop"), {}, cancel.get()).empty());
+  }
   void imageChecks(const fs::path& root) {
     const auto path = root / "image <literal> café\n.png";
     const GioPtr<GdkPixbuf> image(gdk_pixbuf_new(GDK_COLORSPACE_RGB, true, 8, 640, 360));
@@ -399,6 +432,7 @@ int main(int argc, char** argv) {
   ::setenv("XDG_CACHE_HOME", (root / "cache").c_str(), 1);
   parserChecks();
   imageChecks(root);
+  launcherChecks(root);
   nativeFactsChecks(root);
   mediaChecks(root);
   lifecycleChecks(root);

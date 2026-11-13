@@ -45,6 +45,7 @@ test_table = [
   {'name': 'directory-tree', 'deps': [browser_dep], 'timeout': 60, 'env': gio_env},
   {'name': 'directory-model', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'launch-activation', 'deps': [platform_dep, dependency('wayland-server')], 'sources': [activation_server]},
+  {'name': 'extraction-launcher', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'program-launcher', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-launcher', 'deps': [platform_dep, event_loop_dep], 'wrapper': files('file_launcher_test.py')},
   {'name': 'browser-controller', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},

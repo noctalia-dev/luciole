@@ -13,6 +13,7 @@
 #include <functional>
 #include <memory>
 #include <string_view>
+#include <unordered_set>
 
 namespace {
   class Pump {
@@ -65,6 +66,13 @@ namespace {
       cache.invalidate();
     });
     TEST_CHECK(IconResolver::activeThemeName() == (hasSchema ? "Red" : "Blue"));
+    const auto initialPaths = IconResolver::themeWatchPaths();
+    TEST_CHECK(initialPaths == IconResolver::themeWatchPaths());
+    const auto initialDirs = initialPaths->iconDirs;
+    TEST_CHECK(std::unordered_set<std::string>(initialDirs.begin(), initialDirs.end()).size() == initialDirs.size());
+    IconResolver other(true);
+    TEST_CHECK(initialPaths == IconResolver::themeWatchPaths());
+    const std::string initialIcon = other.resolve("folder", 48);
     auto image = cache.request(source, 48);
     pump.until(watcher.get(), [&] { return image->ready; });
     TEST_CHECK(image->pixels && image->pixels->rgba[hasSchema ? 0 : 2] == 255);
@@ -76,6 +84,10 @@ namespace {
       std::ofstream(root / "config/gtk-3.0/settings.ini") << "[Settings]\ngtk-icon-theme-name=Red\n";
       pump.until(watcher.get(), [&] { return changes > 0; });
     }
+    TEST_CHECK(initialPaths != IconResolver::themeWatchPaths());
+    TEST_CHECK(initialPaths->iconDirs == initialDirs);
+    TEST_CHECK(other.resolve("folder", 48) != initialIcon);
+    TEST_CHECK(other.resolve("folder", 48).contains(hasSchema ? "/Blue/" : "/Red/"));
     const auto switched = cache.request(source, 48);
     TEST_CHECK(switched != image);
     pump.until(watcher.get(), [&] { return switched->ready; });
@@ -84,12 +96,16 @@ namespace {
     const auto artwork = root / "data/icons" / current / "scalable/places/folder.svg";
     for (const bool atomic : {false, true}) {
       const auto before = changes;
+      const auto heldPaths = IconResolver::themeWatchPaths();
+      const auto heldDirs = heldPaths->iconDirs;
       const auto path = atomic ? artwork.parent_path() / "replacement.tmp" : artwork;
       writeColor(path, atomic ? "#0000ff" : "#00ff00");
       if (atomic) {
         std::filesystem::rename(path, artwork);
       }
       pump.until(watcher.get(), [&] { return changes > before; });
+      TEST_CHECK(heldPaths->iconDirs == heldDirs);
+      TEST_CHECK(heldDirs == IconResolver::themeWatchPaths()->iconDirs);
       image = cache.request(source, 48);
       pump.until(watcher.get(), [&] { return image->ready; });
       TEST_CHECK(image->pixels && image->pixels->rgba[atomic ? 2 : 1] == 255);

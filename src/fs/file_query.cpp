@@ -45,12 +45,7 @@ luciole::FileDetails luciole::readFileDetails(const Location& location, const Ca
       == G_FILE_ATTRIBUTE_TYPE_STRING) {
     details.displayName = g_file_info_get_display_name(info.get());
   }
-  if (auto mime = readContentType(info.get())) {
-    const GString description(g_content_type_get_description(mime->c_str()));
-    if (description) {
-      details.typeDescription = description.get();
-    }
-  }
+  details.typeDescription = fileTypeDescription(details.type, readIsSymlink(info.get()), readContentType(info.get()));
   if (g_file_info_get_attribute_type(info.get(), G_FILE_ATTRIBUTE_STANDARD_SIZE) == G_FILE_ATTRIBUTE_TYPE_UINT64) {
     details.size = g_file_info_get_attribute_uint64(info.get(), G_FILE_ATTRIBUTE_STANDARD_SIZE);
   }

@@ -164,6 +164,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, b
       application.pointer(event);
     });
     connection.setKeyboardEventCallback([&application](const KeyboardEvent& event) { application.keyboard(event); });
+    connection.setKeyboardModifiersCallback([&clipboard](std::uint32_t) { clipboard.refreshDrag(); });
     connection.setKeyboardFocusCallback([&application, &clipboard](wl_surface* surface, bool entered) {
       application.focus(surface, entered);
       if (entered) {
@@ -199,6 +200,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, b
     connection.setOutputChangeCallback({});
     connection.setPointerEventCallback({});
     connection.setKeyboardEventCallback({});
+    connection.setKeyboardModifiersCallback({});
     connection.setKeyboardFocusCallback({});
     textInput.cleanup();
     connection.setTextInputService(nullptr);

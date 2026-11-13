@@ -2,6 +2,7 @@
 
 #include "browser/action_registry.h"
 #include "fs/location.h"
+#include "fs/trash_availability.h"
 #include "model/details_columns.h"
 #include "render/scene/node.h"
 #include "ui/controls/context_menu.h"
@@ -95,5 +96,6 @@ private:
   ExecutionController& m_execution;
   ContextMenuControl* m_menu = nullptr;
   ScrollView* m_scroll = nullptr;
+  luciole::TrashAvailability m_trashAvailability;
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);
 };

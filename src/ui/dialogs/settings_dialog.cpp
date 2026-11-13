@@ -72,6 +72,7 @@ SettingsDialog::SettingsDialog(
        {"Filter current folder", luciole::TypingMode::Filter},
        {"Select names", luciole::TypingMode::Typeahead}}
   );
+  addBool(P::SwitchToNewTab, "Switch to new folder tabs");
   addBool(P::ShowHidden, "Show hidden files");
   addBool(P::ShowBackups, "Show backup files (*~)");
   addBool(P::AlwaysShowTabBar, "Always show tab bar");

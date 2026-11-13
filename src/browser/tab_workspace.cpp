@@ -20,7 +20,7 @@ void luciole::TabWorkspace::load(TabWindow& window, TabId tab) {
   window.selected = tab;
   static_cast<TabLayout&>(window) = tab ? m_layouts.at(tab) : TabLayout{};
 }
-luciole::TabId luciole::TabWorkspace::addTab(WindowId id) {
+luciole::TabId luciole::TabWorkspace::addTab(WindowId id, bool activate) {
   auto found = m_windows.find(id);
   if (found == m_windows.end()) {
     return 0;
@@ -38,7 +38,9 @@ luciole::TabId luciole::TabWorkspace::addTab(WindowId id) {
   auto& window = found->second;
   save(window);
   window.tabs.push_back(tab);
-  load(window, tab);
+  if (activate || !window.selected) {
+    load(window, tab);
+  }
   return tab;
 }
 std::optional<luciole::TabId> luciole::TabWorkspace::tabFor(TabId page) const {

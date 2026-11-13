@@ -234,6 +234,27 @@ luciole::FileDropTarget DragDropController::externalDestination(const luciole::L
             }
             m_transferController.receiveDrop(std::move(payload), destination, std::move(options), std::move(finish));
           },
+      .extract = destination.isNative()
+          ? std::function<void(luciole::ExtractionOffer, luciole::DropCompletion)>(
+                [this, lifetime, context, destination](luciole::ExtractionOffer offer, luciole::DropCompletion finish) {
+                  if (lifetime.expired()
+                      || context != m_page.browser().contextSerial()
+                      || !m_page.visible()
+                      || m_page.overlay()
+                      || m_page.operationsBusy()) {
+                    finish(false);
+                    return;
+                  }
+                  m_transferController.extractDrop(std::move(offer), destination, std::move(finish));
+                }
+            )
+          : nullptr,
+      .failed =
+          [this, lifetime, context](std::string error) {
+            if (!lifetime.expired() && context == m_page.browser().contextSerial()) {
+              m_page.actionError(std::move(error));
+            }
+          },
       .preferred = (m_connection.keyboardModifiers() & KeyMod::Alt) != 0 ? luciole::DragAction::Ask
           : (m_connection.keyboardModifiers() & KeyMod::Ctrl) != 0       ? luciole::DragAction::Copy
           : (m_connection.keyboardModifiers() & KeyMod::Shift) != 0      ? luciole::DragAction::Move

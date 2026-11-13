@@ -7,6 +7,8 @@
 #include "thumbnails/thumbnail_store.h"
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
@@ -103,6 +105,48 @@ namespace {
     }
     return fields;
   }
+  luciole::MetadataFields launcherFields(int fd, GCancellable* cancel) {
+    constexpr std::size_t limit = 256U * 1024U;
+    std::array<char, 4096> buffer{};
+    std::string bytes;
+    while (bytes.size() <= limit && !g_cancellable_is_cancelled(cancel)) {
+      const auto count = ::read(fd, buffer.data(), std::min(buffer.size(), limit + 1 - bytes.size()));
+      if (count < 0 && errno == EINTR) {
+        continue;
+      }
+      if (count < 0) {
+        return {};
+      }
+      if (count == 0) {
+        break;
+      }
+      bytes.append(buffer.data(), static_cast<std::size_t>(count));
+    }
+    if (bytes.size() > limit || bytes.contains('\0') || g_cancellable_is_cancelled(cancel)) {
+      return {};
+    }
+    const std::unique_ptr<GKeyFile, decltype(&g_key_file_unref)> file(g_key_file_new(), &g_key_file_unref);
+    if (!g_key_file_load_from_data(file.get(), bytes.data(), bytes.size(), G_KEY_FILE_NONE, nullptr)) {
+      return {};
+    }
+    const luciole::GString type(g_key_file_get_string(file.get(), "Desktop Entry", "Type", nullptr));
+    if (!type || (std::string_view(type.get()) != "Application" && std::string_view(type.get()) != "Link")) {
+      return {};
+    }
+    luciole::MetadataFields fields;
+    for (const auto& [key, label] :
+         {std::pair{"Name", std::string_view(type.get()) == "Application" ? "Application" : "Link name"},
+          std::pair{"Comment", "Description"}}) {
+      const luciole::GString value(g_key_file_get_locale_string(file.get(), "Desktop Entry", key, nullptr, nullptr));
+      if (value
+          && *value
+          && std::string_view(value.get()).size() <= 2048
+          && g_utf8_validate(value.get(), -1, nullptr)) {
+        fields.push_back({label, value.get()});
+      }
+    }
+    return fields;
+  }
   luciole::MetadataFields imageFields(std::string_view data) {
     const auto root = nlohmann::json::parse(data, nullptr, false);
     if (!root.is_array() || root.size() > 24) {
@@ -136,6 +180,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   const auto path = entry.location.nativePath();
   const auto mime = entry.contentType.value_or("");
   const bool image = mime.starts_with("image/"), media = mime.starts_with("video/") || mime.starts_with("audio/");
+  const bool launcher = g_content_type_is_a(mime.c_str(), "application/x-desktop");
   if (!path || g_cancellable_is_cancelled(cancel)) {
     return {};
   }
@@ -156,7 +201,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   if (entry.type != FileType::Regular
       || entry.symlink
       || entry.access.read == false
-      || (!image && !media && mime != "application/pdf")) {
+      || (!image && !media && !launcher && mime != "application/pdf")) {
     return fields;
   }
   const GioPtr<GFileInfo> filesystem(
@@ -179,6 +224,19 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   }
   if (!sameDescriptor(before, current.get())) {
     return {};
+  }
+  if (launcher) {
+    auto extra = launcherFields(input.get(), cancel);
+    struct stat after{}, named{};
+    if (g_cancellable_is_cancelled(cancel)
+        || ::fstat(input.get(), &after) < 0
+        || ::lstat(path->c_str(), &named) < 0
+        || stamp(before) != stamp(after)
+        || stamp(before) != stamp(named)) {
+      return {};
+    }
+    extra.insert(extra.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
+    return extra;
   }
   const GString temporary(g_dir_make_tmp("luciole-metadata-XXXXXX", nullptr));
   if (!temporary) {

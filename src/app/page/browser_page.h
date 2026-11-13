@@ -129,6 +129,7 @@ public:
   bool owns(const Node* node) const;
   // The window dispatcher's focus moved to `focused`.
   void focusChanged(InputArea* focused);
+  void windowFocusChanged(bool entered);
   bool completeLocationOnTab(std::uint32_t modifiers);
   void stampFocusKeys(Node& node);
   void duplicateFrom(BrowserPage& source);
@@ -281,7 +282,7 @@ private:
 
   void showPopup(
       std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
-      bool alignLeft = false
+      bool alignLeft = false, PopupMode mode = PopupMode::Transient
   ) override;
   void setDialogSize(float width, float height) override;
   PopupSurface* menuSurface() override;
@@ -420,6 +421,7 @@ private:
   Button* m_sortButton = nullptr;
   bool m_browserDirty = true;
   std::unique_ptr<PopupSurface> m_menuSurface;
+  PopupMode m_popupMode = PopupMode::Transient;
   ActiveDialog m_activeDialog;
   InputDispatcher m_menuDispatcher;
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);

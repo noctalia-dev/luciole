@@ -315,9 +315,7 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
                      .configure = literal}
                 ),
                 ui::label(
-                    {.text = entry.symlink                            ? "Symbolic link"
-                         : entry.type == luciole::FileType::Directory ? "Folder"
-                                                                      : "File",
+                    {.text = luciole::fileTypeDescription(entry.type, entry.symlink, entry.contentType),
                      .fontSize = Style::fontSizeCaption,
                      .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
                 )
@@ -633,7 +631,7 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
   }
   m_page.showPopup(
       std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false
+      height, false, PopupMode::Dialog
   );
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::Properties, [this] { close(); });

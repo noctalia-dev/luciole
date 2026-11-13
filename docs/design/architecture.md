@@ -1,5 +1,9 @@
 # Architecture and ownership
 
+## Dialog lifetime
+
+[PageContext](../../src/app/page/page_context.h) distinguishes transient popups from persistent dialogs through `PopupMode`. Menus keep normal Wayland grabs and outside-click dismissal. Forms retain their scene, focus and drafts across application-window focus changes, using the existing popup transport without an explicit grab. [BrowserPage](../../src/app/page/browser_page.cpp) consumes dialog-background clicks, restores its text-input context on focus return, and keeps all explicit teardown in ActiveDialog. Settings dropdowns remain transient children; losing window focus closes the dropdown while retaining Settings. Compositor popup dismissal is always honored. This is application policy, not a change to the mirrored rendering library.
+
 ## Module boundaries
 
 [meson.build](../../meson.build) assembles the local Noctalia library and Luciole-owned static modules. [CONTRIBUTING.md](../../CONTRIBUTING.md#module-layering) defines the allowed dependencies. Public domain APIs use `Location`, typed metadata and `CancelToken`; UI callers do not operate directly on GIO file objects.
@@ -21,7 +25,7 @@ The application uses direct Wayland and OpenGL ES with Pango/Cairo. GdkPixbuf/Gl
 
 ## Windows, tabs and pages
 
-[WorkspaceApplication](../../src/app/workspace_application.h) owns native windows, the workspace, application-wide preferences and caches, and the [OperationHub](../../src/app/operation_hub.h). [TabWorkspace](../../src/browser/tab_workspace.h) represents logical tabs and optional splits. A native host supplies the visible toolbar/sidebar and mounts the active page roots.
+[WorkspaceApplication](../../src/app/workspace_application.h) owns native windows, the workspace, application-wide preferences and caches, and the [OperationHub](../../src/app/operation_hub.h). [TabWorkspace](../../src/browser/tab_workspace.h) represents logical tabs and optional splits. A native host supplies the visible toolbar/sidebar and mounts the active page roots. `TabWorkspace::addTab()` accepts explicit activation intent; background insertion retains the selected tab and its full split layout/focused page, while the first tab of an empty window is necessarily active. Folder-opening workspace commands follow the shared `switch_to_new_tab` preference; explicit New Tab and one-off background commands carry separate intent. Hidden pages initialize their directory controllers normally without mounting their scene or taking focus. Background loading and errors do not select a tab. Middle-clicking a folder in an inactive split pane leaves the original pane focused when opening in the background.
 
 [BrowserPage](../../src/app/page/browser_page.h) orchestrates feature controllers rather than implementing file jobs or decoder work. Each page has its own browse controller, selection, history, query and viewport. Its [MillerColumns](../../src/browser/miller_columns.h) chain owns additional lazy controllers within the same page. The focused controller supplies action and preview targets. Offscreen/retired branches release resources; at most 16 live columns remain while deeper navigation retires old ancestors.
 

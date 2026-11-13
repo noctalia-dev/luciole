@@ -93,16 +93,16 @@ struct IconThemePollSource::Impl {
 
     std::unordered_map<std::string, DesiredWatch> desired;
     const auto paths = IconResolver::themeWatchPaths();
-    for (const auto& path : paths.baseDirs) {
+    for (const auto& path : paths->baseDirs) {
       desired[path].roles |= WatchBaseDir;
     }
-    for (const auto& path : paths.themeRoots) {
+    for (const auto& path : paths->themeRoots) {
       desired[path].roles |= WatchThemeRoot;
     }
-    for (const auto& path : paths.iconDirs) {
+    for (const auto& path : paths->iconDirs) {
       desired[path].roles |= WatchIconDir;
     }
-    for (const auto& path : paths.settingsFiles) {
+    for (const auto& path : paths->settingsFiles) {
       const fs::path settingsPath(path);
       auto& watch = desired[settingsPath.parent_path().string()];
       watch.roles |= WatchSettingsDir;

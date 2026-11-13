@@ -5,6 +5,7 @@
 #include "clipboard/text_clipboard.h"
 #include "core/timer_manager.h"
 #include "fs/transfer_types.h"
+#include "platform/extraction_launcher.h"
 
 #include <cstdint>
 #include <functional>
@@ -36,6 +37,10 @@ public:
   // True from a paste request until the clipboard answers.
   bool pastePending() const { return m_pendingFilePaste; }
   void cancelPaste() { m_pendingFilePaste = false; }
+  bool extractionPending() const { return m_extraction.busy(); }
+  void cancelExtraction() { m_extraction.cancel(); }
+  void
+  extractDrop(luciole::ExtractionOffer offer, const luciole::Location& destination, luciole::DropCompletion finish);
   // Copies or moves the request's targets into `destination`.
   void transferTo(const luciole::ActionRequest& request, const luciole::Location& destination, bool copy);
   // Starts a transfer job that copies or moves `sources` into `destination`.
@@ -88,6 +93,7 @@ private:
   std::function<void()> m_progressTick;
   Timer m_operationProgress;
   bool m_pendingFilePaste = false;
+  luciole::ExtractionLauncher m_extraction;
   std::optional<ActiveConflict> m_activeConflict;
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);
 };

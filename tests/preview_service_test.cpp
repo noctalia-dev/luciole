@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <thread>
+#include <tuple>
 
 namespace {
   void wait(auto predicate) {
@@ -75,6 +76,32 @@ namespace {
     TEST_CHECK(image.rgba[0] == 255 && image.rgba[1] == 34 && image.rgba[2] == 68 && image.rgba[3] == 255);
     preview.clear();
     TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Empty);
+  }
+  void inheritedTextChecks(const std::filesystem::path& root) {
+    luciole::PreviewService preview;
+    for (const auto& [name, mime, text] :
+         {std::tuple{"record.yaml", "application/yaml", "message: hello\n"},
+          std::tuple{"record.yml", "application/x-yaml", "message: hello again\n"},
+          std::tuple{
+              "launcher.desktop", "application/x-desktop",
+              "[Desktop Entry]\nType=Application\nName=Mail App\nExec=false\n"
+          },
+          std::tuple{"data.json", "application/json", "{\"message\": \"hello\"}\n"},
+          std::tuple{"flake.nix", "application/x-nix", "{ description = \"Example\"; }\n"}}) {
+      const auto path = root / name;
+      write(path, text);
+      preview.show(entry(path, mime), 512, {});
+      wait([&] { return !preview.busy(); });
+      TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Ready);
+      TEST_CHECK(preview.snapshot().text == text);
+      TEST_CHECK(!preview.snapshot().image);
+    }
+    const auto path = root / "binary.yaml";
+    write(path, std::string("binary\0text", 11));
+    preview.show(entry(path, "application/yaml"), 512, {});
+    wait([&] { return !preview.busy(); });
+    TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Unavailable && preview.snapshot().text.empty());
+    preview.clear();
   }
   void checks(const std::filesystem::path& root) {
     const auto portraitLayout = luciole::previewImageLayout(1000, 3000, 320, 1300, 1);
@@ -261,6 +288,7 @@ int main(int argc, char** argv) {
   try {
     checks(root);
     svgChecks(root);
+    inheritedTextChecks(root);
     std::println("preview checks passed");
   } catch (const std::exception& error) {
     std::println(stderr, "preview: {}", error.what());

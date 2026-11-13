@@ -50,6 +50,9 @@ namespace {
     std::unordered_set<wl_resource*> m_offers;
     MimeData m_external;
     std::unique_ptr<WaylandTextClipboard> m_clipboard;
+    bool m_delayData = false;
+    int m_delayedFd = -1;
+    std::string m_delayedBytes;
     bool m_focused = true;
     std::uint32_t m_serial = 10;
     std::size_t m_writes = 0, m_invalidWrites = 0;
@@ -67,6 +70,12 @@ namespace {
                 if (offer.source) {
                   wl_data_source_send_send(offer.source, mime, fd);
                 } else if (const auto found = offer.data.find(mime); found != offer.data.end()) {
+                  if (offer.peer->m_delayData) {
+                    TEST_CHECK(offer.peer->m_delayedFd < 0);
+                    offer.peer->m_delayedFd = fd;
+                    offer.peer->m_delayedBytes = found->second;
+                    return;
+                  }
                   std::size_t offset = 0;
                   while (offset < found->second.size()) {
                     const auto written = ::write(fd, found->second.data() + offset, found->second.size() - offset);
@@ -269,6 +278,9 @@ namespace {
     }
     ~ClipboardPeer() {
       m_clipboard.reset();
+      if (m_delayedFd >= 0) {
+        ::close(m_delayedFd);
+      }
       wl_surface_destroy(m_surface);
       wl_compositor_destroy(m_compositor);
       wl_data_device_manager_destroy(m_manager);
@@ -301,6 +313,23 @@ namespace {
       }
       TEST_CHECK(condition());
       TEST_CHECK(m_invalidWrites == 0);
+    }
+    void delayData() { m_delayData = true; }
+    bool dataPending() const { return m_delayedFd >= 0; }
+    void stopDelayingData() { m_delayData = false; }
+    void releaseData() {
+      const int fd = std::exchange(m_delayedFd, -1);
+      TEST_CHECK(fd >= 0);
+      TEST_CHECK(
+          ::write(fd, m_delayedBytes.data(), m_delayedBytes.size()) == static_cast<ssize_t>(m_delayedBytes.size())
+      );
+      ::close(fd);
+      m_delayData = false;
+    }
+    void closeClipboard() { m_clipboard.reset(); }
+    bool readEndClosed() const {
+      pollfd fd{m_delayedFd, POLLOUT, 0};
+      return ::poll(&fd, 1, 0) > 0 && (fd.revents & POLLERR) != 0;
     }
     WaylandTextClipboard& clipboard() { return *m_clipboard; }
     void blur() { m_focused = false; }
@@ -344,8 +373,9 @@ namespace {
         pump();
       }
     }
-    void beginDrop(std::uint32_t actions, bool askIntent = false) {
-      m_external = {{std::string(kUriListMime), "file:///tmp/drop-source\r\n"}};
+    void beginDrop(std::uint32_t actions, bool askIntent = false, MimeData data = {}) {
+      m_external =
+          data.empty() ? MimeData{{std::string(kUriListMime), "file:///tmp/drop-source\r\n"}} : std::move(data);
       if (askIntent) {
         m_external.emplace(kAskDropMime, "1");
       }
@@ -479,6 +509,232 @@ namespace {
     TEST_CHECK(peer.writes() == 0);
     TEST_CHECK(peer.capture().payload.locations == original.locations);
   }
+  void testDelayedFileOffer() {
+    ClipboardPeer peer;
+    peer.delayData();
+    bool received = false;
+    peer.clipboard().setDropCallbacks(
+        [&](wl_surface*, float, float) {
+          return FileDropTarget{
+              .receive =
+                  [&](const FilePayload& files, const DropOptions& options, const DropCompletion& finish) {
+                    TEST_CHECK(files.locations == std::vector{Location::fromPath("/tmp/drop-source")});
+                    TEST_CHECK(options.select(TransferAction::Copy));
+                    received = true;
+                    finish(true);
+                  },
+              .preferred = DragAction::Copy
+          };
+        },
+        [] {}
+    );
+    peer.beginDrop(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+    peer.until([&] { return peer.preferred() == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY; });
+    peer.drop();
+    peer.until([&] { return peer.dataPending(); });
+    // Archivers can prepare their exported file list after the pointer has been released.
+    const auto readyAt = std::chrono::steady_clock::now() + 5300ms;
+    while (std::chrono::steady_clock::now() < readyAt) {
+      peer.pump();
+      g_usleep(1000);
+    }
+    TEST_CHECK(!received && peer.finished() == 0 && peer.destroyed() == 0);
+    peer.releaseData();
+    peer.until([&] { return received && peer.finished() == 1 && peer.destroyed() == 1; });
+  }
+  void testDropReadLifetimes() {
+    // A new drag does not retire a dropped offer whose source is still preparing data.
+    {
+      ClipboardPeer peer;
+      bool first = false, second = false;
+      peer.delayData();
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .receive =
+                    [&](const FilePayload& files, const DropOptions& options, const DropCompletion& finish) {
+                      TEST_CHECK(options.select(TransferAction::Copy));
+                      if (files.locations == std::vector{Location::fromPath("/tmp/drop-source")}) {
+                        first = true;
+                      } else {
+                        TEST_CHECK(files.locations == std::vector{Location::fromPath("/tmp/another-source")});
+                        second = true;
+                      }
+                      finish(true);
+                    },
+                .preferred = DragAction::Copy
+            };
+          },
+          [] {}
+      );
+      peer.beginDrop(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+      peer.until([&] { return peer.preferred() == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY; });
+      peer.drop();
+      peer.until([&] { return peer.dataPending(); });
+      peer.stopDelayingData();
+      peer.beginDrop(
+          WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, false, {{std::string(kUriListMime), "file:///tmp/another-source\r\n"}}
+      );
+      peer.until([&] { return peer.preferred() == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY; });
+      peer.drop();
+      peer.until([&] { return second && peer.finished() == 1 && peer.destroyed() == 1; });
+      TEST_CHECK(!first);
+      peer.releaseData();
+      peer.until([&] { return first && peer.finished() == 2 && peer.destroyed() == 2; });
+    }
+    {
+      ClipboardPeer peer;
+      bool called = false;
+      peer.delayData();
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .receive = [&](const FilePayload&, const DropOptions&, const DropCompletion&) { called = true; },
+                .failed = [&](const std::string&) { called = true; },
+                .preferred = DragAction::Copy
+            };
+          },
+          [] {}
+      );
+      peer.beginDrop(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+      peer.until([&] { return peer.preferred() == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY; });
+      peer.drop();
+      peer.until([&] { return peer.dataPending(); });
+      peer.closeClipboard();
+      peer.until([&] { return peer.readEndClosed() && peer.destroyed() == 1; });
+      TEST_CHECK(!called && peer.finished() == 0);
+    }
+    for (const auto& bytes : {std::string{}, std::string("not a URI"), std::string("\xff", 1)}) {
+      ClipboardPeer peer;
+      bool received = false, failed = false;
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .receive = [&](const FilePayload&, const DropOptions&, const DropCompletion&) { received = true; },
+                .failed = [&](const std::string& message) { failed = !message.empty(); },
+                .preferred = DragAction::Copy
+            };
+          },
+          [] {}
+      );
+      peer.beginDrop(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, false, {{std::string(kUriListMime), bytes}});
+      peer.until([&] { return peer.preferred() == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY; });
+      peer.drop();
+      peer.until([&] { return peer.destroyed() == 1; });
+      TEST_CHECK(failed && !received && peer.finished() == 0);
+    }
+  }
+  void testDeferredExtractionDrops() {
+    constexpr auto copy = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, move = WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+    const MimeData extraction{
+        {std::string(kExtractionServiceMime), ":1.25"}, {std::string(kExtractionPathMime), "/source"}
+    };
+    for (const std::uint32_t actions :
+         {static_cast<std::uint32_t>(copy), static_cast<std::uint32_t>(copy | move),
+          static_cast<std::uint32_t>(move)}) {
+      ClipboardPeer peer;
+      std::optional<ExtractionOffer> received;
+      DropCompletion finish;
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .extract =
+                    [&](ExtractionOffer offer, DropCompletion done) {
+                      received = std::move(offer);
+                      finish = std::move(done);
+                    },
+                .preferred = DragAction::Move
+            };
+          },
+          [] {}
+      );
+      peer.beginDrop(actions, false, extraction);
+      peer.until([&] { return actions == move ? peer.mask() == 0 : peer.preferred() == copy; });
+      peer.drop();
+      if (actions == move) {
+        peer.until([&] { return peer.destroyed() == 1; });
+        TEST_CHECK(!received && peer.finished() == 0);
+      } else {
+        peer.until([&] { return received.has_value(); });
+        TEST_CHECK(received->service == ":1.25" && received->path == "/source" && peer.finished() == 0);
+        finish(true);
+        finish(true);
+        peer.until([&] { return peer.destroyed() == 1; });
+        TEST_CHECK(peer.finished() == 1 && peer.dropAction() == copy);
+      }
+    }
+    // A folder pin accepts real file lists only, and incomplete protocol offers must not look droppable.
+    for (const bool pin : {false, true}) {
+      ClipboardPeer peer;
+      bool called = false;
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .receive = [&](const FilePayload&, const DropOptions&, const DropCompletion&) { called = true; },
+                .extract = [&](const ExtractionOffer&, const DropCompletion&) { called = true; },
+                .copyOnly = pin
+            };
+          },
+          [] {}
+      );
+      auto data = extraction;
+      if (!pin) {
+        data.erase(std::string(kExtractionPathMime));
+      }
+      peer.beginDrop(copy, false, std::move(data));
+      peer.drop();
+      peer.until([&] { return peer.destroyed() == 1; });
+      TEST_CHECK(!called && peer.finished() == 0);
+    }
+    // Ordinary URLs take precedence when both contracts are offered.
+    {
+      ClipboardPeer peer;
+      bool received = false, extracted = false;
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .receive =
+                    [&](const FilePayload& files, const DropOptions& options, const DropCompletion& done) {
+                      TEST_CHECK(files.locations == std::vector{Location::fromPath("/tmp/drop-source")});
+                      TEST_CHECK(options.select(TransferAction::Copy));
+                      received = true;
+                      done(true);
+                    },
+                .extract = [&](const ExtractionOffer&, const DropCompletion&) { extracted = true; },
+                .preferred = DragAction::Copy
+            };
+          },
+          [] {}
+      );
+      auto data = extraction;
+      data.emplace(kUriListMime, "file:///tmp/drop-source\r\n");
+      peer.beginDrop(copy, false, std::move(data));
+      peer.until([&] { return peer.preferred() == copy; });
+      peer.drop();
+      peer.until([&] { return peer.finished() == 1; });
+      TEST_CHECK(received && !extracted);
+    }
+    for (const auto& invalid : {std::string{}, std::string(4097, 'a')}) {
+      ClipboardPeer peer;
+      bool received = false, failed = false;
+      peer.clipboard().setDropCallbacks(
+          [&](wl_surface*, float, float) {
+            return FileDropTarget{
+                .extract = [&](const ExtractionOffer&, const DropCompletion&) { received = true; },
+                .failed = [&](const std::string& message) { failed = !message.empty(); }
+            };
+          },
+          [] {}
+      );
+      auto data = extraction;
+      data[std::string(kExtractionPathMime)] = invalid;
+      peer.beginDrop(copy, false, std::move(data));
+      peer.until([&] { return peer.preferred() == copy; });
+      peer.drop();
+      peer.until([&] { return peer.destroyed() == 1; });
+      TEST_CHECK(failed && !received && peer.finished() == 0);
+    }
+  }
   void testAskDropNegotiation() {
     constexpr auto copy = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, move = WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE,
                    ask = WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
@@ -566,6 +822,9 @@ namespace {
 } // namespace
 int main() {
   try {
+    testDelayedFileOffer();
+    testDropReadLifetimes();
+    testDeferredExtractionDrops();
     testAskDropNegotiation();
     testDeferredCompletion(false);
     testDeferredCompletion(true);

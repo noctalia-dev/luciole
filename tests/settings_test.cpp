@@ -61,6 +61,24 @@ namespace {
     fixture.write("config.toml", "[browser]\nterminal_command = \"foot\\nkitty\"\n");
     TEST_CHECK(!service.reload());
   }
+  void testNewTabPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.switchToNewTab);
+    fixture.write("config.toml", "[browser]\nswitch_to_new_tab = false\n");
+    TEST_CHECK(service.reload() && !service.settings().browser.switchToNewTab);
+    const std::array on{luciole::OverrideEdit{luciole::BrowserPreference::SwitchToNewTab, true}};
+    TEST_CHECK(service.saveOverrides(on) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && restored.settings().browser.switchToNewTab);
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::SwitchToNewTab, std::nullopt}};
+    TEST_CHECK(restored.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(restored.reload() && !restored.settings().browser.switchToNewTab);
+    fixture.write("config.toml", "[browser]\nswitch_to_new_tab = 'false'\n");
+    TEST_CHECK(!restored.reload() && !restored.settings().browser.switchToNewTab);
+    fixture.write("config.toml", "[browser]\nswitch_to_new_tab = true\n");
+    TEST_CHECK(restored.reload() && restored.settings().browser.switchToNewTab);
+  }
   void testBackupPreference() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -979,6 +997,7 @@ int main() {
     testSchemaAndDiagnostics();
     testPresentationSettings();
     testBackupPreference();
+    testNewTabPreference();
     testMillerSettings();
     testMillerParents();
     testLayersAndReload();

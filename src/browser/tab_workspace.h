@@ -20,7 +20,9 @@ namespace luciole {
   class TabWorkspace {
   public:
     WindowId addWindow();
-    TabId addTab(WindowId id);
+    // A background tab leaves the current tab and its split/focus untouched.
+    // The first tab of an empty window is always activated.
+    TabId addTab(WindowId id, bool activate = true);
     bool removeWindow(WindowId id);
     bool select(WindowId id, TabId tab);
     bool focus(WindowId id, TabId page);

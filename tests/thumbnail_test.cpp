@@ -200,7 +200,13 @@ namespace {
       pump.until([&] { return asset && asset->ready; });
       TEST_CHECK(asset->pixels && asset->pixels->rgba != foreign.image.rgba);
       pump.until([&] { return store.read(entry.location.uri(), 256, *entry.modifiedSeconds, entry.size).has_value(); });
-      TEST_CHECK(store.clear().empty() && fs::exists(target));
+      // PNG publication precedes the worker's ledger commit; clearing can still see its write lock.
+      pump.until([&] {
+        const auto error = store.clear();
+        TEST_CHECK(fs::exists(target));
+        TEST_CHECK(error.empty() || error.starts_with("private file is busy; retry later"));
+        return error.empty();
+      });
     }
     // A stale ownership record must not authorize replacing another application's newer file.
     fs::remove(target);

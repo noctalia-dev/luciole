@@ -115,6 +115,23 @@ namespace {
     }
     return {};
   }
+  State emptyTrash(const C& c, const R&) {
+    if (!c.canEmptyTrash || c.operationsBusy) {
+      return unavailable("Trash is unavailable or another operation is still finishing.");
+    }
+    const auto& snapshot = c.model.snapshot();
+    // Search results and other folders cannot establish whether the whole Trash is empty.
+    if (snapshot.location == luciole::Location::trash() && c.query.empty()) {
+      if (snapshot.status == luciole::DirectoryStatus::Loading) {
+        return unavailable("Wait until Trash has finished loading.");
+      }
+      if (snapshot.status != luciole::DirectoryStatus::Ready) {
+        return unavailable("Trash is unavailable.");
+      }
+      return require(!snapshot.entries.empty(), "Trash is already empty.");
+    }
+    return {};
+  }
   State trashItems(const C& c, const R& r, bool restore) {
     if (const auto state = writable(c); !state.enabled) {
       return state;
@@ -237,7 +254,7 @@ namespace {
   }
   State terminal(const C& c, const R& r) {
     if (!c.terminalAvailable) {
-      return unavailable("Install xdg-terminal-exec to open a terminal.");
+      return unavailable("No terminal is available. Check Settings > General > Terminal.");
     }
     if (!native(r) || r.folder->isTrash()) {
       return unavailable("Terminals require a native folder.");
@@ -246,7 +263,7 @@ namespace {
   }
   State targetTerminal(const C& c, const R& r) {
     if (!c.terminalAvailable) {
-      return unavailable("Install xdg-terminal-exec to open a terminal.");
+      return unavailable("No terminal is available. Check Settings > General > Terminal.");
     }
     return require(
         single(r)
@@ -486,13 +503,7 @@ namespace {
        .label = "Reload pins",
        .shortcut = "",
        .rule = [](const C& c, const R&) { return require(!c.pinsBusy, "Pins are being saved."); }},
-      {.action = A::EmptyTrash,
-       .label = "Empty Trash…",
-       .shortcut = "",
-       .destructive = true,
-       .rule = [](
-                   const C& c, const R&
-               ) { return require(c.canEmptyTrash, "Trash is unavailable or another operation is still finishing."); }},
+      {.action = A::EmptyTrash, .label = "Empty Trash…", .shortcut = "", .destructive = true, .rule = emptyTrash},
       {.action = A::SelectAll, .label = "Select all", .shortcut = "Ctrl+A", .scope = S::Selection, .rule = visibleRows},
       {.action = A::InvertSelection,
        .label = "Invert selection",
@@ -516,7 +527,7 @@ namespace {
        .scope = S::Location,
        .rule = folderClipboard},
       {.action = A::CopyUri, .label = "Copy folder URI", .shortcut = "", .scope = S::Location, .rule = folderClipboard},
-      {.action = A::Terminal, .label = "Open Terminal Here", .shortcut = "", .scope = S::Location, .rule = terminal},
+      {.action = A::Terminal, .label = "Open Terminal Here", .shortcut = "F4", .scope = S::Location, .rule = terminal},
       {.action = A::CopyTargetPath, .label = "Copy path", .shortcut = "", .scope = S::Targets, .rule = clipboard},
       {.action = A::CopyTargetUri, .label = "Copy URI", .shortcut = "", .scope = S::Targets, .rule = clipboard},
       {.action = A::RunProgram, .label = "Run as a Program", .shortcut = "", .scope = S::Targets, .rule = runProgram},
