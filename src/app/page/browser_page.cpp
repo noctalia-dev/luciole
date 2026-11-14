@@ -1449,8 +1449,16 @@ void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& target
       m_millerFocusPending = true;
     }
   } else {
+    std::vector<luciole::Location> files;
     for (const auto& target : targets) {
-      browser().activate(target.id);
+      if (target.type == luciole::FileType::Regular) {
+        files.push_back(target.location);
+      } else {
+        browser().activate(target.id);
+      }
+    }
+    if (!files.empty()) {
+      m_launcher.open(files);
     }
   }
 }

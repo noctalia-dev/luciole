@@ -31,6 +31,7 @@ namespace luciole {
     void setActivationProvider(ActivationProvider provider);
     void setTerminalCommand(std::string command);
     void open(const Location& location);
+    void open(const std::vector<Location>& locations);
     void applications(
         std::string mime, std::function<void(ApplicationList)> callback, bool includeOther = false,
         std::string search = {}

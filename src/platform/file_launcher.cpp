@@ -388,3 +388,68 @@ void luciole::FileLauncher::open(const Location& location) {
     );
   });
 }
+
+void luciole::FileLauncher::open(const std::vector<Location>& locations) {
+  if (locations.empty()) {
+    return;
+  }
+  if (locations.size() == 1) {
+    open(locations.front());
+    return;
+  }
+  struct Group {
+    ApplicationChoice application;
+    std::vector<Location> locations;
+  };
+  struct Batch {
+    std::shared_ptr<State> state;
+    std::vector<Group> groups;
+    std::size_t remaining;
+  };
+  struct Request {
+    std::shared_ptr<Batch> batch;
+    Location location;
+  };
+  auto batch = std::make_shared<Batch>(Batch{m_state, {}, locations.size()});
+  m_state->active += locations.size();
+  for (const auto& location : locations) {
+    auto* request = new Request{batch, location};
+    const auto file = gioFile(location);
+    g_file_query_default_handler_async(
+        file.get(), G_PRIORITY_DEFAULT, m_state->cancellable.get(),
+        [](GObject* source, GAsyncResult* result, gpointer data) {
+          const std::unique_ptr<Request> request(static_cast<Request*>(data));
+          const auto& batch = request->batch;
+          const auto& state = batch->state;
+          --state->active;
+          GError* raw = nullptr;
+          const GioPtr<GAppInfo> app(g_file_query_default_handler_finish(G_FILE(source), result, &raw));
+          const GErrorPtr error(raw);
+          if (!g_cancellable_is_cancelled(state->cancellable.get())) {
+            if (app) {
+              auto found = std::ranges::find_if(batch->groups, [&app](const Group& group) {
+                return g_app_info_equal(group.application.app.get(), app.get());
+              });
+              if (found == batch->groups.end()) {
+                const char* id = g_app_info_get_id(app.get());
+                ApplicationChoice choice;
+                choice.id = id ? id : "";
+                choice.app = std::shared_ptr<GAppInfo>(G_APP_INFO(g_object_ref(app.get())), g_object_unref);
+                batch->groups.push_back({std::move(choice), {request->location}});
+              } else {
+                found->locations.push_back(request->location);
+              }
+            } else if (const auto changed = state->changed) {
+              changed(error ? error->message : "No application is associated with this file.");
+            }
+            if (--batch->remaining == 0 && !g_cancellable_is_cancelled(state->cancellable.get())) {
+              for (auto& group : batch->groups) {
+                State::dispatch(state, group.locations, std::move(group.application));
+              }
+            }
+          }
+        },
+        request
+    );
+  }
+}
