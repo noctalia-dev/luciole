@@ -1249,7 +1249,13 @@ void BrowserPage::runAction(
   static constexpr auto kHandlers = std::to_array<Handler>({
       {Action::Back, [](BrowserPage& page, const Call&) { (void)page.browser().back(); }},
       {Action::Forward, [](BrowserPage& page, const Call&) { (void)page.browser().forward(); }},
-      {Action::Up, [](BrowserPage& page, const Call&) { (void)page.browser().up(); }},
+      {Action::Up,
+      [](BrowserPage& page, const Call&) {
+        if (const auto current = page.browser().model().snapshot().location; current && current->parent()) {
+          page.revealOnReload({*current});
+        }
+        (void)page.browser().up();
+      }},
       {Action::Home, [](BrowserPage& page, const Call&) { page.browser().home(); }},
       {Action::Root, [](BrowserPage& page, const Call&) { page.browser().open(luciole::Location::fromPath("/")); }},
       {Action::Refresh, [](BrowserPage& page, const Call&) { page.browser().refresh(); }},
