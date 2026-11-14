@@ -348,6 +348,9 @@ void luciole::DirectoryModel::selectAll() {
   }
   m_selection.selected.clear();
   m_selection.selected.insert(m_rows.begin(), m_rows.end());
+  if (!m_rows.empty() && !m_selection.focused) {
+    m_selection.focused = m_rows.front();
+  }
   notify();
 }
 
