@@ -62,6 +62,8 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `show_emblems` | `true` | File emblems |
 | `show_hidden` | `false` | Hidden entries |
 | `show_backups` | `true` | Non-directory backup names ending in `~` |
+| `always_show_tab_bar` | `true` | Keep the tab bar visible when a window has only one tab |
+| `always_show_status_bar` | `false` | Keep the status pill visible when idle, showing the item count and free space |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
 | `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |

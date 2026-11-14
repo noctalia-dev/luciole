@@ -31,6 +31,8 @@ Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (
 
 List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu.
 
+The floating status pill reports actions, search and selection. Settings → General → Always show status bar keeps it visible when idle with the item count and, when available, free space.
+
 Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
 
 ## Places and folder trees
@@ -42,6 +44,8 @@ Settings → Sidebar & preview controls sidebar visibility, width, drive rows an
 ## Tabs and split view
 
 Each tab can contain one or two browsing panes. A split belongs to its tab; it does not create another tab. Navigation, search, selection and scroll belong to each pane. Actions target the focused pane.
+
+The tab bar is shown by default even with one tab. Settings → General → Always show tab bar can hide it when there is only one tab.
 
 Middle-click a folder, breadcrumb or Places row, or use a folder's Open In → New Tab menu, to open it in another tab. Settings → General → Switch to new folder tabs is on by default. Turn it off to load those folders in background tabs while keeping your current tab, focused pane, search, selection and scroll. Shift+middle-click reverses the preference for that one opening. Click the tab or use Ctrl+Tab to visit it when ready.
 
