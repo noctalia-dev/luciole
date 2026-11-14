@@ -71,12 +71,14 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
   struct Result {
     bool ready = false;
     std::vector<Bookmark> bookmarks;
+    std::vector<SavedWindow> windows;
     std::vector<UserPlace> places;
     std::string error;
   };
   explicit State(std::filesystem::path path) : store(std::move(path)) {}
   StateStore store; // Accessed only by serial worker tasks.
   std::vector<Bookmark> bookmarks;
+  std::vector<SavedWindow> windows;
   std::vector<UserPlace> places;
   std::string error;
   std::function<void()> changed;
@@ -89,17 +91,27 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
       callback();
     }
   }
-  void run(std::optional<std::vector<Bookmark>> proposed) {
+  void
+  run(std::optional<std::vector<Bookmark>> proposed, std::optional<std::vector<SavedWindow>> proposedWindows = {}) {
     busy = true;
     error.clear();
     runJob<Result>(
-        [owner = shared_from_this(), proposed = std::move(proposed)] {
+        [owner = shared_from_this(), proposed = std::move(proposed), proposedWindows = std::move(proposedWindows)] {
           Result result;
           auto& store = owner->store;
           try {
             result.places = configuredUserPlaces();
             if (proposed) {
               const auto outcome = store.saveBookmarks(*proposed);
+              if (!store.issues().empty()) {
+                result.error = store.issues().front().format();
+              }
+              result.ready = outcome != AtomicWriteState::NotCommitted;
+              if (!result.ready) {
+                result.ready = store.load();
+              }
+            } else if (proposedWindows) {
+              const auto outcome = store.saveWindows(*proposedWindows);
               if (!store.issues().empty()) {
                 result.error = store.issues().front().format();
               }
@@ -114,6 +126,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
               }
             }
             result.bookmarks = store.state().bookmarks;
+            result.windows = store.state().windows;
             if (!store.state().placesCustomized) {
               auto available = StateStore::bookmarkLimit - result.bookmarks.size();
               std::vector<Bookmark> initial;
@@ -152,6 +165,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
           owner->busy = false;
           owner->ready = loaded->ready;
           owner->bookmarks = std::move(loaded->bookmarks);
+          owner->windows = std::move(loaded->windows);
           owner->places = std::move(loaded->places);
           owner->error = std::move(loaded->error);
           owner->notify();
@@ -183,6 +197,15 @@ bool luciole::PinService::save(std::vector<Bookmark> bookmarks) {
   }
   if (bookmarks != m_state->bookmarks) {
     m_state->run(std::move(bookmarks));
+  }
+  return true;
+}
+bool luciole::PinService::saveWindows(std::vector<SavedWindow> windows) {
+  if (!editable()) {
+    return false;
+  }
+  if (windows != m_state->windows) {
+    m_state->run(std::nullopt, std::move(windows));
   }
   return true;
 }

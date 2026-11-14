@@ -5,6 +5,7 @@
 #include "browser/tab_workspace.h"
 #include "clipboard/text_clipboard.h"
 #include "config/settings.h"
+#include "config/state_store.h"
 #include "config/view_preference_writer.h"
 #include "core/deferred_call.h"
 #include "core/input/key_symbols.h"
@@ -116,6 +117,12 @@ WorkspaceApplication::WorkspaceApplication(
   );
   m_preferences.startWatching();
   m_pins.setChangedCallback([this] {
+    if (m_pendingWindows && m_pins.editable()) {
+      auto windows = std::exchange(m_pendingWindows, std::nullopt);
+      if (!m_pins.saveWindows(*windows)) {
+        m_pendingWindows = std::move(*windows);
+      }
+    }
     for (auto& [id, page] : m_pages) {
       (void)id;
       page->placesChanged();
@@ -140,6 +147,10 @@ WorkspaceApplication::WorkspaceApplication(
       page->thumbnailsChanged();
     }
   });
+  luciole::StateStore state(luciole::StateStore::pathFromEnvironment());
+  if (state.load()) {
+    m_savedWindows = state.state().windows;
+  }
   m_pins.reload();
 }
 
@@ -172,6 +183,9 @@ void WorkspaceApplication::start(std::optional<luciole::Location> initial) {
   if (!id) {
     throw std::runtime_error("Cannot create a Luciole window.");
   }
+  if (!initial && restoreLastWindow(id)) {
+    return;
+  }
   newTab(id, std::move(initial));
 }
 
@@ -181,7 +195,14 @@ void WorkspaceApplication::open(const luciole::InstanceRequest& request) {
     throw std::runtime_error("Cannot create a Luciole window.");
   }
   auto& host = *m_hosts.at(window);
-  luciole::TabId first = request.locations.empty() ? newTab(window, std::nullopt) : 0;
+  luciole::TabId first = 0;
+  if (request.locations.empty()) {
+    if (restoreLastWindow(window)) {
+      first = m_model.windows().at(window).selected;
+    } else {
+      first = newTab(window, std::nullopt);
+    }
+  }
   for (const auto& location : request.locations) {
     const auto tab = newTab(window, location);
     if (!tab) {
@@ -296,6 +317,13 @@ bool WorkspaceApplication::running() {
       }
       // Leave the workspace before the pages close their dialogs, so a job that applies changes keeps running.
       if (auto found = m_model.windows().find(id); found != m_model.windows().end()) {
+        if (m_defaults.restoreLastWindow) {
+          if (auto saved = savedWindow(id)) {
+            saveWindows({std::move(*saved)});
+          }
+        } else {
+          saveWindows({});
+        }
         const auto tabs = found->second.tabs;
         for (auto tab : tabs) {
           m_model.close(tab);
@@ -317,7 +345,7 @@ bool WorkspaceApplication::running() {
     m_hub.shutdown();
   }
   m_hub.update(m_focused);
-  bool busy = m_hub.busy() || m_thumbnails.clearing();
+  bool busy = m_hub.busy() || m_thumbnails.clearing() || m_pins.busy();
   for (auto& [id, page] : m_pages) {
     if (!live) {
       page->shutdown();
@@ -984,6 +1012,9 @@ void WorkspaceApplication::execute(
     break;
   }
   case WorkspaceCommand::Close:
+    if (m_model.windows().at(window).tabs.size() == 1) {
+      saveWindows({});
+    }
     m_model.close(tab);
     break;
   case WorkspaceCommand::Reopen:
@@ -997,7 +1028,8 @@ void WorkspaceApplication::execute(
     break;
   case WorkspaceCommand::NewWindow: {
     if (auto id = newWindow()) {
-      if (!newTab(id, destination ? destination : page.location())) {
+      const bool restored = !destination && restoreLastWindow(id);
+      if (!restored && !newTab(id, destination ? destination : page.location())) {
         m_hosts.at(id)->surface.close();
         page.workspaceError("Close a tab before opening another window.");
       }
@@ -1100,6 +1132,93 @@ void WorkspaceApplication::releaseChrome(Host& host) {
   host.toolbarNode = nullptr;
   page.returnSidebar();
   host.chromeOwner = 0;
+}
+
+std::optional<luciole::SavedWindow> WorkspaceApplication::savedWindow(luciole::WindowId window) const {
+  const auto found = m_model.windows().find(window);
+  if (found == m_model.windows().end() || found->second.tabs.empty()) {
+    return std::nullopt;
+  }
+  luciole::SavedWindow saved;
+  const auto selected = std::ranges::find(found->second.tabs, found->second.selected);
+  if (selected != found->second.tabs.end()) {
+    saved.activeTab = static_cast<std::size_t>(selected - found->second.tabs.begin());
+  }
+  for (const auto tab : found->second.tabs) {
+    const auto layout = m_model.layout(tab);
+    if (!layout || !m_pages.contains(layout->primary)) {
+      return std::nullopt;
+    }
+    const auto primary = m_pages.at(layout->primary)->location();
+    if (!primary) {
+      return std::nullopt;
+    }
+    luciole::SavedTab value{.primary = *primary, .secondary = std::nullopt, .activePane = luciole::ActivePane::Primary};
+    if (layout->secondary) {
+      if (!m_pages.contains(*layout->secondary)) {
+        return std::nullopt;
+      }
+      const auto secondary = m_pages.at(*layout->secondary)->location();
+      if (!secondary) {
+        return std::nullopt;
+      }
+      value.secondary = *secondary;
+      value.activePane =
+          layout->active == *layout->secondary ? luciole::ActivePane::Secondary : luciole::ActivePane::Primary;
+    }
+    saved.tabs.push_back(std::move(value));
+  }
+  return saved;
+}
+
+bool WorkspaceApplication::restoreWindow(luciole::WindowId window, const luciole::SavedWindow& saved) {
+  std::size_t openTabs = 0;
+  for (const auto& [id, record] : m_model.windows()) {
+    (void)id;
+    openTabs += record.tabs.size();
+  }
+  const auto requiredPages =
+      std::ranges::count_if(saved.tabs, [](const auto& tab) { return tab.secondary.has_value(); });
+  if (saved.tabs.size() > 32 - openTabs || saved.tabs.size() + requiredPages > 64 - m_pages.size()) {
+    return false;
+  }
+  std::vector<luciole::TabId> tabs;
+  for (const auto& savedTab : saved.tabs) {
+    const auto tab = newTab(window, savedTab.primary);
+    if (!tab) {
+      break;
+    }
+    tabs.push_back(tab);
+    if (savedTab.secondary) {
+      if (const auto pane = newPane(window, savedTab.secondary, tab)) {
+        (void)m_model.focus(window, savedTab.activePane == luciole::ActivePane::Secondary ? pane : tab);
+      }
+    }
+  }
+  if (tabs.empty()) {
+    return false;
+  }
+  select(window, tabs[std::min(saved.activeTab, tabs.size() - 1)]);
+  return true;
+}
+
+bool WorkspaceApplication::restoreLastWindow(luciole::WindowId window) {
+  if (!m_defaults.restoreLastWindow || m_savedWindows.empty()) {
+    return false;
+  }
+  const auto saved = m_savedWindows.back();
+  if (!restoreWindow(window, saved)) {
+    return false;
+  }
+  saveWindows({});
+  return true;
+}
+
+void WorkspaceApplication::saveWindows(std::vector<luciole::SavedWindow> windows) {
+  m_savedWindows = windows;
+  if (!m_pins.saveWindows(windows)) {
+    m_pendingWindows = std::move(windows);
+  }
 }
 
 void WorkspaceApplication::tabMenu(Host& host, luciole::TabId tab, float x, float y) {

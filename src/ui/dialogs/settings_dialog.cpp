@@ -73,6 +73,7 @@ SettingsDialog::SettingsDialog(
        {"Select names", luciole::TypingMode::Typeahead}}
   );
   addBool(P::SwitchToNewTab, "Switch to new folder tabs");
+  addBool(P::RestoreLastWindow, "Restore tabs from last closed window");
   addBool(P::ShowHidden, "Show hidden files");
   addBool(P::ShowBackups, "Show backup files (*~)");
   addBool(P::AlwaysShowTabBar, "Always show tab bar");

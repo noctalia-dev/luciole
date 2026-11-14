@@ -55,7 +55,7 @@ Ctrl+T, the plus button and explicit New Tab menu actions always switch to the n
 | Next / Previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Toggle split / Switch pane | F3 / F6 |
 
-Current tabs and window layouts are not restored across application restarts. Saved preference defaults are separate from that unfinished session-restoration feature.
+Enable Restore tabs from last closed window in Settings → General to reopen the last closed window's tabs once in a new window or on startup without a requested location. The saved session is consumed when restored.
 
 ## Miller columns
 

@@ -6,6 +6,7 @@
 #include "app/page/browser_page.h"
 #include "app/palette_watcher.h"
 #include "browser/tab_workspace.h"
+#include "config/state_store.h"
 #include "thumbnails/thumbnail_service.h"
 
 #include <csignal>
@@ -100,6 +101,10 @@ private:
       const std::optional<luciole::Location>& destination
   );
   void releaseChrome(Host& host);
+  std::optional<luciole::SavedWindow> savedWindow(luciole::WindowId window) const;
+  bool restoreLastWindow(luciole::WindowId window);
+  bool restoreWindow(luciole::WindowId window, const luciole::SavedWindow& saved);
+  void saveWindows(std::vector<luciole::SavedWindow> windows);
   void tabMenu(Host& host, luciole::TabId tab, float x, float y);
   static Button::ButtonPalette closeTabPalette(ColorRole foreground);
   void rebuildStrip(Host& host, const luciole::TabWindow& window);
@@ -117,6 +122,8 @@ private:
   AnimationManager m_animations;
   luciole::ViewPreferenceWriter m_preferences;
   luciole::PinService m_pins;
+  std::vector<luciole::SavedWindow> m_savedWindows;
+  std::optional<std::vector<luciole::SavedWindow>> m_pendingWindows;
   luciole::DriveMonitor m_drives;
   luciole::FileIconCache m_icons;
   // One thumbnail pipeline for every page.

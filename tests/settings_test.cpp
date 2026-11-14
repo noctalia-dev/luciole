@@ -80,6 +80,17 @@ namespace {
     fixture.write("config.toml", "[browser]\nswitch_to_new_tab = true\n");
     TEST_CHECK(restored.reload() && restored.settings().browser.switchToNewTab);
   }
+  void testRestoreLastWindowPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && !service.settings().browser.restoreLastWindow);
+    fixture.write("config.toml", "[browser]\nrestore_last_window = true\n");
+    TEST_CHECK(service.reload() && service.settings().browser.restoreLastWindow);
+    const std::array off{luciole::OverrideEdit{luciole::BrowserPreference::RestoreLastWindow, false}};
+    TEST_CHECK(service.saveOverrides(off) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && !restored.settings().browser.restoreLastWindow);
+  }
   void testBackupPreference() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -1048,6 +1059,7 @@ int main() {
     testPresentationSettings();
     testBackupPreference();
     testNewTabPreference();
+    testRestoreLastWindowPreference();
     testMillerSettings();
     testMillerParents();
     testUnknownSettings();

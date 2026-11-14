@@ -70,6 +70,12 @@ namespace {
     luciole::PinService service(path);
     service.reload();
     pump.ready(service);
+    const std::vector<luciole::SavedWindow> updatedWindows{
+        {.tabs = {{.primary = fixture.location("restored-tab"), .secondary = std::nullopt}}}
+    };
+    TEST_CHECK(service.saveWindows(updatedWindows));
+    pump.ready(service);
+    TEST_CHECK(state.load() && state.state().windows == updatedWindows);
     const auto& places = service.userPlaces();
     TEST_CHECK(
         places.size() == 8

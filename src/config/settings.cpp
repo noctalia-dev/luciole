@@ -209,6 +209,7 @@ namespace {
       ),
       describe(P::TypingMode, "typing_mode", [](S& s) -> auto& { return s.typingMode; }, {kTypingModes}),
       describe(P::SwitchToNewTab, "switch_to_new_tab", [](S& s) -> auto& { return s.switchToNewTab; }),
+      describe(P::RestoreLastWindow, "restore_last_window", [](S& s) -> auto& { return s.restoreLastWindow; }),
       describe(P::ShowHidden, "show_hidden", [](S& s) -> auto& { return s.showHidden; }),
       describe(P::ShowBackups, "show_backups", [](S& s) -> auto& { return s.showBackups; }),
       describe(P::AlwaysShowTabBar, "always_show_tab_bar", [](S& s) -> auto& { return s.alwaysShowTabBar; }),

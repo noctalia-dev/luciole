@@ -31,6 +31,7 @@ preview_width = 320
 activation_mode = "double_click"
 typing_mode = "search"
 switch_to_new_tab = true
+restore_last_window = false
 sort_by = "name"
 directories_first = true
 ```
@@ -65,6 +66,7 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
 | `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |
+| `restore_last_window` | `false` | Reopen tabs from the last closed window once in a new window, or at startup without a requested location |
 | `terminal_command` | `""` | Terminal command and optional arguments, for example `"foot"`; empty uses `$TERMINAL`, then automatic discovery |
 | `sort_by` | `"name"` | `"name"`, `"type"`, `"size"`, `"modified"`, `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"` |
 | `sort_descending` | `false` | Reverse sort direction |
@@ -121,7 +123,7 @@ The Image/PDF size limit applies to image and PDF sources. Video stills and embe
 
 ## Other writable data
 
-Places state lives in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. It is separate from settings and is not a complete saved window/tab session.
+Places and optional last-window tab state live in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. Tab restoration is controlled by `browser.restore_last_window`.
 
 Thumbnails use the shared `$XDG_CACHE_HOME/thumbnails/` cache plus a Luciole ownership ledger under `$XDG_CACHE_HOME/luciole/`. The default cache root is `~/.cache`. Custom actions live in the [Scripts directory](scripts.md).
 
