@@ -602,6 +602,34 @@ namespace {
     }
   }
 
+  void testAlwaysShowStatusBar() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && !config.settings().browser.alwaysShowStatusBar);
+    fixture.write("config.toml", "[browser]\nalways_show_status_bar = true\nshow_hidden = true\n");
+    TEST_CHECK(
+        config.reload() && config.settings().browser.alwaysShowStatusBar && config.settings().browser.showHidden
+    );
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowStatusBar, false}})
+        == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(loaded && !loaded->browser.alwaysShowStatusBar && loaded->browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowStatusBar, std::nullopt}})
+            == State::Durable
+        && config.settings().browser.alwaysShowStatusBar
+        && !read(fixture.paths().overrides).contains("always_show_status_bar")
+    );
+    for (const auto* value : {"0", "'false'", "1.0"}) {
+      fixture.write("config.toml", std::string("[browser]\nalways_show_status_bar = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
   void testDetailsColumnVisibility() {
     using Preference = luciole::BrowserPreference;
     using State = luciole::AtomicWriteState;
@@ -1059,6 +1087,7 @@ int main() {
     testSidebarWidth();
     testSidebarVisibility();
     testAlwaysShowTabBar();
+    testAlwaysShowStatusBar();
     testPreviewVisibility();
     testDetailsColumnVisibility();
     testExtendedColumns();

@@ -40,6 +40,7 @@ namespace luciole {
     DetailsColumnWidths columnWidths = kDefaultDetailsColumnWidths;
     ThumbnailOptions thumbnails;
     std::string terminalCommand;
+    bool alwaysShowStatusBar = false;
     bool operator==(const BrowserSettings&) const = default;
   };
 
@@ -107,6 +108,7 @@ namespace luciole {
     ThumbnailMaxMegapixels,
     ThumbnailCacheMib,
     TerminalCommand,
+    AlwaysShowStatusBar,
     Count
   };
 
@@ -178,6 +180,7 @@ namespace luciole {
     static constexpr PreferenceKey<int> ThumbnailMaxFileMib{Id::ThumbnailMaxFileMib};
     static constexpr PreferenceKey<int> ThumbnailMaxMegapixels{Id::ThumbnailMaxMegapixels};
     static constexpr PreferenceKey<int> ThumbnailCacheMib{Id::ThumbnailCacheMib};
+    static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
   };
 
   // The BrowserSettings field a preference reads and writes.

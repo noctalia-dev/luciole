@@ -76,6 +76,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::ShowHidden, "Show hidden files");
   addBool(P::ShowBackups, "Show backup files (*~)");
   addBool(P::AlwaysShowTabBar, "Always show tab bar");
+  addBool(P::AlwaysShowStatusBar, "Always show status bar");
   group("Terminal");
   addTerminal();
   group("Sorting");

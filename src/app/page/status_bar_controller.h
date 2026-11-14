@@ -19,7 +19,8 @@ class SettingsController;
 
 // The floating status pill and the empty-folder notice: the last
 // action message, search and selection summaries, free space, and the notice shown in place of an empty file list.
-// The pill shows only when there is something to report; the idle folder count is not shown.
+// The pill shows only when there is something to report unless the Always show status bar setting keeps the idle
+// folder count visible.
 class StatusBarController {
 public:
   StatusBarController(
