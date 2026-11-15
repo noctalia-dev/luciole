@@ -30,7 +30,7 @@ Outcomes distinguish unchanged, not committed, committed but directory synchroni
 
 ## State and caches
 
-[StateStore](../../src/config/state_store.h) owns a separate versioned Places schema and persistence revision. It is not a complete durable tab/window session. Do not conflate settings, Places state, future operation journals and regenerable thumbnails. Credentials do not belong in configuration, state, URI history or cache identities.
+[StateStore](../../src/config/state_store.h) owns versioned Places and optional last-window tab state with separate persistence revisions. Session writes are serialized with Places writes while reporting their errors independently. Do not conflate settings, Places/session state, future operation journals and regenerable thumbnails. Credentials do not belong in configuration, state, URI history or cache identities.
 
 The shared thumbnail cache and Luciole' ownership ledger are regenerable. Pruning must preserve untracked entries and foreign replacements. A future operation journal has different ordering/recovery requirements; cache persistence is not an implementation of crash-safe file-job recovery.
 
