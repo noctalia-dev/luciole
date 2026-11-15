@@ -1192,7 +1192,8 @@ bool WorkspaceApplication::restoreWindow(luciole::WindowId window, const luciole
   }
   const auto requiredPages =
       std::ranges::count_if(saved.tabs, [](const auto& tab) { return tab.secondary.has_value(); });
-  if (saved.tabs.size() > luciole::TabWorkspace::tabLimit - openTabs || saved.tabs.size() + requiredPages > pageLimit - m_pages.size()) {
+  if (saved.tabs.size() > luciole::TabWorkspace::tabLimit - openTabs
+      || saved.tabs.size() + requiredPages > pageLimit - m_pages.size()) {
     return false;
   }
   std::vector<luciole::TabId> tabs;

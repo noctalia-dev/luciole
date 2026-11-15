@@ -94,6 +94,8 @@ void StatusBarController::sync(bool miller) {
   if (status.empty()) {
     if (!m_actionError.empty()) {
       status = m_actionError;
+    } else if (!m_pins.sessionError().empty()) {
+      status = std::format("Could not save session: {}", m_pins.sessionError());
     } else if (!m_pins.error().empty()) {
       status = std::format("Could not update pins: {}", m_pins.error());
     } else if (!m_settings.error().empty()) {

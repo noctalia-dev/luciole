@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <glib.h>
 #include <unordered_set>
 #include <utility>
@@ -75,15 +76,22 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     std::vector<UserPlace> places;
     std::string error;
   };
+  struct Work {
+    std::optional<std::vector<Bookmark>> bookmarks;
+    std::optional<std::vector<SavedWindow>> windows;
+  };
   explicit State(std::filesystem::path path) : store(std::move(path)) {}
   StateStore store; // Accessed only by serial worker tasks.
   std::vector<Bookmark> bookmarks;
   std::vector<SavedWindow> windows;
   std::vector<UserPlace> places;
   std::string error;
+  std::string sessionError;
+  std::deque<Work> queue;
   std::function<void()> changed;
   bool ready = false;
   bool busy = false;
+  bool pinBusy = false;
 
   void notify() const {
     const auto callback = changed;
@@ -93,10 +101,26 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
   }
   void
   run(std::optional<std::vector<Bookmark>> proposed, std::optional<std::vector<SavedWindow>> proposedWindows = {}) {
+    queue.push_back({std::move(proposed), std::move(proposedWindows)});
+    startNext();
+  }
+  void startNext() {
+    if (busy || queue.empty()) {
+      return;
+    }
     busy = true;
-    error.clear();
+    auto work = std::move(queue.front());
+    queue.pop_front();
+    const bool pinWrite = work.bookmarks.has_value();
+    const bool sessionWrite = work.windows.has_value();
+    if (pinWrite) {
+      error.clear();
+    }
+    if (sessionWrite) {
+      sessionError.clear();
+    }
     runJob<Result>(
-        [owner = shared_from_this(), proposed = std::move(proposed), proposedWindows = std::move(proposedWindows)] {
+        [owner = shared_from_this(), proposed = std::move(work.bookmarks), proposedWindows = std::move(work.windows)] {
           Result result;
           auto& store = owner->store;
           try {
@@ -156,18 +180,26 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
           }
           return result;
         },
-        [owner = shared_from_this()](JobResult<Result> loaded) {
+        [owner = shared_from_this(), pinWrite, sessionWrite](JobResult<Result> loaded) {
           if (!loaded) {
             Result failed;
             failed.error = loaded.error().message;
             loaded = std::move(failed);
           }
           owner->busy = false;
+          if (pinWrite) {
+            owner->pinBusy = false;
+          }
           owner->ready = loaded->ready;
           owner->bookmarks = std::move(loaded->bookmarks);
           owner->windows = std::move(loaded->windows);
           owner->places = std::move(loaded->places);
-          owner->error = std::move(loaded->error);
+          if (sessionWrite) {
+            owner->sessionError = std::move(loaded->error);
+          } else {
+            owner->error = std::move(loaded->error);
+          }
+          owner->startNext();
           owner->notify();
         }
     );
@@ -183,11 +215,12 @@ void luciole::PinService::reload() {
     m_state->run(std::nullopt);
   }
 }
-bool luciole::PinService::editable() const { return m_state->ready && !m_state->busy; }
-bool luciole::PinService::busy() const { return m_state->busy; }
+bool luciole::PinService::editable() const { return m_state->ready && !m_state->pinBusy; }
+bool luciole::PinService::busy() const { return m_state->busy || !m_state->queue.empty(); }
 const std::vector<luciole::Bookmark>& luciole::PinService::bookmarks() const { return m_state->bookmarks; }
 const std::vector<luciole::UserPlace>& luciole::PinService::userPlaces() const { return m_state->places; }
 const std::string& luciole::PinService::error() const { return m_state->error; }
+const std::string& luciole::PinService::sessionError() const { return m_state->sessionError; }
 bool luciole::PinService::contains(const Location& location) const {
   return std::ranges::any_of(m_state->bookmarks, [&](const auto& pin) { return pin.location == location; });
 }
@@ -196,17 +229,16 @@ bool luciole::PinService::save(std::vector<Bookmark> bookmarks) {
     return false;
   }
   if (bookmarks != m_state->bookmarks) {
+    m_state->pinBusy = true;
     m_state->run(std::move(bookmarks));
   }
   return true;
 }
 bool luciole::PinService::saveWindows(std::vector<SavedWindow> windows) {
-  if (!editable()) {
+  if (!m_state->ready) {
     return false;
   }
-  if (windows != m_state->windows) {
-    m_state->run(std::nullopt, std::move(windows));
-  }
+  m_state->run(std::nullopt, std::move(windows));
   return true;
 }
 bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t before) {

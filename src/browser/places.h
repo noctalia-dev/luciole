@@ -33,6 +33,7 @@ namespace luciole {
     const std::vector<Bookmark>& bookmarks() const;
     const std::vector<UserPlace>& userPlaces() const;
     const std::string& error() const;
+    const std::string& sessionError() const;
     void setChangedCallback(std::function<void()> callback);
 
   private:
