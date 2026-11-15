@@ -13,7 +13,15 @@
 
 namespace {
   constexpr Logger kLog("file-launch");
-}
+
+  luciole::ApplicationChoice applicationChoice(GAppInfo* app) {
+    const char* id = g_app_info_get_id(app);
+    luciole::ApplicationChoice choice;
+    choice.id = id ? id : "";
+    choice.app = std::shared_ptr<GAppInfo>(G_APP_INFO(g_object_ref(app)), g_object_unref);
+    return choice;
+  }
+} // namespace
 
 struct luciole::FileLauncher::State {
   GioPtr<GCancellable> cancellable{g_cancellable_new()};
@@ -376,9 +384,7 @@ void luciole::FileLauncher::open(const Location& location) {
               "request {}: handler={} at {:.2f} ms", request->serial, id ? id : "unknown",
               static_cast<double>(g_get_monotonic_time() - request->started) / 1000.0
           );
-          ApplicationChoice choice;
-          choice.id = id ? id : "";
-          choice.app = std::shared_ptr<GAppInfo>(G_APP_INFO(g_object_ref(application.get())), g_object_unref);
+          auto choice = applicationChoice(application.get());
           State::dispatch(
               state, {request->location}, std::move(choice), std::move(request->context), request->serial,
               request->started
@@ -430,11 +436,7 @@ void luciole::FileLauncher::open(const std::vector<Location>& locations) {
           const GErrorPtr error(raw);
           if (!g_cancellable_is_cancelled(state->cancellable.get())) {
             if (app) {
-              const char* id = g_app_info_get_id(app.get());
-              ApplicationChoice choice;
-              choice.id = id ? id : "";
-              choice.app = std::shared_ptr<GAppInfo>(G_APP_INFO(g_object_ref(app.get())), g_object_unref);
-              batch->applications[request->index] = std::move(choice);
+              batch->applications[request->index] = applicationChoice(app.get());
             } else if (const auto changed = state->changed) {
               changed(error ? error->message : "No application is associated with this file.");
             }
