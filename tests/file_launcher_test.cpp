@@ -197,6 +197,7 @@ int main(int argc, char** argv) {
     const bool other = mode == "other";
     const bool with = mode == "with" || other;
     const bool batch = mode == "batch" || mode == "batch-single";
+    const bool groupedOpen = mode == "grouped-open";
     const bool tokens = mode == "tokens", activationDestroy = mode == "activation-destroy";
     int callbacks = 0, errors = 0;
     launcher->setChangedCallback([&](const std::string& error) {
@@ -243,7 +244,7 @@ int main(int argc, char** argv) {
       testMixed(*launcher);
       return 0;
     }
-    if (batch || tokens || activationDestroy) {
+    if (batch || groupedOpen || tokens || activationDestroy) {
       const auto apps = query(*launcher, false);
       const auto app = std::ranges::find(apps.choices, "fixture.desktop", &luciole::ApplicationChoice::id);
       TEST_CHECK(app != apps.choices.end());
@@ -253,13 +254,19 @@ int main(int argc, char** argv) {
       }
       std::vector<luciole::FileLauncher::ActivationReply> replies;
       std::vector<std::string> appIds;
-      if (tokens || activationDestroy) {
+      if (tokens || activationDestroy || groupedOpen) {
         launcher->setActivationProvider([&](const std::string& id, auto reply) {
           appIds.push_back(id);
-          replies.push_back(std::move(reply));
+          if (groupedOpen) {
+            reply({});
+          } else {
+            replies.push_back(std::move(reply));
+          }
         });
       }
-      if (batch || activationDestroy) {
+      if (groupedOpen) {
+        launcher->open(locations);
+      } else if (batch || activationDestroy) {
         launcher->openWith(locations, *app);
       } else {
         TEST_CHECK(locations.size() == 2);
@@ -287,7 +294,10 @@ int main(int argc, char** argv) {
           TEST_CHECK(g_get_monotonic_time() < deadline);
           g_usleep(1000);
         }
-        TEST_CHECK(callbacks == (tokens ? 2 : 1) && errors == 0);
+        TEST_CHECK(callbacks == (tokens || groupedOpen ? 2 : 1) && errors == 0);
+        if (groupedOpen) {
+          TEST_CHECK((appIds == std::vector<std::string>{"fixture.desktop", "other.desktop"}));
+        }
       }
       return 0;
     }

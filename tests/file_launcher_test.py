@@ -38,13 +38,16 @@ def run_case(binary, mode, names):
             "[Desktop Entry]\nType=Application\nName=Private launch fixture\n"
             f"Exec={sys.executable} {handler} {'%u' if mode == 'batch-single' else '%U'}\n"
             + ("StartupNotify=true\n" if mode == "tokens" else "") +
-            "MimeType=text/plain;\n" + ("NoDisplay=false\n" if mode in ("with", "other", "default", "default-error", "catalog", "batch", "batch-single", "tokens", "activation-destroy", "mixed-catalog") else "NoDisplay=true\n")
+            "MimeType=text/plain;\n" + ("NoDisplay=false\n" if mode in ("with", "other", "default", "default-error", "catalog", "batch", "batch-single", "grouped-open", "tokens", "activation-destroy", "mixed-catalog") else "NoDisplay=true\n")
         )
-        (root / "config/mimeapps.list").write_text(
-            "[Default Applications]\ntext/plain=fixture.desktop;\n"
-        )
-        (root / "data/applications/mimeinfo.cache").write_text("[MIME Cache]\ntext/plain=fixture.desktop;\n")
-        if mode in ("other", "default", "default-error", "catalog", "batch", "batch-single", "tokens", "activation-destroy", "mixed-catalog"):
+        associations = "[Default Applications]\ntext/plain=fixture.desktop;\n"
+        mime_cache = "[MIME Cache]\ntext/plain=fixture.desktop;\n"
+        if mode == "grouped-open":
+            associations += "image/png=other.desktop;\n"
+            mime_cache += "image/png=other.desktop;\n"
+        (root / "config/mimeapps.list").write_text(associations)
+        (root / "data/applications/mimeinfo.cache").write_text(mime_cache)
+        if mode in ("other", "default", "default-error", "catalog", "batch", "batch-single", "grouped-open", "tokens", "activation-destroy", "mixed-catalog"):
             for filename, title, arguments, extra in (
                 ("other.desktop", "Noctalia launch fixture Café", "%U", "MimeType=image/png;"),
                 ("hidden.desktop", "Hidden Café", "%U", "NoDisplay=true"),
@@ -105,7 +108,11 @@ def run_case(binary, mode, names):
             path = os.fsencode(root) + b"/" + name
             if mode != "error":
                 with open(path, "wb") as stream:
-                    stream.write(b"private fixture\n")
+                    stream.write(
+                        b"\x89PNG\r\n\x1a\n"
+                        if mode == "grouped-open" and name.endswith(b".png")
+                        else b"private fixture\n"
+                    )
             paths.append(path)
         env = dict(os.environ)
         for key in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "GIO_LAUNCH_DESKTOP"):
@@ -141,7 +148,7 @@ def run_case(binary, mode, names):
         )
         if result.returncode != 0:
             raise AssertionError((result.returncode, result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace")))
-        if mode in ("open", "sequential", "with", "other", "default", "batch", "batch-single", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
+        if mode in ("open", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
             deadline = time.monotonic() + 5
             expected = sorted(path.hex() for path in paths)
             while True:
@@ -158,10 +165,15 @@ def run_case(binary, mode, names):
                 if time.monotonic() >= deadline:
                     raise AssertionError((actual, expected, result.stderr))
                 time.sleep(0.01)
-        if mode in ("batch", "batch-single"):
+        if mode in ("batch", "batch-single", "grouped-open"):
             invocations = [json.loads(line) for line in log.read_text().splitlines()]
-            if len(invocations) != (1 if mode == "batch" else len(paths)):
+            expected_count = 1 if mode == "batch" else 2 if mode == "grouped-open" else len(paths)
+            if len(invocations) != expected_count:
                 raise AssertionError("desktop multi/single-URI dispatch ignored")
+            if mode == "grouped-open":
+                expected_groups = [[paths[0].hex(), paths[2].hex()], [paths[1].hex()]]
+                if sorted(invocations) != sorted(expected_groups):
+                    raise AssertionError((invocations, expected_groups))
         if mode == "terminal-missing" and log.exists():
             raise AssertionError("invalid terminal preference silently fell back")
         if token_log.exists():
@@ -207,6 +219,7 @@ def main():
     run_case(binary, "catalog", [b"unused.txt"])
     run_case(binary, "batch", [b"grouped.txt", "space ' $() café\n.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "batch-single", [b"individual1.txt", b"individual2.txt"])
+    run_case(binary, "grouped-open", [b"episode-01.txt", b"artwork.png", b"episode-02.txt"])
     run_case(binary, "mixed-catalog", [b"unused.txt"])
     run_case(binary, "dbus", [b"via-bus.txt", "space café.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "tokens", [b"explicit-token.txt", b"default-token.txt"])
