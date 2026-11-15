@@ -183,6 +183,19 @@ namespace {
       return answer->choice;
     };
   }
+  // Removes the sources still waiting for a durability flush. Earlier batches may have completed items after their
+  // outcome was recorded, so moves refresh every attempted item.
+  void finishMoves(Job& job, Work& work, std::vector<luciole::TransferResult>& outcomes) {
+    if (job.request.action != luciole::TransferAction::Move) {
+      return;
+    }
+    flushMoves(work);
+    for (const auto& node : job.nodes) {
+      if (node && node->attempted) {
+        outcomes.at(node->source.index) = snapshot(*node);
+      }
+    }
+  }
 
   std::vector<luciole::TransferResult> retryJob(Job& job, Work& work, std::atomic<std::size_t>& completed) {
     auto outcomes = job.outcomes;
@@ -193,6 +206,7 @@ namespace {
       }
       completed.fetch_add(1);
     }
+    finishMoves(job, work, outcomes);
     return outcomes;
   }
 
@@ -326,6 +340,7 @@ namespace {
         }
       }
     }
+    finishMoves(job, work, outcomes);
     completed.store(outcomes.size());
     return outcomes;
   }

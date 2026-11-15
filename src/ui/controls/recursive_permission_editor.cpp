@@ -1,6 +1,7 @@
 #include "ui/controls/recursive_permission_editor.h"
 
 #include "ui/builders.h"
+#include "ui/controls/card_style.h"
 #include "ui/controls/input.h"
 #include "ui/controls/segmented.h"
 
@@ -26,13 +27,13 @@ namespace {
 RecursivePermissionEditor::RecursivePermissionEditor(const std::function<void()>& changed) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
-  setGap(Style::spaceSm);
+  setGap(Style::spaceMd);
   addChild(
       ui::label(
-          {.text = "Includes selected items and folder contents. Keep preserves each item's value. Symbolic links and "
-                   "mounted subtrees are skipped. Collection is limited to 16384 items and 128 folder levels; "
-                   "resource-limit failures apply no changes.",
+          {.text = "Keep preserves each item's value. Symbolic links and mounted subtrees are skipped. Collection is "
+                   "limited to 16384 items and 128 folder levels; resource-limit failures apply no changes.",
            .fontSize = Style::fontSizeCaption,
+           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
            .maxLines = 5}
       )
   );
@@ -40,12 +41,13 @@ RecursivePermissionEditor::RecursivePermissionEditor(const std::function<void()>
                              "Group write",    "Group execute", "Others read",   "Others write",
                              "Others execute", "Set user ID",   "Set group ID",  "Sticky bit"};
   for (auto* choices : {&m_files, &m_folders}) {
-    addChild(ui::label({.text = choices == &m_files ? "Files" : "Folders", .fontWeight = FontWeight::SemiBold}));
+    Flex* body = nullptr;
+    addChild(luciole::card(choices == &m_files ? "Files" : "Folders", &body));
     for (std::size_t i = 0; i < bits.size(); ++i) {
-      addChild(
+      body->addChild(
           ui::row(
-              {.align = FlexAlign::Center, .gap = Style::spaceSm},
-              ui::label({.text = names[i], .minWidth = 128.0F, .maxWidth = 128.0F}),
+              {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+              ui::label({.text = names[i], .minWidth = 112.0F, .maxWidth = 112.0F}),
               ui::segmented(
                   {.out = &(*choices)[i],
                    .options =
@@ -62,13 +64,19 @@ RecursivePermissionEditor::RecursivePermissionEditor(const std::function<void()>
       );
     }
   }
-  addChild(ui::label({.text = "Ownership", .fontWeight = FontWeight::SemiBold}));
+  Flex* ownership = nullptr;
+  addChild(luciole::card("Ownership", &ownership));
   const auto onChange = [changed](const std::string&) { changed(); };
   for (const bool owner : {true, false}) {
-    addChild(
+    ownership->addChild(
         ui::row(
-            {.align = FlexAlign::Center, .gap = Style::spaceSm},
-            ui::label({.text = owner ? "Owner" : "Group", .minWidth = 104.0F, .maxWidth = 104.0F}),
+            {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+            ui::label(
+                {.text = owner ? "Owner" : "Group",
+                 .fontWeight = FontWeight::SemiBold,
+                 .minWidth = 88.0F,
+                 .maxWidth = 88.0F}
+            ),
             ui::input(
                 {.out = owner ? &m_owner : &m_group,
                  .placeholder = owner ? "Keep owner (name or ID to change)" : "Keep group (name or ID to change)",

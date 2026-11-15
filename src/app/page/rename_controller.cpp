@@ -38,21 +38,15 @@ void RenameController::openFileRename(luciole::DirectoryEntry target) {
     m_page.actionError("This item cannot be renamed right now.");
     return;
   }
-  auto& surface = m_page.surface();
-  const float width = std::min(420.0F, static_cast<float>(surface.width()) - 32.0F);
   const bool validText = g_utf8_validate(target.name.data(), static_cast<gssize>(target.name.size()), nullptr);
   auto editor = std::make_unique<NameDialog>(
-      width, target.type == luciole::FileType::Directory && !target.symlink ? "Rename folder" : "Rename file", "pencil",
+      m_page.dialogWidth(DialogWidth::Small),
+      target.type == luciole::FileType::Directory && !target.symlink ? "Rename folder" : "Rename file", "pencil",
       validText ? target.name : "", validText ? "" : "Enter a new UTF-8 name for this item.", luciole::filenameProblem,
       [this](std::string name) { submitFileRename(std::move(name)); }, [this] { m_page.dismissMenu(); }
   );
   auto* control = editor.get();
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = editor->measure(surface.renderTarget().renderer(), constraints).height;
-  const LayoutRect anchor{(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1};
-  m_page.showPopup(std::move(editor), nullptr, anchor, width, height, false, PopupMode::Dialog);
+  m_page.showDialog(std::move(editor), DialogWidth::Small);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::FileRename, [this] {
       if (m_fileRenameTarget) {
@@ -72,7 +66,7 @@ void RenameController::openFileRename(luciole::DirectoryEntry target) {
     m_fileRenamePreparing = true;
     control->setSaving(true);
     m_job = m_page.jobs().create<luciole::RenameService>(JobScope::Page);
-    if (!m_job->service<luciole::RenameService>().prepare(m_fileRenameTarget->location)) {
+    if (!m_job->service<luciole::RenameService>().prepare(m_fileRenameTarget->location())) {
       control->showError("Another rename is still finishing.");
     }
   }
@@ -172,10 +166,9 @@ void RenameController::openPlaceRename(const luciole::Bookmark& bookmark) {
     return;
   }
   const auto current = *found; // NOLINT(performance-unnecessary-copy-initialization): own the editing snapshot.
-  auto& surface = m_page.surface();
-  const float width = std::min(440.0F, static_cast<float>(surface.width()) - 32.0F);
   auto editor = std::make_unique<NameDialog>(
-      width, "Rename place", "pencil", current.label, "Changes the sidebar label only.",
+      m_page.dialogWidth(DialogWidth::Small), "Rename place", "pencil", current.label,
+      "Changes the sidebar label only.",
       [](const std::string& label) -> std::optional<std::string> {
         if (const auto error = luciole::bookmarkLabelProblem(label)) {
           return error;
@@ -188,17 +181,7 @@ void RenameController::openPlaceRename(const luciole::Bookmark& bookmark) {
       [this](std::string label) { submitPlaceRename(std::move(label)); }, [this] { m_page.dismissMenu(); }
   );
   auto* control = editor.get();
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = std::min(
-      editor->measure(surface.renderTarget().renderer(), constraints).height,
-      static_cast<float>(surface.height()) - 64.0F
-  );
-  m_page.showPopup(
-      std::move(editor), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(editor), DialogWidth::Small);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::PlaceRename, [this] {
       if (m_placeRenameTarget) {

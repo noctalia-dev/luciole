@@ -1,4 +1,5 @@
 #include "browser/directory_model.h"
+#include "directory_fixture.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
 #include "model/details_columns.h"
@@ -28,14 +29,11 @@ namespace {
   DirectoryEntry entry(EntryId id, const std::string& name, luciole::FileType type = luciole::FileType::Regular) {
     return {
         .id = id,
-        .location = Location::fromPath("/tmp/luciole-model-fixture/" + name),
+        .place = Location::fromPath("/tmp/luciole-model-fixture/" + name),
         .name = name,
-        .displayName = name,
         .type = type,
         .size = std::nullopt,
-        .modifiedSeconds = std::nullopt,
-        .etag = std::nullopt,
-        .parentDisplayName = {}
+        .modifiedSeconds = std::nullopt
     };
   }
 
@@ -58,12 +56,12 @@ namespace {
     auto hidden = entry(3, ".hidden"), hiddenBackup = entry(4, ".hidden~");
     hidden.hidden = hiddenBackup.hidden = true;
     auto renamed = entry(2, "notes.txt~");
-    renamed.displayName = "A normal label";
+    renamed.setDisplayName("A normal label");
     auto ordinary = entry(10, "ordinary.txt");
-    ordinary.displayName = "A label ending~";
+    ordinary.setDisplayName("A label ending~");
     auto raw = entry(9, "raw-\xff~");
     raw.name = std::string("raw-\xff~");
-    raw.displayName = "raw bytes";
+    raw.setDisplayName("raw bytes");
     DirectoryModel model;
     model.applySnapshot(snapshot(
         {entry(1, "notes.txt"), renamed, hidden, hiddenBackup, entry(5, "directory~", luciole::FileType::Directory),
@@ -80,13 +78,54 @@ namespace {
     for (const auto id : {2, 3, 4, 7, 8, 9}) {
       TEST_CHECK(!std::ranges::contains(model.rows(), id));
     }
-    TEST_CHECK(model.entry(2)->name == "notes.txt~" && model.entry(2)->displayName == "A normal label");
+    TEST_CHECK(model.entry(2)->name == "notes.txt~" && model.entry(2)->displayName() == "A normal label");
     model.setFilter({.showHidden = true, .text = {}, .showBackups = false});
     TEST_CHECK(
         model.rows().size() == 5 && std::ranges::contains(model.rows(), 3) && !std::ranges::contains(model.rows(), 4)
     );
     model.setFilter({.showHidden = true, .text = {}, .showBackups = true});
     TEST_CHECK(model.rows().size() == 10 && model.selection().selected.empty());
+  }
+
+  void testPublishedEntryOwnership() {
+    auto source = snapshot({entry(1, "folder", luciole::FileType::Directory), entry(2, "raw-\xff")});
+    DirectoryModel model;
+    model.applySnapshot(source);
+    const auto retained = model.snapshot();
+    const auto* folder = &source.entries[0];
+    TEST_CHECK(model.entry(1) == folder && &retained.entries[0] == folder);
+    luciole::DirectoryEntries children{entry(3, "café-文.txt"), entry(4, "other.txt")};
+    const auto* child = &children[0];
+    auto joined = luciole::DirectoryEntries::concatenate({source.entries, children});
+    TEST_CHECK(&joined[0] == folder && &joined[2] == child);
+    auto projection = luciole::DirectoryEntries::project({joined}, {{0, 0}, {0, 2}});
+    TEST_CHECK(&projection[0] == folder && &projection[1] == child);
+    source.entries = {};
+    children = {};
+    joined = {};
+    auto data = snapshot({}, 2);
+    data.entries = projection;
+    model.applySnapshot(data, {{3, 1}});
+    rows(model, {1, 3});
+    TEST_CHECK(model.entry(3) == child && model.treeParent(3) == 1);
+    TEST_CHECK(model.select(3));
+    const auto expanded = model.snapshot();
+    model.applySnapshot(snapshot({entry(1, "replacement")}, 3));
+    TEST_CHECK(model.selection().selected.empty() && !model.entry(3));
+    TEST_CHECK(expanded.entries[1].displayName() == "café-文.txt" && &expanded.entries[1] == child);
+    TEST_CHECK(retained.entries[1].name == "raw-\xff" && retained.entries[0].displayName() == "folder");
+    auto appended = luciole::DirectoryEntries::concatenate({projection, luciole::DirectoryEntries{entry(5, "last")}});
+    projection = {};
+    TEST_CHECK(appended.size() == 3 && &appended[1] == child && appended.back().id == 5);
+    for (const auto index : {luciole::DirectoryEntries::Index{1, 0}, luciole::DirectoryEntries::Index{0, 3}}) {
+      bool rejected = false;
+      try {
+        (void)luciole::DirectoryEntries::project({appended}, {index});
+      } catch (const std::out_of_range&) {
+        rejected = true;
+      }
+      TEST_CHECK(rejected);
+    }
   }
 
   void testSortAndMetadata() {
@@ -103,10 +142,12 @@ namespace {
     rows(model, {20, 1, 2, 10, 30});
 
     data.entries = {entry(1, "a"), entry(2, "b"), entry(3, "c")};
-    data.entries[0].size = 0;
-    data.entries[0].modifiedSeconds = 0;
-    data.entries[1].size = 5;
-    data.entries[1].modifiedSeconds = 20;
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].size = 0;
+      entries[0].modifiedSeconds = 0;
+      entries[1].size = 5;
+      entries[1].modifiedSeconds = 20;
+    });
     model.applySnapshot(data);
     for (const auto field : {SortField::Size, SortField::Modified}) {
       model.setSort({.field = field});
@@ -117,13 +158,15 @@ namespace {
 
     // Collation ties must not let enumeration order determine action targets.
     data.entries = {entry(5, "same-b"), entry(4, "same-a")};
-    for (auto& item : data.entries) {
-      item.displayName = "Same";
-    }
+    test::editEntries(data, [&](auto& entries) {
+      for (auto& item : entries) {
+        item.setDisplayName("Same");
+      }
+    });
     model.setSort({});
     model.applySnapshot(data);
     const auto order = model.rows();
-    std::ranges::reverse(data.entries);
+    test::editEntries(data, [&](auto& entries) { std::ranges::reverse(entries); });
     model.applySnapshot(data);
     TEST_CHECK(model.rows() == order);
     TEST_CHECK(model.entry(4)->name == "same-a");
@@ -144,8 +187,8 @@ namespace {
       rows(model, {2, 1, 3});
       TEST_CHECK(model.selection().selected.contains(1));
     }
-    a.location = Location::fromPath("/tmp/a/file");
-    b.location = Location::fromPath("/tmp/b/file");
+    a.place = Location::fromPath("/tmp/a/file");
+    b.place = Location::fromPath("/tmp/b/file");
     model.applySnapshot(snapshot({b, a}));
     model.setSort({SortField::Location, false, false});
     rows(model, {1, 2});
@@ -168,10 +211,10 @@ namespace {
     b.details.owner = c.details.owner = "alpha";
     a.details.group = c.details.group = "group2";
     b.details.group = "group10";
-    a.location = Location::fromPath("/tmp/z/item2");
-    b.location = Location::fromPath("/tmp/a/item10");
-    c.location = Location::fromPath("/tmp/a/item1");
-    unknown.location = Location::fromPath("/");
+    a.place = Location::fromPath("/tmp/z/item2");
+    b.place = Location::fromPath("/tmp/a/item10");
+    c.place = Location::fromPath("/tmp/a/item1");
+    unknown.place = Location::fromPath("/");
     a.contentType = "text/plain";
     b.contentType = c.contentType = "image/png";
     DirectoryModel model;
@@ -195,14 +238,14 @@ namespace {
     check(SortField::Type, {1, 4, 2, 3}, {2, 4, 1, 3});
     check(SortField::Location, {4, 2, 1, 3}, {1, 2, 4, 3});
 
-    a.details.owner.reset();
+    a.details.owner = {};
     b.details.owner = "zeta";
     unknown.details.owner = ""; // Empty is known, not missing metadata.
     b.details.group = "group1";
-    c.details.group.reset();
+    c.details.group = {};
     unknown.details.group = "";
-    b.displayName = "item0";
-    b.location = Location::fromPath("/tmp/0/item10");
+    b.setDisplayName("item0");
+    b.place = Location::fromPath("/tmp/0/item10");
     a.contentType = unknown.contentType = "image/png";
     b.contentType = "application/octet-stream";
     c.contentType = "text/plain";
@@ -213,7 +256,7 @@ namespace {
     check(SortField::Group, {3, 2, 1, 4}, {1, 2, 3, 4});
     check(SortField::Type, {4, 1, 3, 2}, {3, 1, 4, 2});
     check(SortField::Name, {2, 4, 1, 3}, {3, 1, 4, 2});
-    TEST_CHECK(model.entry(2)->name == "item10" && model.entry(2)->displayName == "item0");
+    TEST_CHECK(model.entry(2)->name == "item10" && model.entry(2)->displayName() == "item0");
     // Removing IDs and adding a new row must not retain an old presentation by source index.
     auto replacement = entry(9, "item3");
     replacement.details.owner = "alpha";
@@ -232,7 +275,7 @@ namespace {
       auto item = entry(id, "café-" + std::to_string(id));
       item.details.owner = "owner" + std::to_string(id);
       item.details.group = "group" + std::to_string(count + 1 - id);
-      item.location = Location::fromPath("/tmp/folder" + std::to_string(id) + "/item");
+      item.place = Location::fromPath("/tmp/folder" + std::to_string(id) + "/item");
       entries.push_back(std::move(item));
     }
     std::ranges::reverse(entries);
@@ -253,7 +296,7 @@ namespace {
       }
       auto refreshed = model.snapshot();
       ++refreshed.generation;
-      std::ranges::reverse(refreshed.entries);
+      test::editEntries(refreshed, [&](auto& entries) { std::ranges::reverse(entries); });
       model.applySnapshot(std::move(refreshed));
     }
   }
@@ -348,12 +391,14 @@ namespace {
          entry(4, "note2.txt"), entry(5, "z.png"), entry(6, "a.bin"), entry(7, "b"),
          entry(8, "special", luciole::FileType::Special), entry(9, "c", luciole::FileType::Unknown)}
     );
-    data.entries[1].symlink = true;
-    data.entries[1].contentType = "image/png";
-    data.entries[2].contentType = "text/plain";
-    data.entries[3].contentType = "text/plain";
-    data.entries[4].contentType = "image/png";
-    data.entries[5].contentType = "application/octet-stream";
+    test::editEntries(data, [&](auto& entries) {
+      entries[1].symlink = true;
+      entries[1].contentType = "image/png";
+      entries[2].contentType = "text/plain";
+      entries[3].contentType = "text/plain";
+      entries[4].contentType = "image/png";
+      entries[5].contentType = "application/octet-stream";
+    });
     model.applySnapshot(data);
     model.select(3);
     model.select(5, SelectionMode::Toggle);
@@ -372,16 +417,18 @@ namespace {
     rows(model, {8, 5, 3, 4, 2, 10, 9, 7, 6});
     selected(model, {5, 3});
     TEST_CHECK(model.selection().focused == 5 && model.selection().anchor == 5 && model.scrollAnchor() == 3);
-    std::ranges::reverse(data.entries);
+    test::editEntries(data, [&](auto& entries) { std::ranges::reverse(entries); });
     model.applySnapshot(data);
     rows(model, {8, 5, 3, 4, 2, 10, 9, 7, 6});
     model.setSort({.field = SortField::Type, .descending = true});
     rows(model, {10, 8, 5, 3, 4, 2, 9, 7, 6});
-    for (auto& item : data.entries) {
-      if (item.id == 3) {
-        item.contentType = "image/png";
+    test::editEntries(data, [&](auto& entries) {
+      for (auto& item : entries) {
+        if (item.id == 3) {
+          item.contentType = "image/png";
+        }
       }
-    }
+    });
     model.applySnapshot(data);
     TEST_CHECK(model.typeLabel(3) == model.typeLabel(5));
     selected(model, {5, 3});
@@ -393,16 +440,19 @@ namespace {
         {entry(1, "empty"), entry(2, "known"), entry(3, "unknown"), entry(4, "folder", luciole::FileType::Directory),
          entry(5, "link"), entry(6, "special", luciole::FileType::Special), entry(7, ".hidden")}
     );
-    data.entries[0].size = 0;
-    data.entries[1].size = 5;
-    data.entries[3].size = 4096;
-    data.entries[4].symlink = true;
-    data.entries[4].size = 900;
-    data.entries[5].size = 777;
-    data.entries[6].hidden = true;
-    data.entries[6].size = 12;
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].size = 0;
+      entries[1].size = 5;
+      entries[3].size = 4096;
+      entries[4].symlink = true;
+      entries[4].size = 900;
+      entries[5].size = 777;
+      entries[6].hidden = true;
+      entries[6].size = 12;
+    });
     model.applySnapshot(data);
     model.selectAll();
+    TEST_CHECK(!model.selection().focused);
     const luciole::SelectionSummary expected{.files = 3, .folders = 1, .others = 2, .bytes = 5, .unknownSizes = 1};
     TEST_CHECK(model.selectionSummary() == expected);
     model.setFilter({.showHidden = true, .text = {}});
@@ -410,7 +460,7 @@ namespace {
     TEST_CHECK(model.selectionSummary().bytes == 17 && model.selectionSummary().files == 4);
     model.setFilter({});
     TEST_CHECK(model.selectionSummary() == expected);
-    data.entries[1].size = 10;
+    test::editEntries(data, [&](auto& entries) { entries[1].size = 10; });
     model.applySnapshot(data);
     TEST_CHECK(model.selectionSummary().bytes == 10);
     TEST_CHECK(model.replaceSelection(std::array<EntryId, 2>{1, 2}));
@@ -419,8 +469,10 @@ namespace {
     model.applySnapshot(data);
     TEST_CHECK(model.selectionSummary() == luciole::SelectionSummary{});
     auto huge = snapshot({entry(10, "large"), entry(11, "one")}, 2);
-    huge.entries[0].size = std::numeric_limits<std::uint64_t>::max();
-    huge.entries[1].size = 1;
+    test::editEntries(huge, [&](auto& entries) {
+      entries[0].size = std::numeric_limits<std::uint64_t>::max();
+      entries[1].size = 1;
+    });
     model.applySnapshot(huge);
     model.selectAll();
     TEST_CHECK(
@@ -434,7 +486,7 @@ namespace {
   void testFiltering() {
     DirectoryModel model;
     auto data = snapshot({entry(1, "Straße"), entry(2, "café"), entry(3, ".hidden"), entry(4, "*.txt")});
-    data.entries[2].hidden = true;
+    test::editEntries(data, [&](auto& entries) { entries[2].hidden = true; });
     model.applySnapshot(data);
     TEST_CHECK(model.rows().size() == 3);
     model.setFilter({.text = "STRASSE"});
@@ -535,12 +587,12 @@ namespace {
     TEST_CHECK(!model.applySnapshot(data));
     TEST_CHECK(model.snapshot().status == DirectoryStatus::Loading);
     data.generation = 11;
-    data.entries[0] = entry(1, "z-renamed");
+    test::editEntries(data, [&](auto& entries) { entries[0] = entry(1, "z-renamed"); });
     model.applySnapshot(data);
     selected(model, {1});
     TEST_CHECK(model.entry(1)->name == "z-renamed" && model.scrollAnchor() == 1);
     data.generation = 12;
-    data.entries[0] = entry(3, "z-renamed");
+    test::editEntries(data, [&](auto& entries) { entries[0] = entry(3, "z-renamed"); });
     model.applySnapshot(data);
     selected(model, {});
     TEST_CHECK(!model.selection().focused && !model.selection().anchor && !model.scrollAnchor());
@@ -649,6 +701,7 @@ int main() {
     g_setenv("LC_ALL", "C", true);
     g_setenv("LANGUAGE", "C", true);
     std::setlocale(LC_ALL, "C");
+    testPublishedEntryOwnership();
     testSortAndMetadata();
     testExtendedMetadataSort();
     testTextSortRefresh();

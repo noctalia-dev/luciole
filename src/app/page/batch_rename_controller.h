@@ -32,7 +32,6 @@ public:
 
   // Menu popup hooks.
   void pointer(float x, float y, bool hover);
-  void layoutDialog(float width);
   void syncTooltip(Renderer& renderer);
   // File list hook in BrowserPage::syncBrowser(): select the renamed items once the folder reloads.
   void revealRenamed(VirtualGridView& list);

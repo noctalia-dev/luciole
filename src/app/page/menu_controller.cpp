@@ -20,6 +20,7 @@
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
 #include "fs/archive_type.h"
+#include "fs/entry_access.h"
 #include "platform/desktop_integration.h"
 #include "platform/terminal_launcher.h"
 #include "render/scene/input_dispatcher.h"
@@ -134,18 +135,20 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   const auto& model = m_page.browser().model();
   const bool one = request.targets.size() == 1;
   const auto* single = one ? model.entry(request.targets.front().id) : nullptr;
+  const auto singleLocation = single ? std::optional(single->location()) : std::nullopt;
   const bool singleFolder = single != nullptr && single->type == luciole::FileType::Directory;
   const bool trash = request.targets.front().location.isTrash();
 
   add(Action::Open);
   add(Action::OpenWith);
   if (single
-      && single->location.isNative()
+      && singleLocation->isNative()
       && !trash
       && (single->type == luciole::FileType::Regular || single->symlink)
-      && (single->access.execute == true || single->location.basename().value_or("").ends_with(".desktop"))) {
+      && (luciole::entryAccess(*single).execute == true
+          || singleLocation->basename().value_or("").ends_with(".desktop"))) {
     add(Action::RunProgram);
-    if (!single->location.basename().value_or("").ends_with(".desktop")) {
+    if (!singleLocation->basename().value_or("").ends_with(".desktop")) {
       add(Action::RunInTerminal);
     }
   }
@@ -170,8 +173,8 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
         {.id = PasteInto,
          .label = "Paste into Folder",
          .enabled = !m_page.operationsBusy()
-             && luciole::transferLocationSupported(single->location)
-             && single->access.write != false}
+             && luciole::transferLocationSupported(*singleLocation)
+             && luciole::entryAccess(*single).write != false}
     );
   }
   if (m_page.hasOtherPane()) {
@@ -181,23 +184,23 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   entries.push_back({.id = CopyLocation, .label = "Copy Location", .hasSubmenu = true});
   addSeparator(entries);
   if (single != nullptr) {
-    if (luciole::isSupportedArchive(single->location, single->contentType)) {
+    if (luciole::isSupportedArchive(*singleLocation, single->contentType.value_or(""))) {
       add(Action::BrowseArchive);
       add(Action::ExtractHere);
       add(Action::ExtractTo);
     }
     // Only useful when the item lives outside the shown folder (search results); otherwise it reopens this one.
-    if (single->location.parent() != model.snapshot().location) {
+    if (singleLocation->parent() != model.snapshot().location) {
       add(Action::ContainingFolder);
     }
-    if (single->trash.original) {
+    if (single->trashInfo().original) {
       add(Action::OriginalLocation);
     }
   }
   addSeparator(entries);
   const bool folders = std::ranges::all_of(request.targets, [&model](const auto& target) {
     const auto* entry = model.entry(target.id);
-    return entry->type == luciole::FileType::Directory && !entry->location.isTrash();
+    return entry->type == luciole::FileType::Directory && !entry->location().isTrash();
   });
   if (folders) {
     if (std::ranges::any_of(request.targets, [this](const auto& target) {
@@ -371,17 +374,15 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
               bookmark.location, action == 3 ? (index > 0 ? index - 1 : 0) : std::min(index + 1, pins.size() - 1)
           );
         } else if (action == 5) {
-          m_properties.show(
-              {{.location = bookmark.location,
-                .name = bookmark.label,
-                .displayName = bookmark.label,
-                .type = luciole::FileType::Directory,
-                .size = std::nullopt,
-                .modifiedSeconds = std::nullopt,
-                .etag = std::nullopt,
-                .parentDisplayName = {}}},
-              true
-          );
+          luciole::DirectoryEntry entry{
+              .place = bookmark.location,
+              .name = bookmark.label,
+              .type = luciole::FileType::Directory,
+              .size = std::nullopt,
+              .modifiedSeconds = std::nullopt
+          };
+          entry.setDisplayName(bookmark.label);
+          m_properties.show({std::move(entry)}, true);
         }
       },
       {x, y, 1, 1}

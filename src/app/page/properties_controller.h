@@ -44,7 +44,7 @@ public:
   void updateApply();
   // Keyboard hook in BrowserPage::keyboard() while a popup is shown: keyboard navigation in the results list.
   bool resultsKey(const KeyboardEvent& event);
-  // Menu popup hook: keeps the editable dialog at its fixed height.
+  // Dialog layout hook with the dialog's width: re-wraps the Details table.
   void layoutDialog(float width);
 
 private:
@@ -56,6 +56,8 @@ private:
       bool withResults
   );
   void showAdvanced(bool advanced, bool focus = false);
+  // Swaps the permission body for the per-item outcomes of the last bulk or recursive job.
+  void showDetails(bool shown);
   bool canApply() const;
   void sync();
   void syncMetadata();
@@ -71,9 +73,9 @@ private:
   Flex *m_permissionBasic = nullptr, *m_permissionAdvanced = nullptr;
   Button *m_permissionAdvancedOpen = nullptr, *m_permissionAdvancedBack = nullptr;
   bool m_aclActive = false;
-  std::size_t m_permissionResultTab = 2;
   PermissionResultsView* m_permissionResults = nullptr;
-  Button *m_permissionReport = nullptr, *m_permissionCancel = nullptr;
+  Button *m_permissionReport = nullptr, *m_permissionCancel = nullptr, *m_permissionDetails = nullptr;
+  bool m_detailsShown = false;
   Label* m_permissionStatus = nullptr;
   Segmented* m_permissionTabs = nullptr;
   ScrollView* m_permissionScroll = nullptr;
@@ -83,6 +85,8 @@ private:
   bool m_multiple = false;
   FileMetadataView* m_metadataView = nullptr;
   FolderTotalsView* m_folderTotals = nullptr;
+  // Location, size and similar entry facts that lead the Details table.
+  luciole::MetadataFields m_basicFields;
   float m_metadataWidth = 0;
   bool m_metadataDirty = false;
   bool m_dirty = false;

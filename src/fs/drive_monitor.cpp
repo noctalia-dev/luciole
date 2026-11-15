@@ -30,7 +30,8 @@ namespace {
 } // namespace
 
 struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
-  GioPtr<GVolumeMonitor> monitor{g_volume_monitor_get()};
+  // Null until start(): GIO starts the volume-monitor services synchronously.
+  GioPtr<GVolumeMonitor> monitor;
   std::vector<Drive> drives;
   std::map<std::string, Handle> handles;
   std::function<void()> changed;
@@ -95,6 +96,26 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
 };
 
 luciole::DriveMonitor::DriveMonitor() : m_state(std::make_shared<State>()) {
+  // The volume monitor used to initialize GIO's process-global mount cache here, before any worker filesystem
+  // query; GIO races when concurrent first queries build it. Keep that serialized first query on this thread.
+  const GioPtr<GFile> root(g_file_new_for_path("/"));
+  const GioPtr<GFileInfo> info(
+      g_file_query_filesystem_info(root.get(), G_FILE_ATTRIBUTE_FILESYSTEM_READONLY, nullptr, nullptr)
+  );
+}
+
+luciole::DriveMonitor::~DriveMonitor() {
+  if (m_state->monitor) {
+    g_signal_handlers_disconnect_by_data(m_state->monitor.get(), m_state.get());
+  }
+  m_state->changed = {};
+}
+
+void luciole::DriveMonitor::start() {
+  if (m_state->monitor) {
+    return;
+  }
+  m_state->monitor.reset(g_volume_monitor_get());
   for (const auto* signal :
        {"volume-added", "volume-removed", "volume-changed", "mount-added", "mount-removed", "mount-changed"}) {
     g_signal_connect_swapped(
@@ -103,11 +124,6 @@ luciole::DriveMonitor::DriveMonitor() : m_state(std::make_shared<State>()) {
     );
   }
   m_state->refresh();
-}
-
-luciole::DriveMonitor::~DriveMonitor() {
-  g_signal_handlers_disconnect_by_data(m_state->monitor.get(), m_state.get());
-  m_state->changed = {};
 }
 
 const std::vector<luciole::Drive>& luciole::DriveMonitor::drives() const { return m_state->drives; }

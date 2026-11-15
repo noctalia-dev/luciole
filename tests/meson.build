@@ -62,11 +62,13 @@ test_table = [
 
 foreach entry : test_table
   name = entry['name']
+  local_gio = 'GIO_USE_VFS=local' in entry.get('env', [])
   exe = executable(name + '-test',
     'library_test_setup.cpp',
     name.replace('-', '_') + '_test.cpp',
     entry.get('sources', []),
-    dependencies: entry['deps'] + [noctalia_ui_dep],
+    dependencies: entry['deps'] + [noctalia_ui_dep] + (local_gio ? [gio] : []),
+    cpp_args: local_gio ? ['-DLUCIOLE_TEST_LOCAL_GIO'] : [],
     override_options: ['b_ndebug=false'],
   )
   if 'wrapper' in entry

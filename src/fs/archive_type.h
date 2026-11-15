@@ -10,6 +10,7 @@ namespace luciole {
   bool archiveCompressionAvailable(ArchiveCompression compression);
   // A byte-split ZIP part named <name>.zip.NNN; only part 001 opens the set.
   std::optional<unsigned> splitZipPart(const Location& location);
-  bool isSupportedArchive(const Location& location, const std::optional<std::string>& mime);
+  // mime is the provider's content type; empty when unknown.
+  bool isSupportedArchive(const Location& location, std::string_view mime);
   std::string archiveFolderName(const Location& location);
 } // namespace luciole

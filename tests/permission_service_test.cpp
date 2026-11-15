@@ -78,19 +78,18 @@ namespace {
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
     ));
     TEST_CHECK(info);
-    return {
+    luciole::DirectoryEntry result{
         .id = 1,
-        .location = location,
+        .place = location,
         .name = path.filename().native(),
-        .displayName = luciole::filenameDisplayText(path.filename().native()),
         .type = luciole::fileType(g_file_info_get_file_type(info.get())),
         .symlink = g_file_info_get_is_symlink(info.get()) != FALSE,
         .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {},
-        .identity = luciole::readFileIdentity(info.get())
+        .modifiedSeconds = {}
     };
+    result.setDisplayName(luciole::filenameDisplayText(path.filename().native()));
+    result.setIdentity(luciole::readFileIdentity(info.get()));
+    return result;
   }
   class Pump {
   public:
@@ -317,7 +316,7 @@ namespace {
     pump.prepare(service, file);
     TEST_CHECK(!notified);
     auto unknown = entry(file);
-    unknown.identity.reset();
+    unknown.setIdentity(std::nullopt);
     TEST_CHECK(service.prepare(unknown));
     pump.settle(service);
     TEST_CHECK(
@@ -331,7 +330,7 @@ namespace {
     pump.apply(service, {.mode = 0640, .owner = {}, .group = {}});
     TEST_CHECK(!service.snapshot().failed() && mode(file) == 0640);
     auto remote = entry(file);
-    remote.location = luciole::Location::fromUri("sftp://example.invalid/file");
+    remote.place = luciole::Location::fromUri("sftp://example.invalid/file");
     TEST_CHECK(service.prepare(remote));
     pump.settle(service);
     TEST_CHECK(service.snapshot().phase == P::Error);
@@ -412,9 +411,9 @@ namespace {
         && service.snapshot().results->back().outcome == O::Changed
     );
     auto remote = entry(a);
-    remote.location = luciole::Location::fromUri("sftp://example.invalid/file");
+    remote.place = luciole::Location::fromUri("sftp://example.invalid/file");
     auto unknown = entry(b);
-    unknown.identity.reset();
+    unknown.setIdentity(std::nullopt);
     prepareBulk(pump, service, {entry(a), unknown, remote});
     TEST_CHECK(service.snapshot().unknownItems == 1 && service.snapshot().results->back().outcome == O::Failed);
     pump.apply(service, {.mode = 0002, .owner = {}, .group = {}, .mask = 0002});
@@ -1299,8 +1298,24 @@ namespace {
       TEST_CHECK(service.applyAclPatch(userPatch("21000", 4)));
       service.cancel();
       pump.settle(service);
-      TEST_CHECK(service.snapshot().phase == P::Cancelled && !service.snapshot().applied);
-      TEST_CHECK(!aclText(f.root / "0").contains("user:21000:"));
+      // Cancellation can race the worker. Reports must describe the changes that actually completed.
+      const auto& cancelled = service.snapshot();
+      TEST_CHECK(cancelled.phase == P::Cancelled && cancelled.finished && !cancelled.failed() && cancelled.results);
+      std::size_t changed = 0;
+      for (const auto& row : *cancelled.results) {
+        TEST_CHECK(row.info && row.info->acl && row.info->acl->supported);
+        const bool actual = aclText(*row.location.nativePath()).contains("user:21000:r--\n");
+        TEST_CHECK(row.outcome == (actual ? O::Changed : O::Cancelled));
+        TEST_CHECK(row.info->acl->access.size() == (actual ? 5 : 3));
+        TEST_CHECK(row.info->mode == mode(*row.location.nativePath()));
+        changed += actual ? 1U : 0U;
+      }
+      TEST_CHECK(cancelled.applied == (changed > 0));
+      TEST_CHECK(!aliases || changed == 0 || changed == entries.size());
+      std::println("Bulk ACL immediate cancellation: aliases={}, changed={} of {}", aliases, changed, entries.size());
+      for (const auto& item : entries) {
+        setAcl(*item.location().nativePath(), "u::rw-,g::---,o::---");
+      }
       prepareBulk(pump, service, entries);
       TEST_CHECK(service.applyAclPatch(userPatch("21000", 4)));
       pump.until([&] { return service.completed() > 0 || !service.busy(); });

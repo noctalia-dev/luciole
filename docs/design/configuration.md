@@ -4,9 +4,9 @@ The [user configuration guide](../user/configuration.md) owns the preference ref
 
 ## Ownership and reload
 
-Built-in defaults are overlaid by the optional base `config.toml`, then writable GUI `settings.toml`. GUI edits never modify the base. Canonical names have one spelling; unknown keys, wrong types and unsupported values fail validation. Schema version is integer 1 when supplied. The validation CLI checks one required file, with no adjacent overrides and no compositor initialization.
+Built-in defaults are overlaid by the optional base `config.toml`, then writable GUI `settings.toml`. GUI edits never modify the base. Canonical names have one spelling. Runtime loading warns about unknown root/browser keys and decodes recognized preferences normally. The validation CLI remains strict about unknown keys and checks one required file, with no adjacent overrides and no compositor initialization. Wrong types, unsupported known values, incompatible schema versions and malformed TOML still fail. Schema version is integer 1 when supplied. This policy applies to configuration files, not the separate Places state schema.
 
-The worker serializes typed edits and reload requests, coalescing pending edits per preference. Saves reread and validate actual persisted inputs before merging only the requested keys. Removing an override restores inheritance. An invalid reload keeps the last valid snapshot; failed saves reload actual persisted state. Publish only after pending edits/reloads drain.
+The worker serializes typed edits and reload requests, coalescing pending edits per preference. Saves reread and validate actual persisted inputs before merging only the requested keys. The override document retains unknown values, arrays and tables while known preference fields are replaced or removed; comments and original formatting are not retained on a changed save. No-op saves preserve the exact bytes. Removing an override restores inheritance. Reset removes only recognized preferences, preserving unknown values for another application version. An invalid reload keeps the last valid snapshot; failed saves reload actual persisted state. Publish only after pending edits/reloads drain.
 
 File monitors follow canonical files, existing path components and resolved declarative targets. Coalesced events trigger worker reads; the read after watch installation closes the read/install gap. Callbacks publish during Update. Only relevant global changes should replace a live preference; an unrelated reload must not reset the current visit's view/zoom/history state. Ordinary close drains pending preference saves.
 
@@ -30,7 +30,7 @@ Outcomes distinguish unchanged, not committed, committed but directory synchroni
 
 ## State and caches
 
-[StateStore](../../src/config/state_store.h) owns a separate versioned Places schema and persistence revision. It is not a complete durable tab/window session. Do not conflate settings, Places state, future operation journals and regenerable thumbnails. Credentials do not belong in configuration, state, URI history or cache identities.
+[StateStore](../../src/config/state_store.h) owns versioned Places and optional last-window tab state with separate persistence revisions. Session writes are serialized with Places writes while reporting their errors independently. Do not conflate settings, Places/session state, future operation journals and regenerable thumbnails. Credentials do not belong in configuration, state, URI history or cache identities.
 
 The shared thumbnail cache and Luciole' ownership ledger are regenerable. Pruning must preserve untracked entries and foreign replacements. A future operation journal has different ordering/recovery requirements; cache persistence is not an implementation of crash-safe file-job recovery.
 

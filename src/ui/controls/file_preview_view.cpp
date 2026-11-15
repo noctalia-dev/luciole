@@ -105,13 +105,13 @@ void FilePreviewView::sync(
     label->setMaxWidth(budget);
   }
   const auto& entry = snapshot.entry;
-  const std::string location = entry ? entry->location.uri() : "";
+  const std::string location = entry ? entry->location().uri() : "";
   if (location != m_location) {
     m_location = location;
     m_scroll->requestScrollToOffset(0);
   }
   // The file name is the card's title; the empty-state hint reads as plain secondary text.
-  m_name->setText(entry ? entry->displayName : "Select an item to preview");
+  m_name->setText(entry ? entry->displayName() : "Select an item to preview");
   m_name->setFontWeight(entry ? FontWeight::SemiBold : FontWeight::Normal);
   m_name->setColor(colorSpecFromRole(entry ? ColorRole::OnSurface : ColorRole::OnSurfaceVariant));
   luciole::MetadataFields metadata;
@@ -134,7 +134,7 @@ void FilePreviewView::sync(
         fileFacts.push_back({"Modified", formatted.get()});
       }
     }
-    m_image->bind(entry->icon, colorSpecFromRole(ColorRole::OnSurface));
+    m_image->bind(luciole::iconSource(entry->icon), colorSpecFromRole(ColorRole::OnSurface));
   }
   const auto* pixels = snapshot.image && snapshot.image->pixels ? &*snapshot.image->pixels : nullptr;
   const auto image =

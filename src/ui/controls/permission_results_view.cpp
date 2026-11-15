@@ -1,8 +1,11 @@
 #include "ui/controls/permission_results_view.h"
 
+#include "browser/location_presentation.h"
 #include "core/input/key_symbols.h"
 #include "ui/builders.h"
 #include "ui/controls/file_error_text.h"
+#include "ui/controls/glyph.h"
+#include "ui/controls/permission_editor.h"
 #include "ui/controls/virtual_grid_view.h"
 
 #include <algorithm>
@@ -10,56 +13,123 @@
 #include <format>
 
 namespace {
-  constexpr std::array outcomes{"Ready", "Changed", "Unchanged", "Failed", "Partially changed", "Cancelled", "Skipped"};
+  using Outcome = luciole::PermissionOutcome;
+  struct OutcomeStyle {
+    const char* label;
+    const char* glyph;
+    ColorRole accent, badge, onBadge;
+  };
+  // Indexed by PermissionOutcome: changes read as primary, failures as error, everything else stays quiet.
+  constexpr std::array<OutcomeStyle, 7> styles{{
+      {"Ready", "circle-dot", ColorRole::OnSurfaceVariant, ColorRole::SurfaceContainerHigh,
+       ColorRole::OnSurfaceVariant},
+      {"Changed", "circle-check", ColorRole::Primary, ColorRole::PrimaryContainer, ColorRole::OnPrimaryContainer},
+      {"Unchanged", "circle-minus", ColorRole::OnSurfaceVariant, ColorRole::SurfaceContainerHigh,
+       ColorRole::OnSurfaceVariant},
+      {"Failed", "alert-circle", ColorRole::Error, ColorRole::ErrorContainer, ColorRole::OnErrorContainer},
+      {"Partially changed", "alert-triangle", ColorRole::Error, ColorRole::ErrorContainer, ColorRole::OnErrorContainer},
+      {"Cancelled", "circle-x", ColorRole::OnSurfaceVariant, ColorRole::SurfaceContainerHigh,
+       ColorRole::OnSurfaceVariant},
+      {"Skipped", "player-skip-forward", ColorRole::OnSurfaceVariant, ColorRole::SurfaceContainerHigh,
+       ColorRole::OnSurfaceVariant},
+  }};
+  constexpr float kGlyphSize = 18.0F;
+  constexpr float kBadgeReserve = 140.0F;
+  // One item: outcome glyph, name with an outcome badge, the path with mode and owner, then any note or error.
   class ResultRow final : public Flex {
   public:
     ResultRow() {
-      setDirection(FlexDirection::Vertical);
-      setAlign(FlexAlign::Stretch);
-      setPadding(4, 6);
-      setGap(2);
-      addChild(ui::label({.out = &m_name, .fontWeight = FontWeight::SemiBold, .maxLines = 1}));
-      addChild(ui::label({.out = &m_metadata, .fontSize = Style::fontSizeCaption, .maxLines = 1}));
-      addChild(ui::label({.out = &m_detail, .fontSize = Style::fontSizeCaption, .maxLines = 3}));
-      for (auto* label : {m_name, m_metadata, m_detail}) {
-        label->setUseMarkup(false);
-      }
+      setDirection(FlexDirection::Horizontal);
+      // Rows share one cell height; centering keeps two-line items from leaving a gap at the bottom.
+      setAlign(FlexAlign::Center);
+      setPadding(Style::spaceSm, Style::spaceMd);
+      setGap(Style::spaceSm);
+      setRadius(Style::radiusMd);
+      const auto literal = [](Label& label) { label.setUseMarkup(false); };
+      addChild(ui::glyph({.out = &m_glyph, .glyph = "circle-dot", .glyphSize = kGlyphSize}));
+      addChild(
+          ui::column(
+              {.align = FlexAlign::Stretch, .gap = 2.0F, .flexGrow = 1.0F},
+              ui::row(
+                  {.align = FlexAlign::Center, .gap = Style::spaceSm},
+                  ui::label(
+                      {.out = &m_name,
+                       .fontWeight = FontWeight::SemiBold,
+                       .maxLines = 1,
+                       .flexGrow = 1.0F,
+                       .configure = literal}
+                  ),
+                  ui::row(
+                      {.out = &m_badge,
+                       .align = FlexAlign::Center,
+                       .paddingV = 1.0F,
+                       .paddingH = Style::spaceSm,
+                       .radius = Style::radiusMd},
+                      ui::label(
+                          {.out = &m_outcome, .fontSize = Style::fontSizeMini, .fontWeight = FontWeight::SemiBold}
+                      )
+                  )
+              ),
+              ui::label(
+                  {.out = &m_facts,
+                   .fontSize = Style::fontSizeCaption,
+                   .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+                   .maxLines = 1,
+                   .configure =
+                       [](Label& label) {
+                         label.setUseMarkup(false);
+                         // Keep the file end of long paths.
+                         label.setEllipsize(TextEllipsize::Start);
+                       }}
+              ),
+              ui::label({.out = &m_detail, .fontSize = Style::fontSizeCaption, .maxLines = 1, .configure = literal})
+          )
+      );
       setHitTestVisible(false);
     }
     void bind(const luciole::PermissionResult& row, bool hovered) {
-      m_name->setText(row.name + " · " + outcomes[static_cast<std::size_t>(row.outcome)]);
-      m_metadata->setText(
-          row.info ? std::format("Mode {:04o} · Owner {} · Group {}", row.info->mode, row.info->owner, row.info->group)
-                   : "Permissions and ownership unknown"
-      );
-      if (row.info && row.info->acl && row.info->acl->supported) {
-        m_metadata->setText(
-            m_metadata->text()
-            + std::format(" · ACL: {} access, {} default", row.info->acl->access.size(), row.info->acl->defaults.size())
+      const auto& style = styles[static_cast<std::size_t>(row.outcome)];
+      m_glyph->setGlyph(style.glyph);
+      m_glyph->setColor(colorSpecFromRole(style.accent));
+      m_name->setText(row.name);
+      m_outcome->setText(style.label);
+      m_outcome->setColor(colorSpecFromRole(style.onBadge));
+      m_badge->setFill(colorSpecFromRole(style.badge));
+      std::string facts = luciole::locationEditText(row.location);
+      if (row.info) {
+        const auto& info = *row.info;
+        facts += std::format(
+            "  ·  {}  ·  {}:{}", permissionModeText(info.mode),
+            info.ownerName.empty() ? std::to_string(info.owner) : info.ownerName,
+            info.groupName.empty() ? std::to_string(info.group) : info.groupName
         );
       }
+      m_facts->setText(facts);
+      // "No changes." on an Unchanged item only repeats the badge.
       std::string detail = row.error ? luciole::fileErrorText(*row.error) : "";
-      if (!detail.empty() && !row.message.empty()) {
-        detail += ' ';
+      if (!row.message.empty() && row.outcome != Outcome::Unchanged) {
+        detail += (detail.empty() ? "" : " ") + row.message;
       }
-      detail += row.message;
-      m_detail->setText(row.location.uri() + (detail.empty() ? "" : "\n" + detail));
-      const bool error =
-          row.outcome == luciole::PermissionOutcome::Failed || row.outcome == luciole::PermissionOutcome::Partial;
-      m_name->setColor(colorSpecFromRole(error ? ColorRole::Error : ColorRole::OnSurface));
-      m_metadata->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
+      m_detail->setText(detail);
+      m_detail->setVisible(!detail.empty());
+      m_detail->setParticipatesInLayout(!detail.empty());
+      const bool error = row.outcome == Outcome::Failed || row.outcome == Outcome::Partial;
       m_detail->setColor(colorSpecFromRole(error ? ColorRole::Error : ColorRole::OnSurfaceVariant));
-      setFill(hovered ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec());
+      setFill(colorSpecFromRole(hovered ? ColorRole::SurfaceContainerHigh : ColorRole::SurfaceContainerLow));
     }
 
   private:
     void doLayout(Renderer& renderer) override {
-      for (auto* label : {m_name, m_metadata, m_detail}) {
-        label->setMaxWidth(std::max(1.0F, width() - 12.0F));
+      const float text = std::max(1.0F, width() - Style::spaceMd * 2 - kGlyphSize - Style::spaceSm);
+      for (auto* label : {m_facts, m_detail}) {
+        label->setMaxWidth(text);
       }
+      m_name->setMaxWidth(std::max(1.0F, text - kBadgeReserve));
       Flex::doLayout(renderer);
     }
-    Label *m_name = nullptr, *m_metadata = nullptr, *m_detail = nullptr;
+    Glyph* m_glyph = nullptr;
+    Flex* m_badge = nullptr;
+    Label *m_name = nullptr, *m_outcome = nullptr, *m_facts = nullptr, *m_detail = nullptr;
   };
 } // namespace
 class PermissionResultsView::Adapter final : public VirtualGridAdapter {
@@ -84,9 +154,10 @@ PermissionResultsView::PermissionResultsView() : m_adapter(std::make_unique<Adap
       ui::virtualGridView(
           {.out = &m_grid,
            .columns = 1,
-           .cellHeight = 100.0F,
+           // Fits the name, facts and one note line at the row's padding.
+           .cellHeight = 76.0F,
            .squareCells = false,
-           .rowGap = 0.0F,
+           .rowGap = Style::spaceXs,
            .overscanRows = 1,
            .adapter = m_adapter.get(),
            .flexGrow = 1.0F}

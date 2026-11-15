@@ -5,6 +5,8 @@
 #include "util/string_utils.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -27,14 +29,28 @@ struct IconThemePlan {
   std::vector<IconSearchDir> searchDirs;
   std::vector<std::string> pixmapDirs;
   std::string activeTheme;
-  std::string planSignature;
-  std::string contentSignature;
+  std::uint64_t planSignature = 0;
+  std::uint64_t contentSignature = 0;
   std::shared_ptr<const IconThemeWatchPaths> watchPaths;
 };
 
 namespace {
 
   constexpr Logger kLog("icon-resolver");
+
+  // findIcon calls in this process; lets the watch setup skip a refresh when nothing was loaded yet.
+  std::atomic<std::uint64_t> g_lookups{0};
+
+  // FNV-1a over the signature text; equal inputs give equal values, any byte change a different one.
+  struct Fnv64 {
+    std::uint64_t value = 0xcbf29ce484222325ULL;
+    void add(std::string_view text) {
+      for (const unsigned char byte : text) {
+        value ^= byte;
+        value *= 0x100000001b3ULL;
+      }
+    }
+  };
 
   void pushUniqueDir(std::vector<IconSearchDir>& dirs, std::unordered_set<std::string>& seen, IconSearchDir dir) {
     if (dir.path.empty()) {
@@ -169,19 +185,20 @@ namespace {
     return roots;
   }
 
-  void appendPathIdentity(std::string& signature, std::string_view kind, const std::string& path) {
-    signature += kind;
-    signature += path;
-    signature += ':';
+  void appendPathIdentity(Fnv64& signature, std::string_view kind, const std::string& path) {
+    signature.add(kind);
+    signature.add(path);
+    signature.add(":");
     std::error_code ec;
     const auto canonical = fs::weakly_canonical(path, ec);
-    signature += ec ? "missing" : canonical.string();
-    signature += '\n';
+    signature.add(ec ? "missing" : canonical.native());
+    signature.add("\n");
   }
 
-  std::string planSignatureFor(const IconThemePlan& plan) {
-    std::string signature = plan.activeTheme;
-    signature += '\n';
+  std::uint64_t planSignatureFor(const IconThemePlan& plan) {
+    Fnv64 signature;
+    signature.add(plan.activeTheme);
+    signature.add("\n");
     for (const auto& root : plan.baseDirs) {
       appendPathIdentity(signature, "base:", root);
     }
@@ -189,40 +206,35 @@ namespace {
       appendPathIdentity(signature, "theme:", root);
     }
     for (const auto& dir : plan.searchDirs) {
-      signature += "search:";
-      signature += dir.path;
-      signature += ':';
-      signature += std::to_string(dir.size);
-      signature += dir.scalable ? ":scalable:" : ":fixed:";
-      signature += dir.theme;
-      signature += ':';
-      signature += std::to_string(dir.minSize);
-      signature += ':';
-      signature += std::to_string(dir.maxSize);
-      signature += '\n';
+      signature.add("search:");
+      signature.add(dir.path);
+      signature.add(
+          std::format(
+              ":{}{}{}:{}:{}\n", dir.size, dir.scalable ? ":scalable:" : ":fixed:", dir.theme, dir.minSize, dir.maxSize
+          )
+      );
     }
     for (const auto& dir : plan.pixmapDirs) {
       appendPathIdentity(signature, "pixmap:", dir);
     }
-    return signature;
+    return signature.value;
   }
 
-  std::string contentSignatureFor(const IconThemePlan& plan) {
-    std::string signature;
+  // Stats every directory once: records which search directories exist, so lookups skip the missing ones,
+  // and folds their modification times into the content signature.
+  void scanDirectories(IconThemePlan& plan) {
+    Fnv64 signature;
     const auto appendDirectory = [&](const std::string& path) {
-      signature += path;
-      signature += ':';
+      signature.add(path);
+      signature.add(":");
       std::error_code ec;
       const auto modified = fs::last_write_time(path, ec);
-      if (ec) {
-        signature += "missing";
-      } else {
-        signature += std::to_string(static_cast<std::int64_t>(modified.time_since_epoch().count()));
-      }
-      signature += '\n';
+      signature.add(ec ? "missing" : std::to_string(static_cast<std::int64_t>(modified.time_since_epoch().count())));
+      signature.add("\n");
+      return !ec;
     };
-    for (const auto& dir : plan.searchDirs) {
-      appendDirectory(dir.path);
+    for (auto& dir : plan.searchDirs) {
+      dir.exists = appendDirectory(dir.path);
     }
     for (const auto& dir : plan.baseDirs) {
       appendDirectory(dir);
@@ -230,7 +242,7 @@ namespace {
     for (const auto& dir : plan.pixmapDirs) {
       appendDirectory(dir);
     }
-    return signature;
+    plan.contentSignature = signature.value;
   }
 
   struct GSettingsDeleter {
@@ -539,7 +551,7 @@ namespace {
     buildThemeSearchPaths("hicolor", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs, seenDirs);
     buildThemeSearchPaths("Adwaita", plan.baseDirs, visited, plan.themeRoots, plan.searchDirs, seenDirs);
     plan.planSignature = planSignatureFor(plan);
-    plan.contentSignature = contentSignatureFor(plan);
+    scanDirectories(plan);
     auto paths = std::make_shared<IconThemeWatchPaths>(IconThemeWatchPaths{
         .baseDirs = plan.baseDirs,
         .themeRoots = plan.themeRoots,
@@ -652,6 +664,8 @@ std::string IconResolver::activeThemeName() {
   return state.plan->activeTheme;
 }
 
+std::uint64_t IconResolver::lookupCount() { return g_lookups.load(std::memory_order_relaxed); }
+
 void IconResolver::rebuild() {
   auto& state = iconThemeState();
   std::scoped_lock lock(state.mutex);
@@ -697,6 +711,7 @@ const std::string& IconResolver::resolve(const std::string& iconName, int target
 }
 
 std::string IconResolver::findIcon(const std::string& name, int targetSize) const {
+  g_lookups.fetch_add(1, std::memory_order_relaxed);
   // Absolute path , use directly
   if (!name.empty() && name[0] == '/') {
     return pathExists(name) ? name : std::string{};
@@ -706,6 +721,9 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
     // Legacy behavior: search dirs are pre-sorted scalable-first then largest;
     // return the first match. Callers with no size budget keep this exactly.
     for (const auto& dir : m_plan->searchDirs) {
+      if (!dir.exists) {
+        continue;
+      }
       for (const char* ext : {".svg", ".png"}) {
         std::string path = dir.path + name + ext;
         if (pathExists(path)) {
@@ -728,6 +746,9 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
           return best;
         }
         theme = dir.theme;
+      }
+      if (!dir.exists) {
+        continue;
       }
       std::string svg = dir.path + name + ".svg";
       if (pathExists(svg)) {

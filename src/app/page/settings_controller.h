@@ -43,7 +43,7 @@ public:
   const std::string& error() const { return m_error; }
   // Frame slot in BrowserPage::prepareFrame().
   void onFrame();
-  // Refresh the open dialog for the current parent size during popup layout.
+  // Dialog layout hook with the dialog's width: compact navigation on narrow windows.
   void layoutDialog(float width);
   // Keyboard hook for the dialog popup: the open dropdown and the Settings shortcut. False lets the dialog handle it.
   bool key(const KeyboardEvent& event);

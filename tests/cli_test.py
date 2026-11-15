@@ -125,6 +125,23 @@ printf '%s\n' "${COMPREPLY[@]}"
         self.assertEqual(self.invoke("--help", config_home="invalid-relative-directory").returncode, 0)
         self.assertEqual(self.invoke("--version", config_home="invalid-relative-directory").returncode, 0)
 
+    def test_unknown_startup_settings_warn_without_blocking_wayland(self):
+        directory = self.config_dir / "luciole"
+        directory.mkdir()
+        for name in ("config.toml", "settings.toml"):
+            with self.subTest(name=name):
+                path = directory / name
+                original = "[browser]\nshow_tab_bar_with_single_tab = true\nview_mode = 'list'\n"
+                path.write_text(original)
+                result = self.invoke()
+                self.assertIn("browser.show_tab_bar_with_single_tab: unknown setting; ignored", result.stderr)
+                self.assertIn("failed to connect to Wayland", result.stderr)
+                self.assertEqual(path.read_text(), original)
+                strict = self.invoke("config", "validate", str(path))
+                self.assertNotEqual(strict.returncode, 0)
+                self.assertIn("browser.show_tab_bar_with_single_tab: unknown setting", strict.stderr)
+                path.unlink()
+
     def test_startup_reports_connection_failure(self):
         result = self.invoke()
         self.assertNotEqual(result.returncode, 0)

@@ -20,7 +20,8 @@ namespace luciole {
     std::optional<FileIdentity> identity;
     std::optional<std::string> linkTarget;
     EntryMetadata metadata{};
-    std::optional<std::string> etag = std::nullopt, contentRevision = std::nullopt;
+    std::optional<std::string> etag = std::nullopt;
+    std::optional<ChangeRevision> contentRevision = std::nullopt;
   };
   // Blocking typed query for workers. Never follows links; GIO may inspect content to determine MIME type.
   FileDetails readFileDetails(const Location& location, const CancelToken& token);

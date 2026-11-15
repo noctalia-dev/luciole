@@ -14,6 +14,8 @@ public:
   IconThemePollSource& operator=(const IconThemePollSource&) = delete;
 
   void setChangeCallback(std::function<void()> callback);
+  // Includes initial setup and changes queued while a worker is running.
+  bool refreshing() const;
   int pollTimeoutMs() const override;
   void dispatch(const std::vector<pollfd>& fds, std::size_t startIdx) override;
 
@@ -22,5 +24,5 @@ protected:
 
 private:
   struct Impl;
-  std::unique_ptr<Impl> m_impl;
+  std::shared_ptr<Impl> m_impl;
 };

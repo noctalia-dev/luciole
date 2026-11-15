@@ -9,9 +9,9 @@
 namespace {
   bool sameSource(const luciole::DirectoryEntry& a, const luciole::DirectoryEntry& b) {
     return a.id == b.id
-        && a.location == b.location
-        && a.identity == b.identity
-        && a.etag == b.etag
+        && a.location() == b.location()
+        && a.identity() == b.identity()
+        && a.etag() == b.etag()
         && a.size == b.size
         && a.modifiedSeconds == b.modifiedSeconds
         && a.contentRevision == b.contentRevision
@@ -85,7 +85,7 @@ void luciole::PreviewMetadataService::show(const DirectoryEntry& entry, Thumbnai
   state.reset();
   state.entry = entry;
   state.options = options;
-  state.pending = entry.location.isNative();
+  state.pending = entry.location().isNative();
   state.start();
 }
 void luciole::PreviewMetadataService::setChangedCallback(std::function<void()> callback) {

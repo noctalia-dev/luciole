@@ -24,22 +24,16 @@ namespace {
   }
   luciole::DirectoryEntry entry(const fs::path& path) {
     luciole::DirectoryEntry result{
-        .location = luciole::Location::fromPath(path.native()),
-        .name = {},
-        .displayName = {},
-        .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {}
+        .place = luciole::Location::fromPath(path.native()), .name = {}, .size = {}, .modifiedSeconds = {}
     };
-    const auto details = luciole::readFileDetails(result.location, {});
+    const auto details = luciole::readFileDetails(result.location(), {});
     result.name = path.filename().native();
-    result.displayName = result.name;
+    result.setDisplayName(result.name);
     result.type = details.type;
     result.symlink = details.type == luciole::FileType::Symlink;
     result.size = details.size;
-    result.identity = details.identity;
-    result.etag = details.etag;
+    result.setIdentity(details.identity);
+    result.setEtag(details.etag);
     result.contentRevision = details.contentRevision;
     result.details = details.metadata;
     return result;
@@ -65,15 +59,9 @@ namespace {
     TEST_CHECK(details.accessedSeconds == 0 && !details.createdSeconds && details.mode == 0640);
     TEST_CHECK(details.owner == "<literal> café" && !details.group);
     luciole::DirectoryEntry source{
-        .location = luciole::Location::fromPath("/tmp/metadata-only"),
-        .name = {},
-        .displayName = {},
-        .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {}
+        .place = luciole::Location::fromPath("/tmp/metadata-only"), .name = {}, .size = {}, .modifiedSeconds = {}
     };
-    source.details = std::move(details);
+    source.details = details;
     TEST_CHECK(luciole::entryColumnText(source, luciole::DetailsColumn::Created) == "Unknown");
     TEST_CHECK(luciole::entryColumnText(source, luciole::DetailsColumn::Permissions) == "0640");
     TEST_CHECK(luciole::entrySortNumber(source, luciole::SortField::Accessed) == 0);
@@ -104,7 +92,7 @@ namespace {
     TEST_CHECK(!value(service, "Owner").empty() && value(service, "Owner") != "Mixed");
     TEST_CHECK(!value(service, "Accessed").empty());
     auto stale = targets;
-    stale[0].identity = luciole::FileIdentity{"wrong", "identity"};
+    stale[0].setIdentity(luciole::FileIdentity{"wrong", "identity"});
     fs::remove(root / "b-café <x>.txt");
     service.show(stale);
     wait([&] { return !service.busy(); });

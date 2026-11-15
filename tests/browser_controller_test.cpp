@@ -101,7 +101,7 @@ namespace {
     pump.ready(browser);
     TEST_CHECK(browser.model().rows().size() == 2 && !visible(browser, "inside~"));
     TEST_CHECK(std::ranges::any_of(browser.model().rows(), [&](auto id) {
-      return browser.model().entry(id)->location == Location::fromPath((fixture.path / "cache~" / "inside").native());
+      return browser.model().entry(id)->location() == Location::fromPath((fixture.path / "cache~" / "inside").native());
     }));
     BrowserController duplicate({}, false);
     duplicate.duplicateFrom(browser);
@@ -305,8 +305,8 @@ namespace {
     TEST_CHECK(browser.model().selection().selected.empty());
     std::unordered_set<std::string> targets;
     for (const auto& entry : browser.model().snapshot().entries) {
-      targets.insert(entry.location.uri());
-      TEST_CHECK(!entry.parentDisplayName.empty() && entry.id != oldId);
+      targets.insert(entry.location().uri());
+      TEST_CHECK(!entry.parentDisplayName().empty() && entry.id != oldId);
       if (entry.type == luciole::FileType::Regular && !entry.symlink) {
         TEST_CHECK(entry.contentType == "text/plain");
       }
@@ -535,7 +535,7 @@ namespace {
         && id(browser, "Template1.csv") == first
     );
     for (const auto row : browser.model().rows()) {
-      TEST_CHECK(browser.model().entry(row)->location.parent() == root);
+      TEST_CHECK(browser.model().entry(row)->location().parent() == root);
     }
     browser.model().select(first);
     browser.editSearchQuery("STRASSE");
@@ -595,7 +595,7 @@ namespace {
     browser.editSearchQuery("temp");
     TEST_CHECK(browser.model().rows().size() == 4);
     for (const auto row : browser.model().rows()) {
-      TEST_CHECK(browser.model().entry(row)->location.parent() == root);
+      TEST_CHECK(browser.model().entry(row)->location().parent() == root);
     }
     browser.editSearchQuery({});
     TEST_CHECK(browser.toggleFolder(id(browser, "child")));

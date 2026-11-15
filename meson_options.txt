@@ -1,3 +1,4 @@
 option('tests', type: 'feature', value: 'auto', description: 'Build tests (auto: unsanitized debug builds)')
 option('native_optimizations', type: 'boolean', value: false, description: 'Optimize for the build machine CPU')
 option('build_revision', type: 'string', value: 'unknown', description: 'Explicit build revision metadata')
+option('benchmarks', type: 'boolean', value: false, description: 'Build the headless benchmark drivers in tools/bench')

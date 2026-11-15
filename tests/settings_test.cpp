@@ -12,6 +12,7 @@
 #include <print>
 #include <stdexcept>
 #include <sys/stat.h>
+#include <toml++/toml.hpp>
 #include <unistd.h>
 
 namespace {
@@ -78,6 +79,17 @@ namespace {
     TEST_CHECK(!restored.reload() && !restored.settings().browser.switchToNewTab);
     fixture.write("config.toml", "[browser]\nswitch_to_new_tab = true\n");
     TEST_CHECK(restored.reload() && restored.settings().browser.switchToNewTab);
+  }
+  void testRestoreLastWindowPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && !service.settings().browser.restoreLastWindow);
+    fixture.write("config.toml", "[browser]\nrestore_last_window = true\n");
+    TEST_CHECK(service.reload() && service.settings().browser.restoreLastWindow);
+    const std::array off{luciole::OverrideEdit{luciole::BrowserPreference::RestoreLastWindow, false}};
+    TEST_CHECK(service.saveOverrides(off) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && !restored.settings().browser.restoreLastWindow);
   }
   void testBackupPreference() {
     Fixture fixture;
@@ -248,6 +260,52 @@ namespace {
     TEST_CHECK(typed && typed->browser.sort.field == luciole::SortField::Type);
   }
 
+  void testUnknownSettings() {
+    Fixture fixture;
+    const std::string base = "schema_version = 1\nfuture_root = ['keep', 'these']\n[browser]\n"
+                             "sort_by = 'size'\nshow_hidden = true\nfuture_setting = { value = 17 }\n";
+    const std::string overrides =
+        "schema_version = 1\n[future_section]\nenabled = true\n[browser]\n"
+        "show_hidden = false\nshow_tab_bar_with_single_tab = true\nfuture_array = [1, 2, 3]\n";
+    fixture.write("config.toml", base);
+    fixture.write("settings.toml", overrides);
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && config.issues().empty());
+    TEST_CHECK(
+        !config.settings().browser.showHidden && config.settings().browser.sort.field == luciole::SortField::Size
+    );
+    TEST_CHECK(read(fixture.paths().base) == base && read(fixture.paths().overrides) == overrides);
+    const auto inherited = luciole::loadInheritedSettings(fixture.paths());
+    TEST_CHECK(inherited && inherited->browser.showHidden);
+    const auto diagnostics = luciole::validateConfigFile(fixture.paths().overrides);
+    TEST_CHECK(diagnostics.size() == 3);
+    TEST_CHECK(std::ranges::any_of(diagnostics, [](const auto& issue) {
+      return issue.key == "browser.show_tab_bar_with_single_tab" && issue.line > 0 && issue.column > 0;
+    }));
+    const std::array edit{luciole::OverrideEdit{luciole::BrowserPreference::GridIconSize, 96}};
+    TEST_CHECK(config.saveOverrides(edit) == luciole::AtomicWriteState::Durable);
+    const auto saved = toml::parse(read(fixture.paths().overrides));
+    TEST_CHECK(saved["browser"]["show_tab_bar_with_single_tab"].value<bool>() == true);
+    TEST_CHECK(saved["future_section"]["enabled"].value<bool>() == true);
+    TEST_CHECK(saved["browser"]["future_array"].as_array()->size() == 3);
+    TEST_CHECK(saved["browser"]["future_array"][2].value<int>() == 3);
+    const auto bytes = read(fixture.paths().overrides);
+    TEST_CHECK(config.saveOverrides(edit) == luciole::AtomicWriteState::Unchanged);
+    TEST_CHECK(read(fixture.paths().overrides) == bytes && read(fixture.paths().base) == base);
+    TEST_CHECK(config.saveOverrides(luciole::inheritAllPreferences()) == luciole::AtomicWriteState::Durable);
+    const auto reset = toml::parse(read(fixture.paths().overrides));
+    TEST_CHECK(!reset["browser"]["grid_icon_size"] && !reset["browser"]["show_hidden"]);
+    TEST_CHECK(reset["browser"]["show_tab_bar_with_single_tab"].value<bool>() == true);
+    TEST_CHECK(reset["future_section"]["enabled"].value<bool>() == true);
+    TEST_CHECK(config.reload() && config.settings().browser.showHidden);
+    const auto lastGood = config.settings();
+    fixture.write("settings.toml", "[browser]\nshow_tab_bar_with_single_tab = true\nshow_hidden = 42\n");
+    TEST_CHECK(!config.reload() && config.settings() == lastGood);
+    TEST_CHECK(config.issues().size() == 1 && config.issues().front().key == "browser.show_hidden");
+    fixture.write("settings.toml", "[browser]\nshow_tab_bar_with_single_tab = true\nshow_hidden = false\n");
+    TEST_CHECK(config.reload() && !config.settings().browser.showHidden && config.issues().empty());
+  }
+
   void testLayersAndReload() {
     Fixture fixture;
     luciole::ConfigService config(fixture.paths());
@@ -356,22 +414,16 @@ namespace {
     data.status = luciole::DirectoryStatus::Ready;
     data.entries = {
         {.id = 1,
-         .location = luciole::Location::fromPath((fixture.directory / ".hidden").native()),
+         .place = luciole::Location::fromPath((fixture.directory / ".hidden").native()),
          .name = ".hidden",
-         .displayName = ".hidden",
          .hidden = true,
          .size = 20,
-         .modifiedSeconds = std::nullopt,
-         .etag = std::nullopt,
-         .parentDisplayName = {}},
+         .modifiedSeconds = std::nullopt},
         {.id = 2,
-         .location = luciole::Location::fromPath((fixture.directory / "visible").native()),
+         .place = luciole::Location::fromPath((fixture.directory / "visible").native()),
          .name = "visible",
-         .displayName = "visible",
          .size = 5,
-         .modifiedSeconds = std::nullopt,
-         .etag = std::nullopt,
-         .parentDisplayName = {}},
+         .modifiedSeconds = std::nullopt},
     };
     model.applySnapshot(std::move(data));
     TEST_CHECK((model.rows() == std::vector<luciole::EntryId>{1, 2}));
@@ -527,6 +579,59 @@ namespace {
       fixture.write("config.toml", std::string("[browser]\nshow_sidebar = ") + value + "\n");
       const auto issues = luciole::validateConfigFile(fixture.paths().base);
       TEST_CHECK(issues.size() == 1 && issues.front().key == "browser.show_sidebar");
+    }
+  }
+
+  void testAlwaysShowTabBar() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && config.settings().browser.alwaysShowTabBar);
+    fixture.write("config.toml", "[browser]\nalways_show_tab_bar = false\nshow_hidden = true\n");
+    TEST_CHECK(config.reload() && !config.settings().browser.alwaysShowTabBar && config.settings().browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowTabBar, true}}) == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(loaded && loaded->browser.alwaysShowTabBar && loaded->browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowTabBar, std::nullopt}})
+            == State::Durable
+        && !config.settings().browser.alwaysShowTabBar
+        && !read(fixture.paths().overrides).contains("always_show_tab_bar")
+    );
+    for (const auto* value : {"0", "'false'", "1.0"}) {
+      fixture.write("config.toml", std::string("[browser]\nalways_show_tab_bar = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
+  void testAlwaysShowStatusBar() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && !config.settings().browser.alwaysShowStatusBar);
+    fixture.write("config.toml", "[browser]\nalways_show_status_bar = true\nshow_hidden = true\n");
+    TEST_CHECK(
+        config.reload() && config.settings().browser.alwaysShowStatusBar && config.settings().browser.showHidden
+    );
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowStatusBar, false}})
+        == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(loaded && !loaded->browser.alwaysShowStatusBar && loaded->browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::AlwaysShowStatusBar, std::nullopt}})
+            == State::Durable
+        && config.settings().browser.alwaysShowStatusBar
+        && !read(fixture.paths().overrides).contains("always_show_status_bar")
+    );
+    for (const auto* value : {"0", "'false'", "1.0"}) {
+      fixture.write("config.toml", std::string("[browser]\nalways_show_status_bar = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
     }
   }
 
@@ -904,7 +1009,7 @@ namespace {
     TEST_CHECK(read(baseTarget) == baseContent && std::filesystem::is_symlink(fixture.paths().base));
 
     const auto lastGood = second.settings();
-    fixture.write("settings.toml", "[browser]\nunknown = true\n");
+    fixture.write("settings.toml", "[browser]\nshow_hidden = 42\n");
     const auto invalid = read(fixture.paths().overrides);
     TEST_CHECK(
         second.saveOverrides(show) == State::NotCommitted
@@ -976,8 +1081,10 @@ int main() {
     testPresentationSettings();
     testBackupPreference();
     testNewTabPreference();
+    testRestoreLastWindowPreference();
     testMillerSettings();
     testMillerParents();
+    testUnknownSettings();
     testLayersAndReload();
     testFilesAndLimits();
     testEnvironmentPaths();
@@ -985,6 +1092,8 @@ int main() {
     testGridIconSize();
     testSidebarWidth();
     testSidebarVisibility();
+    testAlwaysShowTabBar();
+    testAlwaysShowStatusBar();
     testPreviewVisibility();
     testDetailsColumnVisibility();
     testExtendedColumns();

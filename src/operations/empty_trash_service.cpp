@@ -258,15 +258,16 @@ bool luciole::EmptyTrashService::prepareTargets(std::optional<std::vector<Direct
         Targets targets;
         std::set<std::string> seen;
         for (const auto& entry : *selection) {
-          if (!isTopLevelTrashItem(entry.location) || !seen.insert(entry.location.uri()).second) {
+          const auto location = entry.location();
+          if (!isTopLevelTrashItem(location) || !seen.insert(location.uri()).second) {
             throwFileError(FileErrorKind::InvalidArgument, "Only distinct top-level Trash items can be deleted.");
           }
-          const auto current = queryTrashItem(entry.location, token);
+          const auto current = queryTrashItem(location, token);
           const auto expected = readTrashItemIdentity(entry);
           if (expected != current.identity()) {
             throwFileError(FileErrorKind::Changed, "The selected item changed. Select it again before deleting it.");
           }
-          targets.push_back({entry.location, entry.displayName, expected});
+          targets.push_back({location, entry.displayName(), expected});
         }
         return targets;
       },

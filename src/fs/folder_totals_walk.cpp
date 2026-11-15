@@ -32,9 +32,9 @@ namespace {
         const std::function<void(const luciole::FolderTotalsSnapshot&)>& progress, luciole::FolderTotalsLimits limits
     )
         : m_roots(std::move(roots)), m_token(token), m_progress(progress), m_limits(limits) {
-      std::ranges::stable_sort(m_roots, {}, [](const auto& entry) { return entry.location.uri().size(); });
+      std::ranges::stable_sort(m_roots, {}, [](const auto& entry) { return entry.location().uri().size(); });
       for (const auto& root : m_roots) {
-        m_selected.emplace(root.location.uri(), &root);
+        m_selected.emplace(root.location().uri(), &root);
       }
       m_result.phase = luciole::FolderTotalsPhase::Running;
     }
@@ -44,20 +44,20 @@ namespace {
         if (stopped()) {
           break;
         }
-        if (m_seenRoots.contains(root.location.uri())) {
+        const auto location = root.location();
+        if (m_seenRoots.contains(location.uri())) {
           continue;
         }
         try {
-          if (!root.location.isNative() || root.location.isTrash()) {
+          if (!location.isNative() || location.isTrash()) {
             ++m_result.unsupported;
             continue;
           }
-          const auto fd =
-              luciole::checkedFd(::open(root.location.nativePath()->c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
+          const auto fd = luciole::checkedFd(::open(location.nativePath()->c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
           const auto value = luciole::statFd(fd.get());
-          visit(fd.get(), value, root.location, 0);
+          visit(fd.get(), value, location, 0);
           struct stat current{};
-          if (::lstat(root.location.nativePath()->c_str(), &current) != 0 || !sameStamp(value, current)) {
+          if (::lstat(location.nativePath()->c_str(), &current) != 0 || !sameStamp(value, current)) {
             ++m_result.changed;
           }
         } catch (const luciole::FileErrorException& error) {
@@ -94,9 +94,10 @@ namespace {
       m_result.error = error.message.substr(0, 256);
     }
     void validateRoot(const luciole::DirectoryEntry& root, const struct stat& value) const {
-      const auto details = luciole::readFileDetails(root.location, m_token);
+      const auto location = root.location();
+      const auto details = luciole::readFileDetails(location, m_token);
       const luciole::GioPtr<GFileInfo> info(g_file_query_info(
-          luciole::gioFile(root.location).get(), "unix::device,unix::inode", G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+          luciole::gioFile(location).get(), "unix::device,unix::inode", G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
           luciole::gioCancellable(m_token), nullptr
       ));
       if (m_token.cancelled()) {
@@ -107,8 +108,8 @@ namespace {
           || !g_file_info_has_attribute(info.get(), "unix::inode")
           || g_file_info_get_attribute_uint32(info.get(), "unix::device") != value.st_dev
           || g_file_info_get_attribute_uint64(info.get(), "unix::inode") != value.st_ino
-          || (root.identity && root.identity != details.identity)
-          || (root.etag && root.etag != details.etag)
+          || (root.identity() && root.identity() != details.identity)
+          || (root.etag() && root.etag() != details.etag)
           || (root.contentRevision && root.contentRevision != details.contentRevision)) {
         luciole::throwFileError(luciole::FileErrorKind::Changed, "A selected item changed. Reopen Properties.");
       }

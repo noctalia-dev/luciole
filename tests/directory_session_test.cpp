@@ -1,13 +1,16 @@
 #include "event_loop/glib_poll_source.h"
 #include "fs/directory_session.h"
+#include "fs/entry_access.h"
 #include "fs/file_query.h"
 #include "fs/gio_interop.h"
+#include "fs/native_listing.h"
 #include "fs/recursive_search.h"
 #include "test_check.h"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <print>
@@ -86,8 +89,11 @@ namespace {
         != session.snapshot().entries.end();
   }
 
+  // Ready, with sniffed content types published.
   void ready(Pump& pump, const DirectorySession& session) {
-    pump.until([&session] { return session.snapshot().status != DirectoryStatus::Loading; });
+    pump.until([&session] {
+      return session.snapshot().status != DirectoryStatus::Loading && !session.snapshot().contentTypesPending;
+    });
     TEST_CHECK(session.snapshot().status == DirectoryStatus::Ready);
   }
 
@@ -109,6 +115,58 @@ namespace {
       }
       TEST_CHECK(rejected);
     }
+  }
+
+  // Local listings derive icons and child locations themselves; both must equal what GIO reports.
+  void testLocalIconsAndLocations(Pump& pump, const fs::path& profile) {
+    const auto home = profile / "home";
+    TEST_CHECK(home.native() == g_get_home_dir());
+    for (const auto* folder : {"Desktop", "Docs", "ordinary", "Pictures"}) {
+      fs::create_directories(home / folder);
+    }
+    const auto write = [&](const std::string& name, const std::string& contents) {
+      std::ofstream file(home / name, std::ios::binary);
+      file << contents;
+      TEST_CHECK(file.good());
+    };
+    write("notes.txt", "text");
+    write("more.txt", "more text");
+    write("empty", "");
+    write("picture", std::string("\x89PNG\r\n\x1a\n", 8) + std::string(64, '\0'));
+    write("launcher.desktop", "[Desktop Entry]\nType=Application\nName=Test\nExec=true\n");
+    write("a space#%\n" + std::string(1, static_cast<char>(0xFF)), "raw");
+    write("ünï côdé.txt", "unicode");
+    fs::create_symlink("notes.txt", home / "link");
+    fs::create_symlink("missing", home / "broken");
+    fs::create_directory_symlink(home / "Docs", profile / "docs-link");
+
+    DirectorySession session;
+    std::size_t special = 0;
+    for (const auto& folder : {profile, home}) {
+      session.open(Location::fromPath(folder.native()));
+      ready(pump, session);
+      for (const auto& entry : session.snapshot().entries) {
+        const auto location = entry.location();
+        const auto file = luciole::gioFile(location);
+        const luciole::GioPtr<GFileInfo> info(g_file_query_info(
+            file.get(),
+            G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_ICON
+                                           "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
+        ));
+        TEST_CHECK(info);
+        const auto expected = luciole::readFileIcon(info.get(), location);
+        TEST_CHECK(entry.icon && *entry.icon == expected);
+        special += expected.names.front().starts_with("user-") || expected.names.front().starts_with("folder-");
+        TEST_CHECK(Location::fromUri(location.uri()) == location);
+        TEST_CHECK(Location::fromPath((folder / entry.name).native()) == location);
+      }
+    }
+    // Home, Desktop, Docs and Pictures; equal artwork is stored once.
+    TEST_CHECK(special == 4);
+    TEST_CHECK(entry(session, "notes.txt").icon == entry(session, "more.txt").icon);
+    TEST_CHECK(entry(session, "notes.txt").icon != entry(session, "ordinary").icon);
+    TEST_CHECK(entry(session, "launcher.desktop").icon->desktopFile == (home / "launcher.desktop").native());
   }
 
   void testContentTypes(Pump& pump) {
@@ -209,8 +267,8 @@ namespace {
     ready(pump, session);
     TEST_CHECK(session.snapshot().entries.size() == 155);
     TEST_CHECK(!session.snapshot().monitorError);
-    TEST_CHECK(entry(session, unusual).location.nativePath() == (fixture.path / unusual).native());
-    TEST_CHECK(g_utf8_validate(entry(session, unusual).displayName.c_str(), -1, nullptr));
+    TEST_CHECK(entry(session, unusual).location().nativePath() == (fixture.path / unusual).native());
+    TEST_CHECK(g_utf8_validate(entry(session, unusual).displayName().c_str(), -1, nullptr));
     TEST_CHECK(entry(session, ".hidden").hidden);
     TEST_CHECK(entry(session, "broken-link").symlink);
     TEST_CHECK(entry(session, "folder").type == luciole::FileType::Directory);
@@ -235,6 +293,41 @@ namespace {
     TEST_CHECK(entry(session, "renamed").id != id);
   }
 
+  void testSearchSnapshotOwnership(Pump& pump) {
+    Fixture fixture;
+    for (int i = 0; i < 150; ++i) {
+      fixture.write("match-" + std::to_string(i));
+    }
+    const std::string raw = "match-raw-%\n\xff";
+    fixture.write(raw);
+    luciole::RecursiveSearch search;
+    std::vector<luciole::DirectorySnapshot> published;
+    search.setChangedCallback([&] {
+      if (!search.snapshot().entries.empty()) {
+        published.push_back(search.snapshot());
+      }
+    });
+    search.start(fixture.location(), "match", true);
+    pump.until([&] { return search.snapshot().status != DirectoryStatus::Loading; });
+    TEST_CHECK(search.snapshot().status == DirectoryStatus::Ready && search.snapshot().entries.size() == 151);
+    TEST_CHECK(published.size() > 1 && published.front().entries.size() < 151);
+    const auto retained = published.front();
+    const auto* first = &retained.entries.front();
+    const auto found = std::ranges::find(search.snapshot().entries, first->id, &luciole::DirectoryEntry::id);
+    TEST_CHECK(found != search.snapshot().entries.end() && &*found == first);
+    const auto unusual = std::ranges::find(search.snapshot().entries, raw, &luciole::DirectoryEntry::name);
+    TEST_CHECK(
+        unusual != search.snapshot().entries.end() && unusual->location().nativePath() == (fixture.path / raw).native()
+    );
+    const auto complete = search.snapshot();
+    search.setChangedCallback({});
+    search.start(fixture.location(), "no matches", true);
+    search.cancel();
+    TEST_CHECK(retained.entries.size() < 151 && &retained.entries.front() == first);
+    TEST_CHECK(complete.entries.size() == 151 && complete.entries.front().id == first->id);
+    TEST_CHECK(first->location().nativePath().has_value());
+  }
+
   void testGenerationAndLifetime(Pump& pump) {
     Fixture first;
     Fixture second;
@@ -247,6 +340,7 @@ namespace {
     ready(pump, session);
     TEST_CHECK(session.snapshot().generation > generation);
     TEST_CHECK(!hasEntry(session, "first") && hasEntry(session, "second"));
+    const auto retained = session.snapshot();
     session.open(first.location());
     session.cancel();
     bool drained = false;
@@ -259,6 +353,7 @@ namespace {
     );
     pump.until([&drained] { return drained; });
     TEST_CHECK(session.snapshot().status == DirectoryStatus::Cancelled);
+    TEST_CHECK(retained.status == DirectoryStatus::Ready && retained.entries.front().name == "second");
     session.refresh();
     ready(pump, session);
     first.write("after-resume");
@@ -343,6 +438,35 @@ namespace {
     TEST_CHECK(session.snapshot().error->kind == luciole::FileErrorKind::NotDirectory);
   }
 
+  // A folder that changes faster than it can be scanned still publishes, at a bounded rate.
+  void testChurnDoesNotStarve(Pump& pump) {
+    Fixture fixture;
+    for (int index = 0; index < 20'000; ++index) {
+      const std::ofstream file(fixture.path / std::format("file-{:05d}", index));
+    }
+    DirectorySession session;
+    std::size_t published = 0;
+    session.setChangedCallback([&] { published += session.snapshot().status == DirectoryStatus::Ready ? 1 : 0; });
+    // Creations and deletions are not rate-limited by GIO, unlike content changes.
+    const std::jthread writer([&fixture](const std::stop_token& stop) {
+      for (int index = 0; !stop.stop_requested(); ++index) {
+        const std::ofstream file(fixture.path / std::format("busy-{}", index));
+        std::error_code ignored;
+        fs::remove(fixture.path / std::format("busy-{}", index - 1), ignored);
+        std::this_thread::sleep_for(5ms);
+      }
+    });
+    const auto start = std::chrono::steady_clock::now();
+    session.open(fixture.location());
+    pump.until([&published] { return published > 0; });
+    TEST_CHECK(std::chrono::steady_clock::now() - start < 3s);
+    while (std::chrono::steady_clock::now() - start < 4s) {
+      pump.once();
+    }
+    TEST_CHECK(published >= 2);
+    session.setChangedCallback({});
+  }
+
   bool unknown(const luciole::FileAccess& access) {
     const auto values = {access.read, access.write, access.execute, access.rename, access.trash, access.remove};
     return std::ranges::all_of(values, [](const auto value) { return !value.has_value(); });
@@ -403,12 +527,17 @@ namespace {
     );
     TEST_CHECK(session.snapshot().metadata.filesystem.readOnly == false);
     TEST_CHECK(session.snapshot().metadata.filesystem.freeBytes.has_value());
+    // Local listings defer read/write/execute to entryAccess(), which asks the filesystem.
+    TEST_CHECK(entry(session, "plain").accessDeferred && !entry(session, "plain").access.read.has_value());
     TEST_CHECK(
-        entry(session, "plain").access.read == true
-        && entry(session, "plain").access.write == true
-        && entry(session, "plain").access.execute == false
+        luciole::entryAccess(entry(session, "plain")).read == true
+        && luciole::entryAccess(entry(session, "plain")).write == true
+        && luciole::entryAccess(entry(session, "plain")).execute == false
     );
     const auto id = entry(session, "plain").id;
+    const auto published = session.snapshot();
+    const auto* retainedEntry = &published.entries.front();
+    TEST_CHECK(retainedEntry == &session.snapshot().entries.front());
     const auto generation = session.snapshot().generation;
     bool invalidated = false;
     session.setChangedCallback([&] {
@@ -427,7 +556,9 @@ namespace {
           && !session.snapshot().metadataLoading;
     });
     TEST_CHECK(invalidated && entry(session, "plain").id == id);
-    TEST_CHECK(entry(session, "plain").access.execute == (::access(file.c_str(), X_OK) == 0));
+    TEST_CHECK(published.status == DirectoryStatus::Ready && retainedEntry->access.rename == true);
+    TEST_CHECK(&published.entries.front() == retainedEntry && retainedEntry->access.remove == true);
+    TEST_CHECK(luciole::entryAccess(entry(session, "plain")).execute == (::access(file.c_str(), X_OK) == 0));
     session.setChangedCallback({});
     fs::permissions(file, fs::perms::owner_read);
     session.refresh();
@@ -439,7 +570,7 @@ namespace {
     );
     ready(pump, session);
     pump.until([&session] { return !session.snapshot().metadataLoading; });
-    TEST_CHECK(entry(session, "plain").access.write == (::access(file.c_str(), W_OK) == 0));
+    TEST_CHECK(luciole::entryAccess(entry(session, "plain")).write == (::access(file.c_str(), W_OK) == 0));
     session.cancel();
     TEST_CHECK(
         !session.snapshot().metadataLoading
@@ -463,19 +594,155 @@ namespace {
     pump.until([&session] { return !session.snapshot().metadataLoading; });
     TEST_CHECK(session.snapshot().metadata.access.execute == true);
   }
+
+  // Every fact of a native listing equals what GIO's local backend reports for the same file.
+  void compareWithGio(const luciole::DirectoryEntry& entry) {
+    const auto location = entry.location();
+    const auto file = luciole::gioFile(location);
+    const luciole::GioPtr<GFileInfo> info(g_file_query_info(
+        file.get(), "standard::*,time::*,unix::*,owner::*,access::*,etag::value,id::*",
+        G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
+    ));
+    TEST_CHECK(info);
+    TEST_CHECK(entry.accessDeferred);
+    TEST_CHECK(entry.name == g_file_info_get_name(info.get()));
+    TEST_CHECK(entry.displayName() == g_file_info_get_display_name(info.get()));
+    TEST_CHECK(entry.type == luciole::fileType(g_file_info_get_file_type(info.get())));
+    TEST_CHECK(entry.symlink == luciole::readIsSymlink(info.get()));
+    TEST_CHECK(entry.hidden == (g_file_info_get_is_hidden(info.get()) != FALSE || entry.name.starts_with('.')));
+    TEST_CHECK(entry.size == luciole::infoUint64(info.get(), G_FILE_ATTRIBUTE_STANDARD_SIZE));
+    TEST_CHECK(entry.modifiedSeconds == luciole::infoUint64(info.get(), G_FILE_ATTRIBUTE_TIME_MODIFIED));
+    TEST_CHECK(entry.etag() == std::optional<std::string>(g_file_info_get_etag(info.get())));
+    const auto changed = luciole::infoUint64(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED);
+    const auto nanos = luciole::infoUint32(info.get(), "time::changed-nsec");
+    TEST_CHECK(changed && nanos && entry.contentRevision == luciole::ChangeRevision(*changed, *nanos));
+    TEST_CHECK(entry.details == luciole::readEntryMetadata(info.get()));
+    TEST_CHECK(entry.identity() == luciole::readFileIdentity(info.get()));
+    TEST_CHECK(entry.contentType == luciole::readContentType(info.get()));
+    TEST_CHECK(entry.icon && *entry.icon == luciole::readFileIcon(info.get(), location));
+    const auto expected = luciole::readFileAccess(info.get());
+    TEST_CHECK(entry.access.rename == expected.rename);
+    TEST_CHECK(entry.access.remove == expected.remove);
+    TEST_CHECK(entry.access.trash == expected.trash);
+    const auto deferred = luciole::entryAccess(entry);
+    TEST_CHECK(deferred.read == expected.read && deferred.write == expected.write);
+    TEST_CHECK(deferred.execute == expected.execute);
+  }
+
+  void testNativeMatchesGio(Pump& pump) {
+    Fixture fixture;
+    const auto write = [&](const std::string& name, const std::string& contents, fs::perms mode) {
+      std::ofstream(fixture.path / name, std::ios::binary) << contents;
+      fs::permissions(fixture.path / name, mode);
+    };
+    write("regular.txt", "text", fs::perms::owner_read | fs::perms::owner_write);
+    write("empty", "", fs::perms::owner_read | fs::perms::owner_write);
+    write("readonly", "fixed", fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read);
+    write("script.sh", "#!/bin/sh\ntrue\n", fs::perms::owner_all);
+    write("picture", std::string("\x89PNG\r\n\x1a\n", 8) + std::string(64, '\0'), fs::perms::owner_read);
+    write("raw-\xff", "raw", fs::perms::owner_read | fs::perms::owner_write);
+    write("ünï côdé.txt", "unicode", fs::perms::owner_read | fs::perms::owner_write);
+    write(".hidden", "regular.txt\npicture\n", fs::perms::owner_read | fs::perms::owner_write);
+    fs::create_symlink("regular.txt", fixture.path / "link");
+    fs::create_symlink("missing", fixture.path / "broken");
+    TEST_CHECK(::mkfifo((fixture.path / "fifo").c_str(), 0600) == 0);
+    fs::create_directory(fixture.path / "locked");
+    std::ofstream(fixture.path / "locked" / "inner") << "inner";
+    fs::permissions(fixture.path / "locked", fs::perms::owner_read | fs::perms::owner_exec);
+
+    DirectorySession session;
+    for (const auto& folder : {fixture.path, fixture.path / "locked"}) {
+      session.open(Location::fromPath(folder.native()));
+      ready(pump, session);
+      TEST_CHECK(!session.snapshot().entries.empty());
+      for (const auto& entry : session.snapshot().entries) {
+        compareWithGio(entry);
+      }
+    }
+    TEST_CHECK(entry(session, "inner").access.rename == false);
+    fs::permissions(fixture.path / "locked", fs::perms::owner_all);
+  }
+
+  // Uncertain names publish at once with their name-based type; GIO's sniffed type follows, and rescans of an
+  // unchanged file keep it without reading the file again.
+  void testDeferredSniffing(Pump& pump) {
+    Fixture fixture;
+    const auto picture = fixture.path / "picture";
+    std::ofstream(picture, std::ios::binary) << std::string("\x89PNG\r\n\x1a\n", 8) << std::string(64, '\0');
+    DirectorySession session;
+    bool publishedPending = false;
+    session.setChangedCallback([&] {
+      publishedPending = publishedPending
+          || (session.snapshot().status == DirectoryStatus::Ready && session.snapshot().contentTypesPending);
+    });
+    session.open(Location::fromPath(fixture.path.native()));
+    ready(pump, session);
+    TEST_CHECK(publishedPending);
+    TEST_CHECK(entry(session, "picture").contentType == "image/png");
+
+    publishedPending = false;
+    session.refresh();
+    ready(pump, session);
+    TEST_CHECK(!publishedPending && entry(session, "picture").contentType == "image/png");
+
+    std::ofstream(picture, std::ios::binary | std::ios::trunc) << "plain words\n";
+    session.refresh();
+    ready(pump, session);
+    TEST_CHECK(publishedPending && entry(session, "picture").contentType == "text/plain");
+    session.setChangedCallback({});
+  }
+
+  // Children that cannot be inspected leave the listing to GIO, which reports what it can.
+  void testNativeUnsupportedFallsBack(Pump& pump) {
+    if (::geteuid() == 0) {
+      return;
+    }
+    Fixture fixture;
+    fs::create_directory(fixture.path / "closed");
+    std::ofstream(fixture.path / "closed" / "inside") << "data";
+    fs::permissions(fixture.path / "closed", fs::perms::owner_read | fs::perms::owner_write);
+    const auto folder = fixture.path / "closed";
+    TEST_CHECK(luciole::listNativeFolder(folder.native(), 0, nullptr).unsupported);
+    DirectorySession session;
+    session.open(Location::fromPath(folder.native()));
+    ready(pump, session);
+    TEST_CHECK(session.snapshot().entries.size() == 1 && !session.snapshot().entries.front().accessDeferred);
+    TEST_CHECK(session.snapshot().entries.front().name == "inside");
+    fs::permissions(fixture.path / "closed", fs::perms::owner_all);
+  }
 } // namespace
 
 int main() {
   try {
+    // A private home with configured user folders, selected before GLib first reads either.
+    const Fixture profile;
+    fs::create_directories(profile.path / "home");
+    fs::create_directories(profile.path / "config");
+    {
+      std::ofstream dirs(profile.path / "config/user-dirs.dirs");
+      dirs
+          << "XDG_DESKTOP_DIR=\"$HOME/Desktop\"\nXDG_DOCUMENTS_DIR=\"$HOME/Docs\"\nXDG_MUSIC_DIR=\"$HOME/\"\n"
+          << "XDG_PICTURES_DIR=\""
+          << (profile.path / "home/Pictures").native()
+          << "\"\n";
+    }
+    g_setenv("HOME", (profile.path / "home").c_str(), TRUE);
+    g_setenv("XDG_CONFIG_HOME", (profile.path / "config").c_str(), TRUE);
     testLocations();
     Pump pump;
+    testLocalIconsAndLocations(pump, profile.path);
     testContentTypes(pump);
     testEnumerationAndMonitoring(pump);
+    testSearchSnapshotOwnership(pump);
     testGenerationAndLifetime(pump);
     testChangesDuringLoading(pump);
     testErrorsAndEmpty(pump);
+    testChurnDoesNotStarve(pump);
     testMetadataAbsenceAndTypes();
     testCapabilityLifecycle(pump);
+    testNativeMatchesGio(pump);
+    testNativeUnsupportedFallsBack(pump);
+    testDeferredSniffing(pump);
     std::println("directory session checks passed");
     return 0;
   } catch (const std::exception& error) {

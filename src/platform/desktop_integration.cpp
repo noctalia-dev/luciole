@@ -7,6 +7,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 
 #include <algorithm>
+#include <utility>
 #include <wayland-cursor.h>
 
 luciole::DesktopIntegration::DesktopIntegration(WaylandConnection& connection) : m_connection(connection) {}
@@ -207,3 +208,23 @@ luciole::WindowSurface::~WindowSurface() {
   m_decoration->release();
 }
 bool luciole::WindowSurface::serverDecorated() const { return m_decoration->server; }
+
+void luciole::WindowSurface::setFrameCallbacks(std::function<void()> rendered, std::function<void()> frameDone) {
+  m_rendered = std::move(rendered);
+  m_frameDone = std::move(frameDone);
+}
+
+void luciole::WindowSurface::render() {
+  ToplevelSurface::render();
+  if (m_rendered) {
+    m_rendered();
+  }
+}
+
+void luciole::WindowSurface::onFrameCallbackDone() {
+  ToplevelSurface::onFrameCallbackDone();
+  // Last: the callback may destroy this surface.
+  if (const auto callback = m_frameDone) {
+    callback();
+  }
+}

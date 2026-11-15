@@ -1,6 +1,7 @@
 #include "browser/action_registry.h"
 
 #include "fs/archive_type.h"
+#include "fs/entry_access.h"
 #include "fs/transfer_types.h"
 
 #include <algorithm>
@@ -56,8 +57,9 @@ namespace {
       return unavailable("The application clipboard is unavailable.");
     }
     if (!all(c, r, [&](const DirectoryEntry& entry) {
-          return transferLocationSupported(entry.location)
-              && ((entry.symlink && entry.location.isNative()) || entry.access.read.value_or(true))
+          const auto location = entry.location();
+          return transferLocationSupported(location)
+              && ((entry.symlink && location.isNative()) || entry.access.read.value_or(true))
               && (entry.type == FileType::Directory || entry.type == FileType::Regular || entry.symlink)
               && (!cut || (entry.access.rename != false && entry.access.remove != false));
         })) {
@@ -96,13 +98,13 @@ namespace {
       }
       const auto parent = r.targets.front().location.parent();
       if (!parent || !all(c, r, [&](const DirectoryEntry& entry) {
-            const auto other = entry.location.parent();
-            return entry.identity && other && *parent == *other;
+            const auto other = entry.location().parent();
+            return entry.identity().has_value() && other && *parent == *other;
           })) {
         return unavailable("Batch rename requires identified items from one native folder.");
       }
     }
-    if (!all(c, r, [](const DirectoryEntry& entry) { return entry.location.nativePath().has_value(); })) {
+    if (!all(c, r, [](const DirectoryEntry& entry) { return entry.location().nativePath().has_value(); })) {
       return unavailable("This operation currently supports native files only.");
     }
     if (!rename && (!native(r) || !c.query.empty() || !ready(c))) {
@@ -140,17 +142,18 @@ namespace {
       return unavailable("Select items directly in Trash first.");
     }
     if (!all(c, r, [](const DirectoryEntry& entry) {
-          const auto parent = entry.location.parent();
-          return entry.location.isTrash()
+          const auto location = entry.location();
+          const auto parent = location.parent();
+          return location.isTrash()
               && parent
               && *parent == luciole::Location::trash()
-              && entry.identity
+              && entry.identity().has_value()
               && entry.access.remove.value_or(true);
         })) {
       return unavailable("These items cannot be changed by the Trash provider.");
     }
     if (restore && !all(c, r, [](const DirectoryEntry& entry) {
-          return entry.trash.original && entry.trash.original->nativePath().has_value();
+          return entry.trashInfo().original && entry.trashInfo().original->nativePath().has_value();
         })) {
       return unavailable("The original location is unavailable for one or more selected items.");
     }
@@ -161,7 +164,7 @@ namespace {
       return unavailable("Another file operation is still finishing.");
     }
     if (!all(c, r, [](const DirectoryEntry& entry) {
-          return entry.location.nativePath().has_value() && entry.access.read.value_or(true);
+          return entry.location().nativePath().has_value() && entry.access.read.value_or(true);
         })) {
       return unavailable("Archives require readable native items.");
     }
@@ -174,7 +177,7 @@ namespace {
     } else if (!single(r) || !all(c, r, [](const DirectoryEntry& entry) {
                  return entry.type == FileType::Regular
                      && !entry.symlink
-                     && luciole::isSupportedArchive(entry.location, entry.contentType);
+                     && luciole::isSupportedArchive(entry.location(), entry.contentType.value_or(""));
                })) {
       return unavailable("Select one ZIP or TAR archive.");
     }
@@ -186,7 +189,7 @@ namespace {
       return unavailable("Open folders individually.");
     }
     if (!all(c, r, [](const DirectoryEntry& entry) {
-          return !entry.location.isTrash() || (entry.type == FileType::Directory && !entry.symlink);
+          return !entry.location().isTrash() || (entry.type == FileType::Directory && !entry.symlink);
         })) {
       return unavailable("Restore this item before opening it.");
     }
@@ -200,13 +203,12 @@ namespace {
       return unavailable("Select one program and wait for file operations to finish.");
     }
     const auto* entry = c.model.entry(r.targets.front().id);
-    if (!entry->location.isNative()
-        || entry->location.isTrash()
-        || (entry->type != FileType::Regular && !entry->symlink)) {
+    const auto location = entry->location();
+    if (!location.isNative() || location.isTrash() || (entry->type != FileType::Regular && !entry->symlink)) {
       return unavailable("Run requires a native program outside Trash.");
     }
     return require(
-        entry->location.basename().value_or("").ends_with(".desktop") || entry->access.execute != false,
+        location.basename().value_or("").ends_with(".desktop") || entry->access.execute != false,
         "Allow executing this file in Properties first."
     );
   }
@@ -227,12 +229,12 @@ namespace {
       return unavailable("Select exactly one item.");
     }
     return require(
-        c.model.entry(r.targets.front().id)->trash.original.has_value(), "The original location is unavailable."
+        c.model.entry(r.targets.front().id)->trashInfo().original.has_value(), "The original location is unavailable."
     );
   }
   State pin(const C& c, const R& r, bool unpin) {
     if (!all(c, r, [](const DirectoryEntry& entry) {
-          return entry.type == FileType::Directory && !entry.location.isTrash();
+          return entry.type == FileType::Directory && !entry.location().isTrash();
         })) {
       return unavailable("Only folders outside Trash can be pinned.");
     }
@@ -271,7 +273,7 @@ namespace {
                 c, r,
                 [](const DirectoryEntry& entry) {
                   return entry.type == FileType::Directory
-                      && entry.location.nativePath().has_value()
+                      && entry.location().nativePath().has_value()
                       && entry.access.execute.value_or(true);
                 }
             ),
@@ -287,9 +289,10 @@ namespace {
             && all(
                 c, r,
                 [](const DirectoryEntry& entry) {
-                  return entry.location.nativePath().has_value()
-                      && !entry.location.isTrash()
-                      && entry.identity.has_value()
+                  const auto location = entry.location();
+                  return location.nativePath().has_value()
+                      && !location.isTrash()
+                      && entry.identity().has_value()
                       && (entry.type == FileType::Regular
                           || entry.type == FileType::Directory
                           || entry.type == FileType::Symlink);
@@ -583,7 +586,7 @@ luciole::ActionRequest luciole::ActionRegistry::capture(const ActionContext& con
   ActionRequest request{context.context, context.model.snapshot().location, std::string(context.query), {}};
   for (const auto id : context.model.selectedIds()) {
     if (const auto* entry = context.model.entry(id)) {
-      request.targets.push_back({id, entry->location});
+      request.targets.push_back({id, entry->location()});
     }
   }
   return request;
@@ -600,7 +603,7 @@ bool luciole::ActionRegistry::current(const ActionContext& context, const Action
   return scope != ActionScope::Targets || std::ranges::all_of(request.targets, [&](const auto& target) {
            const auto* entry = context.model.entry(target.id);
            return entry != nullptr
-               && entry->location == target.location
+               && entry->location() == target.location
                && std::ranges::contains(context.model.rows(), target.id);
          });
 }

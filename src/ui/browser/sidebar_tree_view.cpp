@@ -61,15 +61,15 @@ public:
     const auto glyph = m_owner.m_glyphs.find(id);
     auto& button = static_cast<TreeButton&>(tile);
     button.bind(
-        m_owner.m_tree.row(id), entry->displayName, glyph == m_owner.m_glyphs.end() ? "folder" : glyph->second,
-        m_owner.m_current == entry->location, hovered, m_owner.width()
+        m_owner.m_tree.row(id), entry->displayName(), glyph == m_owner.m_glyphs.end() ? "folder" : glyph->second,
+        m_owner.m_current == entry->location(), hovered, m_owner.width()
     );
     button.setKeyboardFocusHint(m_owner.m_grid->focusArea()->focused() && m_owner.m_model.selection().focused == id);
   }
   std::string itemTooltip(std::size_t index) const override {
     const auto id = m_owner.m_model.rows()[index];
     const auto info = m_owner.m_tree.row(id);
-    return locationEditText(m_owner.m_model.entry(id)->location) + (info.status.empty() ? "" : "\n" + info.status);
+    return locationEditText(m_owner.m_model.entry(id)->location()) + (info.status.empty() ? "" : "\n" + info.status);
   }
   bool onPointerPress(std::size_t index, float x, float, float width, float) override {
     m_pressed = m_owner.m_model.rows()[index];
@@ -102,7 +102,7 @@ public:
     if (m_expand) {
       (void)m_owner.m_tree.toggle(id);
     } else if (m_owner.open) {
-      const auto target = m_owner.m_model.entry(id)->location;
+      const auto target = m_owner.m_model.entry(id)->location();
       m_owner.open(target);
     }
   }
@@ -197,6 +197,7 @@ luciole::SidebarTreeView::~SidebarTreeView() {
 void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vector<Drive>& drives) {
   DirectorySnapshot snapshot;
   snapshot.status = DirectoryStatus::Ready;
+  std::vector<DirectoryEntry> entries;
   std::map<std::string, EntryId> roots;
   m_pinIndices.clear();
   m_glyphs.clear();
@@ -211,17 +212,16 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
       return place.bookmark.location == pin.location;
     });
     m_glyphs.emplace(id, known == pins.userPlaces().end() ? "folder" : known->glyphName);
-    snapshot.entries.push_back(
-        {.id = id,
-         .location = pin.location,
-         .name = {},
-         .displayName = pin.label,
-         .type = FileType::Directory,
-         .size = {},
-         .modifiedSeconds = {},
-         .etag = {},
-         .parentDisplayName = {}}
-    );
+    DirectoryEntry entry{
+        .id = id,
+        .place = pin.location,
+        .name = {},
+        .type = FileType::Directory,
+        .size = {},
+        .modifiedSeconds = {},
+    };
+    entry.setDisplayName(pin.label);
+    entries.push_back(std::move(entry));
   }
   for (const auto& drive : drives) {
     const auto& uri = drive.root->uri();
@@ -232,18 +232,18 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
     const auto id = prior == m_rootIds.end() ? m_nextRoot++ : prior->second;
     roots.emplace(uri, id);
     m_glyphs.emplace(id, drive.glyph);
-    snapshot.entries.push_back(
-        {.id = id,
-         .location = *drive.root,
-         .name = {},
-         .displayName = drive.label,
-         .type = FileType::Directory,
-         .size = {},
-         .modifiedSeconds = {},
-         .etag = {},
-         .parentDisplayName = {}}
-    );
+    DirectoryEntry entry{
+        .id = id,
+        .place = *drive.root,
+        .name = {},
+        .type = FileType::Directory,
+        .size = {},
+        .modifiedSeconds = {},
+    };
+    entry.setDisplayName(drive.label);
+    entries.push_back(std::move(entry));
   }
+  snapshot.entries = std::move(entries);
   m_rootIds = std::move(roots);
   m_tree.setRoot(std::move(snapshot));
 }
@@ -270,11 +270,11 @@ void luciole::SidebarTreeView::prepare() {
 }
 std::optional<luciole::Bookmark> luciole::SidebarTreeView::bookmark(EntryId id) const {
   const auto* entry = m_model.entry(id);
-  return entry ? std::optional(Bookmark{entry->displayName, entry->location}) : std::nullopt;
+  return entry ? std::optional(Bookmark{entry->displayName(), entry->location()}) : std::nullopt;
 }
 InputArea* luciole::SidebarTreeView::focusArea(const Location& location) {
   const auto found =
-      std::ranges::find_if(m_model.rows(), [&](EntryId id) { return m_model.entry(id)->location == location; });
+      std::ranges::find_if(m_model.rows(), [&](EntryId id) { return m_model.entry(id)->location() == location; });
   if (found == m_model.rows().end()) {
     return nullptr;
   }
@@ -288,7 +288,7 @@ std::optional<luciole::Bookmark> luciole::SidebarTreeView::folderAt(float x, flo
 }
 std::optional<LayoutRect> luciole::SidebarTreeView::folderRect(const Location& location) const {
   for (std::size_t i = 0; i < m_model.rows().size(); ++i) {
-    if (m_model.entry(m_model.rows()[i])->location == location) {
+    if (m_model.entry(m_model.rows()[i])->location() == location) {
       if (const auto rect = m_grid->itemRect(i)) {
         return rect;
       }

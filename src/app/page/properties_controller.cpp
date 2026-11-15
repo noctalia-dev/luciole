@@ -16,6 +16,7 @@
 #include "ui/builders.h"
 #include "ui/controls/acl_editor.h"
 #include "ui/controls/bulk_acl_editor.h"
+#include "ui/controls/card_style.h"
 #include "ui/controls/file_metadata_view.h"
 #include "ui/controls/folder_totals_view.h"
 #include "ui/controls/permission_editor.h"
@@ -34,6 +35,32 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace {
+  // Equal tabs wide enough for "Permissions"; the strip is centered rather than spanning the dialog.
+  constexpr float kTabWidth = 128.0F;
+  // Text width inside a General card: dialog padding, scrollbar gutter, then the card's own padding.
+  float generalCardWidth(float dialogWidth) {
+    return std::max(1.0F, dialogWidth - Style::spaceMd * 4 - Style::scrollbarWidth - Style::scrollbarGap);
+  }
+} // namespace
+
+void PropertiesController::showDetails(bool shown) {
+  if (!m_permissionResults || shown == m_detailsShown) {
+    return;
+  }
+  m_detailsShown = shown;
+  // The per-item list takes the body's place; the footer keeps the summary, Apply and Close.
+  m_permissionResults->setVisible(shown);
+  m_permissionResults->setParticipatesInLayout(shown);
+  m_permissionScroll->setVisible(!shown);
+  m_permissionScroll->setParticipatesInLayout(!shown);
+  m_permissionDetails->setText(shown ? "Back" : "Details…");
+  m_permissionDetails->setGlyph(shown ? "chevron-left" : "");
+  m_permissionReport->setVisible(shown);
+  m_permissionReport->setParticipatesInLayout(shown);
+  m_page.menuSurface()->requestLayout();
+}
 
 PropertiesController::PropertiesController(PageContext& page, luciole::FileIconCache& icons)
     : m_page(page), m_icons(icons) {
@@ -127,6 +154,8 @@ void PropertiesController::syncMetadata() {
     std::erase_if(fields, [](const auto& field) { return field.label == "Folder contents"; });
     m_folderTotals->sync(m_metadataWidth);
   }
+  // The entry's own facts lead, so both kinds read as one table with one row rhythm.
+  fields.insert(fields.begin(), m_basicFields.begin(), m_basicFields.end());
   m_metadataView->sync(fields, m_metadataWidth);
   m_page.menuSurface()->requestLayout();
 }
@@ -149,15 +178,10 @@ bool PropertiesController::resultsKey(const KeyboardEvent& event) {
 }
 
 void PropertiesController::layoutDialog(float width) {
-  const float metadataWidth = std::max(1.0F, width - Style::spaceMd * 2 - Style::scrollbarWidth - Style::scrollbarGap);
+  const float metadataWidth = generalCardWidth(width);
   if (m_metadataView && metadataWidth != m_metadataWidth) {
     m_metadataWidth = metadataWidth;
     syncMetadata();
-  }
-  if (m_permissionEditor || m_metadataView) {
-    m_page.activeDialog().root()->setSize(
-        width, std::min(600.0F, static_cast<float>(m_page.surface().height()) - 64.0F)
-    );
   }
 }
 
@@ -230,12 +254,21 @@ void PropertiesController::sync() {
       m_permissionStatus->setColor(
           colorSpecFromRole(snapshot.failed() ? ColorRole::Error : ColorRole::OnSurfaceVariant)
       );
-      m_permissionReport->setEnabled(!permissions.busy() && !snapshot.report.empty() && m_page.clipboard().available());
+      // Clipboard access needs a recent input serial, which the click itself provides; checking it here left the
+      // button greyed out whenever the job finished between inputs.
+      m_permissionReport->setEnabled(!permissions.busy() && !snapshot.report.empty());
       m_permissionCancel->setVisible(saving);
       m_permissionCancel->setParticipatesInLayout(saving);
       m_permissionCancel->setEnabled(!snapshot.cancelRequested);
-      if (snapshot.finished) {
-        m_permissionTabs->setSelectedIndex(m_permissionResultTab);
+      // Reading a multi-selection fills one Ready row per item; that is the selection, not a result. Details
+      // become available once an item was changed, failed, or skipped.
+      const bool outcomes = snapshot.results && std::ranges::any_of(*snapshot.results, [](const auto& row) {
+                              return row.outcome != luciole::PermissionOutcome::Ready;
+                            });
+      m_permissionDetails->setVisible(outcomes);
+      m_permissionDetails->setParticipatesInLayout(outcomes);
+      if (!outcomes) {
+        showDetails(false);
       }
     }
     if (snapshot.failed() && !snapshot.finished && snapshot.phase == luciole::PermissionPhase::Ready) {
@@ -273,6 +306,8 @@ struct PropertiesController::Body {
   AclEditor* acl = nullptr;
   BulkAclEditor* bulkAcl = nullptr;
   PermissionResultsView* results = nullptr;
+  // The entry's own facts, shown ahead of the loaded metadata in the Details card.
+  luciole::MetadataFields fields;
 };
 
 PropertiesController::Body
@@ -280,35 +315,22 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
   auto general = ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceMd});
   auto* generalGroup = general.get();
   const auto literal = [](Label& label) { label.setUseMarkup(false); };
-  const auto field = [&](const std::string& name, const std::string& value) {
-    general->addChild(
-        ui::row(
-            {.align = FlexAlign::Start, .gap = Style::spaceMd},
-            ui::label(
-                {.text = name,
-                 .fontSize = Style::fontSizeCaption,
-                 .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-                 .minWidth = 76.0F,
-                 .maxWidth = 76.0F}
-            ),
-            ui::label(
-                {.text = value, .maxWidth = width - 132.0F, .maxLines = 3, .flexGrow = 1.0F, .configure = literal}
-            )
-        )
-    );
+  luciole::MetadataFields fields;
+  const auto field = [&](std::string name, std::string value) {
+    fields.push_back({.label = std::move(name), .value = std::move(value), .preview = false});
   };
-  FileMetadataView* metadataView = nullptr;
   if (targets.size() == 1) {
     const auto& entry = targets.front();
+    const auto location = entry.location();
     auto icon = std::make_unique<luciole::FileIcon>(m_icons, 48.0F);
-    icon->bind(entry.icon, colorSpecFromRole(ColorRole::OnSurface));
+    icon->bind(luciole::iconSource(entry.icon), colorSpecFromRole(ColorRole::OnSurface));
     general->addChild(
         ui::row(
             {.align = FlexAlign::Center, .gap = Style::spaceMd}, std::move(icon),
             ui::column(
                 {.align = FlexAlign::Start, .gap = Style::spaceXs, .flexGrow = 1.0F},
                 ui::label(
-                    {.text = entry.displayName,
+                    {.text = entry.displayName(),
                      .fontWeight = FontWeight::SemiBold,
                      .maxWidth = width - 104.0F,
                      .maxLines = 2,
@@ -322,14 +344,14 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
             )
         )
     );
-    general->addChild(ui::separator({}));
-    field("Location", luciole::locationEditText(entry.location));
+    field("Location", luciole::locationEditText(location));
     if (entry.contentType) {
       field("MIME", *entry.contentType);
     }
-    if (entry.location.isTrash()) {
-      field("Original", entry.trash.original ? luciole::locationEditText(*entry.trash.original) : "Unknown");
-      field("Deleted", entry.trash.deletionDate.value_or("Unknown"));
+    if (location.isTrash()) {
+      const auto& trash = entry.trashInfo();
+      field("Original", trash.original ? luciole::locationEditText(*trash.original) : "Unknown");
+      field("Deleted", trash.deletionDate.value_or("Unknown"));
     }
     if (entry.type != luciole::FileType::Directory) {
       const luciole::GString size(entry.size ? g_format_size_full(*entry.size, G_FORMAT_SIZE_IEC_UNITS) : nullptr);
@@ -350,6 +372,11 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
       field("Permissions", "Select at most 4096 items for permission editing.");
     }
   }
+  Flex* details = nullptr;
+  general->addChild(luciole::card("Details", &details));
+  auto metadata = std::make_unique<FileMetadataView>();
+  auto* metadataView = metadata.get();
+  details->addChild(std::move(metadata));
   FolderTotalsView* totals = nullptr;
   if (std::ranges::any_of(targets, [](const auto& entry) {
         return entry.type == luciole::FileType::Directory && !entry.symlink;
@@ -359,15 +386,16 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
       m_page.requestSync();
     });
     totals = view.get();
-    general->addChild(std::move(view));
+    // FolderTotalsView brings its own "Contents" heading beside the Stop button.
+    Flex* contents = nullptr;
+    general->addChild(luciole::card({}, &contents));
+    contents->addChild(std::move(view));
   }
-  auto metadata = std::make_unique<FileMetadataView>();
-  metadataView = metadata.get();
-  general->addChild(std::move(metadata));
   Body result;
   result.general = generalGroup;
   result.metadata = metadataView;
   result.folderTotals = totals;
+  result.fields = std::move(fields);
   result.node = std::move(general);
   return result;
 }
@@ -403,18 +431,33 @@ PropertiesController::Body PropertiesController::buildBody(
         multiple, folders
     );
     editor = permissions.get();
-    auto basic = ui::column(
-        {.out = &basicGroup, .align = FlexAlign::Stretch, .gap = Style::spaceSm},
+    Flex* advancedEntry = nullptr;
+    auto advancedCard = luciole::card({}, &advancedEntry);
+    advancedEntry->addChild(
         ui::row(
-            {.justify = FlexJustify::End},
+            {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+            ui::column(
+                {.align = FlexAlign::Stretch, .gap = Style::spaceXs, .flexGrow = 1.0F},
+                ui::label({.text = "Access control list", .fontWeight = FontWeight::SemiBold}),
+                ui::label(
+                    {.text = "Grant rights to more users and groups.",
+                     .fontSize = Style::fontSizeCaption,
+                     .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+                )
+            ),
             ui::button(
                 {.out = &advancedOpen,
                  .text = "Advanced permissions…",
-                 .variant = ButtonVariant::Ghost,
+                 .controlHeight = Style::controlHeightSm,
+                 .variant = ButtonVariant::Default,
                  .onClick = [this] { showAdvanced(true, true); }}
             )
-        ),
-        std::move(permissions)
+        )
+    );
+    // The editor's cards come first; ACLs are the less common path, so they close the page.
+    auto basic = ui::column(
+        {.out = &basicGroup, .align = FlexAlign::Stretch, .gap = Style::spaceMd}, std::move(permissions),
+        std::move(advancedCard)
     );
     const auto aclChanged = [this] {
       if (m_permissionSave) {
@@ -435,20 +478,25 @@ PropertiesController::Body PropertiesController::buildBody(
     auto advanced = ui::column(
         {.out = &advancedGroup,
          .align = FlexAlign::Stretch,
-         .gap = Style::spaceSm,
+         .gap = Style::spaceMd,
          .visible = false,
          .participatesInLayout = false},
+        // Page header: back arrow beside the page title, like a sub-page.
         ui::row(
-            {.justify = FlexJustify::Start},
+            {.align = FlexAlign::Center, .gap = Style::spaceSm},
             ui::button(
                 {.out = &advancedBack,
-                 .text = "Back to permissions",
                  .glyph = "chevron-left",
+                 .controlHeight = Style::controlHeightSm,
                  .variant = ButtonVariant::Ghost,
+                 .tooltip = "Back to permissions",
+                 .minWidth = Style::controlHeightSm,
+                 .maxWidth = Style::controlHeightSm,
                  .onClick = [this] { showAdvanced(false, true); }}
-            )
+            ),
+            ui::label({.text = "Access control list", .fontSize = Style::fontSizeTitle, .fontWeight = FontWeight::Bold})
         ),
-        ui::label({.text = "Advanced permissions", .fontWeight = FontWeight::SemiBold}), std::move(aclControl)
+        std::move(aclControl)
     );
     body->content()->addChild(
         ui::column(
@@ -485,6 +533,7 @@ PropertiesController::Body PropertiesController::buildBody(
       .acl = acl,
       .bulkAcl = bulkAcl,
       .results = results,
+      .fields = std::move(general.fields),
   };
 }
 
@@ -501,14 +550,14 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
   const bool editable = !targets.empty() && targets.size() <= 4096;
   const bool multiple = targets.size() > 1;
   const bool folders = std::ranges::any_of(targets, [](const auto& entry) {
-    return entry.type == luciole::FileType::Directory
-        && !entry.symlink
-        && entry.location.nativePath()
-        && !entry.location.isTrash();
+    if (entry.type != luciole::FileType::Directory || entry.symlink) {
+      return false;
+    }
+    const auto location = entry.location();
+    return location.nativePath() && !location.isTrash();
   });
   const bool withResults = multiple || folders;
-  auto& surface = m_page.surface();
-  const float width = std::min(editable ? 600.0F : 440.0F, static_cast<float>(surface.width()) - 32.0F);
+  const float width = m_page.dialogWidth(DialogWidth::Medium);
   auto body = buildBody(targets, width, editable, multiple, folders, withResults);
   auto* scroll = body.scroll;
   auto* generalGroup = body.general;
@@ -516,45 +565,39 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
   auto* results = body.results;
   const auto literal = [](Label& label) { label.setUseMarkup(false); };
   Segmented* tabs = nullptr;
-  Button *save = nullptr, *reportButton = nullptr, *cancelButton = nullptr;
+  Button *save = nullptr, *reportButton = nullptr, *cancelButton = nullptr, *detailsButton = nullptr;
   Label* progress = nullptr;
-  std::vector<ui::SegmentedOption> propertyTabs{
-      {.label = "General", .glyph = {}, .tooltip = {}}, {.label = "Permissions", .glyph = {}, .tooltip = {}}
+  const auto onTabChange = [this, generalGroup, permissionsGroup, scroll](std::size_t index) {
+    showDetails(false);
+    generalGroup->setVisible(index == 0);
+    generalGroup->setParticipatesInLayout(index == 0);
+    if (permissionsGroup) {
+      permissionsGroup->setVisible(index == 1);
+      permissionsGroup->setParticipatesInLayout(index == 1);
+    }
+    showAdvanced(false);
+    if (m_permissionSave) {
+      m_permissionSave->setEnabled(canApply() && !m_page.operationsBusy());
+    }
+    scroll->requestScrollToOffset(0);
+    m_page.menuSurface()->requestLayout();
   };
-  constexpr std::size_t resultTab = 2;
-  if (withResults) {
-    propertyTabs.push_back({.label = "Results", .glyph = {}, .tooltip = {}});
-  }
   auto root = ui::column(
       {.align = FlexAlign::Stretch},
       luciole::dialogHeader("Properties", "list-details", [this] { m_page.dismissMenu(); }),
-      ui::segmented(
-          {.out = &tabs,
-           .options = std::move(propertyTabs),
-           .equalSegmentWidths = true,
-           .visible = editable,
-           .participatesInLayout = editable,
-           .onChange =
-               [this, generalGroup, permissionsGroup, scroll, results](std::size_t index) {
-                 generalGroup->setVisible(index == 0);
-                 generalGroup->setParticipatesInLayout(index == 0);
-                 if (permissionsGroup) {
-                   permissionsGroup->setVisible(index == 1);
-                   permissionsGroup->setParticipatesInLayout(index == 1);
-                 }
-                 showAdvanced(false);
-                 if (m_permissionSave) {
-                   m_permissionSave->setEnabled(canApply() && !m_page.operationsBusy());
-                 }
-                 if (results) {
-                   results->setVisible(index == resultTab);
-                   results->setParticipatesInLayout(index == resultTab);
-                   scroll->setVisible(index != resultTab);
-                   scroll->setParticipatesInLayout(index != resultTab);
-                 }
-                 scroll->requestScrollToOffset(0);
-                 m_page.menuSurface()->requestLayout();
-               }}
+      ui::row(
+          {.justify = FlexJustify::Center, .visible = editable, .participatesInLayout = editable},
+          ui::segmented(
+              {.out = &tabs,
+               .options =
+                   std::vector<ui::SegmentedOption>{
+                       {.label = "General", .glyph = {}, .tooltip = {}},
+                       {.label = "Permissions", .glyph = {}, .tooltip = {}}
+                   },
+               .equalSegmentWidths = true,
+               .width = kTabWidth * 2.0F,
+               .onChange = onTabChange}
+          )
       ),
       std::move(body.node)
   );
@@ -567,23 +610,38 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
     }
     root->addChild(
         ui::row(
-            {.align = FlexAlign::Center, .justify = FlexJustify::End, .gap = Style::spaceSm},
+            {.align = FlexAlign::Center, .gap = Style::spaceSm},
+            // Per-item outcomes of the last bulk or recursive job; shown only once there are some.
+            ui::button(
+                {.out = &detailsButton,
+                 .text = "Details…",
+                 .variant = ButtonVariant::Ghost,
+                 .visible = false,
+                 .participatesInLayout = false,
+                 .onClick = [this] { showDetails(!m_detailsShown); }}
+            ),
             ui::button(
                 {.out = &reportButton,
                  .text = "Copy report",
                  .enabled = false,
                  .variant = ButtonVariant::Ghost,
-                 .visible = withResults,
-                 .participatesInLayout = withResults,
+                 .visible = false,
+                 .participatesInLayout = false,
                  .onClick =
                      [this] {
-                       if (m_job) {
-                         m_page.clipboard().setClipboardText(
-                             m_job->service<luciole::PermissionService>().snapshot().report
-                         );
+                       if (!m_job) {
+                         return;
                        }
+                       if (!m_page.clipboard().available()) {
+                         m_page.actionError("The clipboard is not available.");
+                         return;
+                       }
+                       m_page.clipboard().setClipboardText(
+                           m_job->service<luciole::PermissionService>().snapshot().report
+                       );
                      }}
             ),
+            ui::spacer(),
             ui::button(
                 {.out = &cancelButton,
                  .text = "Cancel",
@@ -617,27 +675,17 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
         )
     );
   }
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = (editable || multiple)
-      ? std::min(600.0F, static_cast<float>(surface.height()) - 64.0F)
-      : std::min(
-            root->measure(surface.renderTarget().renderer(), constraints).height,
-            static_cast<float>(surface.height()) - 64.0F
-        );
-  if (editable || multiple) {
-    root->setSize(width, height);
-  }
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::Properties, [this] { close(); });
+    // Start on the tabs rather than the header's close button.
+    if (editable) {
+      m_page.menuDispatcher().setFocus(m_page.menuDispatcher().firstTabFocusUnder(tabs));
+    }
     m_metadataView = body.metadata;
     m_folderTotals = body.folderTotals;
-    m_metadataWidth = std::max(1.0F, width - Style::spaceMd * 2 - Style::scrollbarWidth - Style::scrollbarGap);
+    m_basicFields = std::move(body.fields);
+    m_metadataWidth = generalCardWidth(width);
     m_multiple = multiple;
     if (m_metadataView) {
       if (multiple) {
@@ -647,7 +695,6 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
       }
       m_metadataDirty = true;
     }
-    m_page.setDialogSize(width, height);
     if (!editable) {
       return;
     }
@@ -659,9 +706,9 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
     m_aclEditor = body.acl;
     m_bulkAclEditor = body.bulkAcl;
     m_aclActive = false;
-    m_permissionResultTab = resultTab;
     m_permissionResults = results;
     m_permissionReport = reportButton;
+    m_permissionDetails = detailsButton;
     m_permissionCancel = cancelButton;
     m_permissionStatus = progress;
     m_permissionTabs = tabs;
@@ -676,7 +723,7 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
     m_job = m_page.jobs().create<luciole::PermissionService>(JobScope::Page);
     auto& permissions = m_job->service<luciole::PermissionService>();
     if (captureCurrentLocation) {
-      (void)permissions.prepare(targets.front().location);
+      (void)permissions.prepare(targets.front().location());
     } else if (multiple) {
       (void)permissions.prepare(targets);
     } else {
@@ -691,6 +738,7 @@ void PropertiesController::close() {
   m_multiple = false;
   m_metadataView = nullptr;
   m_folderTotals = nullptr;
+  m_basicFields.clear();
   m_metadataDirty = false;
   // Saving goes on for the page that takes the job over once this page left its window.
   if (const auto job = std::exchange(m_job, nullptr); job && (m_page.jobs().attached() || !job->running())) {
@@ -702,9 +750,9 @@ void PropertiesController::close() {
   m_aclEditor = nullptr;
   m_bulkAclEditor = nullptr;
   m_aclActive = false;
-  m_permissionResultTab = 2;
   m_permissionResults = nullptr;
-  m_permissionReport = m_permissionCancel = nullptr;
+  m_permissionReport = m_permissionCancel = m_permissionDetails = nullptr;
+  m_detailsShown = false;
   m_permissionStatus = nullptr;
   m_permissionTabs = nullptr;
   m_permissionSave = nullptr;

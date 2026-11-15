@@ -62,15 +62,15 @@ namespace {
     Target parent;
     luciole::Fd item;
     explicit LinkSource(const luciole::DirectoryEntry& source)
-        : path(source.location.nativePath().value_or("")), name(std::filesystem::path(path).filename().native()),
+        : path(source.location().nativePath().value_or("")), name(std::filesystem::path(path).filename().native()),
           parent(std::filesystem::path(path).parent_path().native()),
           item(luciole::checkedFd(::openat(parent.directory.get(), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC))) {
       const luciole::GioPtr<GFileInfo> info(g_file_query_info(
-          luciole::gioFile(source.location).get(), "id::file,id::filesystem,standard::type,standard::is-symlink",
+          luciole::gioFile(source.location()).get(), "id::file,id::filesystem,standard::type,standard::is-symlink",
           G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
       ));
       if (!info
-          || luciole::readFileIdentity(info.get()) != source.identity
+          || luciole::readFileIdentity(info.get()) != source.identity()
           || luciole::fileType(g_file_info_get_file_type(info.get())) != source.type
           || (g_file_info_get_is_symlink(info.get()) != FALSE) != source.symlink) {
         luciole::throwFileError(luciole::FileErrorKind::Changed, "The selected item changed. Choose it again.");
@@ -217,8 +217,8 @@ bool luciole::CreateService::prepareTemplate(const Location& parent, DocumentTem
 }
 bool luciole::CreateService::prepareLink(const DirectoryEntry& source) {
   if (busy()
-      || !source.location.nativePath()
-      || !source.identity
+      || !source.location().nativePath()
+      || !source.identity()
       || (source.type != FileType::Regular && source.type != FileType::Directory && source.type != FileType::Symlink)) {
     return false;
   }

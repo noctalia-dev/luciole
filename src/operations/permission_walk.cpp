@@ -96,15 +96,16 @@ namespace {
     }
 
     void walk(std::shared_ptr<PermissionTarget> target, std::uint64_t rootMount, std::size_t depth) {
-      if (m_token.cancelled() || !m_seen.insert(target->entry.location.uri()).second) {
+      const auto location = target->entry.location();
+      if (m_token.cancelled() || !m_seen.insert(location.uri()).second) {
         return;
       }
       if (m_found.fetch_add(1) >= maxItems) {
         limit(luciole::FileErrorKind::Unsupported, "The recursive job exceeds 16384 items. Select smaller folders.");
       }
       luciole::PermissionResult row{
-          .location = target->entry.location,
-          .name = target->entry.displayName,
+          .location = location,
+          .name = target->entry.displayName(),
           .info = {},
           .outcome = PermissionOutcome::Ready,
           .error = {},
@@ -165,6 +166,7 @@ namespace {
         ::close(descriptor);
         luciole::throwErrno(code);
       }
+      const auto folder = target->entry.location();
       while (!m_token.cancelled()) {
         errno = 0;
         const auto* child = ::readdir(directory.get());
@@ -180,21 +182,23 @@ namespace {
         }
         target->validate();
         auto entry = target->entry;
-        entry.location = target->entry.location.child(name);
+        const auto location = folder.child(name);
+        const auto& uri = location.uri();
+        entry.place = location;
         entry.name = name;
-        entry.displayName = luciole::filenameDisplayText(name);
-        if (const auto found = m_selected.find(entry.location.uri()); found != m_selected.end()) {
+        entry.setDisplayName(luciole::filenameDisplayText(name));
+        if (const auto found = m_selected.find(uri); found != m_selected.end()) {
           const auto& captured = m_roots.targets[found->second];
           if (captured) {
             captured->ancestors = target->ancestors;
             captured->ancestors.push_back(target);
             walk(captured, mountId(captured->fd.get()), depth + 1);
-          } else if (m_seen.insert(entry.location.uri()).second) {
+          } else if (m_seen.insert(uri).second) {
             append((*m_roots.results)[found->second], {});
           }
           continue;
         }
-        if (m_seen.contains(entry.location.uri())) {
+        if (m_seen.contains(uri)) {
           continue;
         }
         const int fd = ::openat(::dirfd(directory.get()), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
@@ -203,8 +207,8 @@ namespace {
             descriptorLimit(errno);
           }
           append(
-              {.location = entry.location,
-               .name = entry.displayName,
+              {.location = location,
+               .name = entry.displayName(),
                .info = {},
                .outcome = PermissionOutcome::Failed,
                .error = luciole::errnoError(errno),

@@ -164,14 +164,15 @@ void luciole::MillerColumns::synchronize() {
           parent.seedRevision = model.snapshot().generation;
           parent.pathEntry.reset();
           for (const auto& entry : model.snapshot().entries) {
-            if (entry.location != child.location) {
+            if (entry.location() != child.location) {
               continue;
             }
-            if (child.identity && child.identity != entry.identity) {
+            auto identity = entry.identity();
+            if (child.identity && child.identity != identity) {
               parent.seedPath = false;
               break;
             }
-            child.identity = entry.identity;
+            child.identity = std::move(identity);
             if (entry.type == luciole::FileType::Directory || entry.symlink) {
               parent.pathEntry = entry.id;
             }
@@ -193,11 +194,13 @@ void luciole::MillerColumns::synchronize() {
         entry && entry->type == luciole::FileType::Directory && !entry->symlink && browser.searchQuery().empty();
     if (i + 1 < m_columns.size()) {
       auto& child = *m_columns[i + 1];
-      if (child.explicitPath && !child.identity && entry && entry->location == child.location) {
-        child.identity = entry->identity;
+      const auto location = entry ? std::optional(entry->location()) : std::nullopt;
+      const auto identity = entry ? entry->identity() : std::nullopt;
+      if (child.explicitPath && !child.identity && entry && location == child.location) {
+        child.identity = identity;
       }
       const bool linkedPath = child.explicitPath && entry && entry->symlink;
-      if ((!folder && !linkedPath) || entry->location != child.location || entry->identity != child.identity) {
+      if ((!folder && !linkedPath) || location != child.location || identity != child.identity) {
         trim(i + 1);
         notify();
       }
@@ -205,14 +208,14 @@ void luciole::MillerColumns::synchronize() {
     if (i != m_focused || !folder || i + 1 < m_columns.size()) {
       continue;
     }
+    const auto destination = entry->location();
+    const auto identity = entry->identity();
     const bool cycle = std::ranges::any_of(m_columns, [&](const auto& column) {
-      return column->location == entry->location || (entry->identity && column->identity == entry->identity);
+      return column->location == destination || (identity && column->identity == identity);
     });
     if (cycle) {
       continue;
     }
-    const auto destination = entry->location;
-    const auto identity = entry->identity;
     auto child = makeColumn(browser, destination);
     child->identity = identity;
     child->width = m_columns[i]->width;

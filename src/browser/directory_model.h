@@ -75,34 +75,58 @@ namespace luciole {
     bool setScrollAnchor(std::optional<EntryId> id);
 
   private:
+    // Per-entry keys live NUL-terminated in m_keyText; presentations hold offsets.
     struct Presentation {
-      std::size_t sourceIndex = 0;
-      std::string sortKey;
-      std::string filterKey;
-      std::string typeLabel;
-      // Points into m_alternateSortKeys; nodes keep their addresses across rehash.
-      const std::string* alternateSortKey = nullptr;
+      std::uint32_t sortKey = 0;
+      // kNoKey when the folded display name equals the display name; see filterText().
+      std::uint32_t filterKey = kNoKey;
+      // Points into m_typeLabels; equal labels share one string.
+      const std::string* typeLabel = nullptr;
       bool knownType = false;
     };
+    static constexpr std::uint32_t kNoRow = UINT32_MAX;
+    static constexpr std::uint32_t kNoKey = UINT32_MAX;
+
+    const char* keyText(std::uint32_t offset) const { return m_keyText.data() + offset; }
+    // Open-addressing slot of `id` in `slots` over `entries`, or the empty slot where it would go.
+    static std::size_t sourceSlot(const std::vector<std::uint32_t>& slots, const DirectoryEntries& entries, EntryId id);
 
     void prepareSortKeys();
     void rebuildProjection();
     void reconcileSelection();
     void notify() const;
     bool canSelect() const;
-    bool less(EntryId left, EntryId right) const;
+    std::optional<std::size_t> sourceOf(EntryId id) const;
+    // The visible row of an ID, or nullopt when it is filtered out or absent.
+    std::optional<std::size_t> rowOf(EntryId id) const;
+    std::string_view filterText(std::size_t source) const;
+    struct SortItem {
+      EntryId id;
+      std::uint32_t source;
+      const Presentation* presentation;
+      const DirectoryEntry* entry;
+    };
+    bool less(const SortItem& left, const SortItem& right) const;
 
     DirectorySnapshot m_snapshot;
     SortOptions m_sort;
     FilterOptions m_filter;
     std::string m_filterKey;
-    std::unordered_map<EntryId, Presentation> m_presentations;
+    std::unordered_set<std::string> m_typeLabels;
+    // Indexed like m_snapshot.entries.
+    std::vector<Presentation> m_presentations;
+    std::string m_keyText;
+    // Source indexes by entry ID: open addressing over m_snapshot.entries, kNoRow marks an empty slot.
+    std::vector<std::uint32_t> m_sourceSlots;
     // One selected text-sort field, shared by repeated values/containing folders.
     std::unordered_map<std::string, std::string> m_alternateSortKeys;
+    // Indexed like m_snapshot.entries while a text sort field is prepared; points into m_alternateSortKeys.
+    std::vector<const std::string*> m_alternateKeys;
     std::optional<SortField> m_preparedSortField;
     std::vector<EntryId> m_rows;
     std::unordered_map<EntryId, EntryId> m_treeParents;
-    std::unordered_map<EntryId, std::size_t> m_positions;
+    // Visible row of each source entry, kNoRow when filtered out.
+    std::vector<std::uint32_t> m_rowBySource;
     SelectionState m_selection;
     std::optional<EntryId> m_scrollAnchor;
     bool m_selectionAvailable = false;

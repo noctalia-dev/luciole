@@ -67,18 +67,17 @@ namespace {
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
     ));
     TEST_CHECK(info);
-    return {
-        .location = location,
+    luciole::DirectoryEntry result{
+        .place = location,
         .name = *location.basename(),
-        .displayName = *location.basename(),
         .type = luciole::fileType(g_file_info_get_file_type(info.get())),
         .symlink = g_file_info_get_is_symlink(info.get()) != FALSE,
         .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {},
-        .identity = luciole::readFileIdentity(info.get())
+        .modifiedSeconds = {}
     };
+    result.setDisplayName(*location.basename());
+    result.setIdentity(luciole::readFileIdentity(info.get()));
+    return result;
   }
   void batchRenameHistory(Pump& pump) {
     Fixture fixture;

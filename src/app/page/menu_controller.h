@@ -63,7 +63,7 @@ public:
 
   // The context menu on the popup; null while the popup shows a dialog or nothing.
   ContextMenuControl* menu() const { return m_menu; }
-  // BrowserPage::showPopup(): the popup now shows `menu`, or a dialog when null.
+  // BrowserPage::openPopup(): the popup now shows `menu`, or a dialog or popover when null.
   void setMenu(ContextMenuControl* menu) { m_menu = menu; }
   // BrowserPage::closeMenu(): forgets the menu widgets.
   void menuClosed();

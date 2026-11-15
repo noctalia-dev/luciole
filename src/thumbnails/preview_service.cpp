@@ -1,5 +1,6 @@
 #include "thumbnails/preview_service.h"
 
+#include "fs/entry_access.h"
 #include "fs/gio_interop.h"
 
 #include <algorithm>
@@ -13,12 +14,12 @@
 namespace {
   bool sameSource(const luciole::DirectoryEntry& a, const luciole::DirectoryEntry& b) {
     return a.id == b.id
-        && a.location == b.location
-        && a.displayName == b.displayName
-        && a.icon == b.icon
+        && a.location() == b.location()
+        && a.displayName() == b.displayName()
+        && luciole::sameIcon(a.icon, b.icon)
         && a.access.read == b.access.read
-        && a.identity == b.identity
-        && a.etag == b.etag
+        && a.identity() == b.identity()
+        && a.etag() == b.etag()
         && a.size == b.size
         && a.modifiedSeconds == b.modifiedSeconds
         && a.contentRevision == b.contentRevision
@@ -38,12 +39,13 @@ namespace {
   };
   TextResult readText(const luciole::DirectoryEntry& entry, GCancellable* cancel) {
     using namespace luciole;
-    const auto path = entry.location.nativePath();
+    const auto location = entry.location();
+    const auto path = location.nativePath();
     if (!path) {
       return {{}, "Text previews are available for local files."};
     }
     const GioPtr<GFileInfo> fs(
-        g_file_query_filesystem_info(gioFile(entry.location).get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE, cancel, nullptr)
+        g_file_query_filesystem_info(gioFile(location).get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE, cancel, nullptr)
     );
     if (!fs
         || !g_file_info_has_attribute(fs.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)
@@ -70,25 +72,21 @@ namespace {
       return {{}, "The file changed. Select it again.", true};
     }
     const GioPtr<GFileInfo> info(g_file_query_info(
-        gioFile(entry.location).get(),
+        gioFile(location).get(),
         G_FILE_ATTRIBUTE_ID_FILE "," G_FILE_ATTRIBUTE_ID_FILESYSTEM "," G_FILE_ATTRIBUTE_ETAG_VALUE
                                  "," G_FILE_ATTRIBUTE_TIME_CHANGED
                                  ",time::changed-nsec," G_FILE_ATTRIBUTE_TIME_CHANGED_USEC,
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancel, nullptr
     ));
+    const auto identity = entry.identity();
+    const auto etag = entry.etag();
     if (!info
-        || (entry.identity && readFileIdentity(info.get()) != entry.identity)
-        || (entry.etag && (!g_file_info_get_etag(info.get()) || *entry.etag != g_file_info_get_etag(info.get())))) {
+        || (identity && readFileIdentity(info.get()) != identity)
+        || (etag && (!g_file_info_get_etag(info.get()) || *etag != g_file_info_get_etag(info.get())))) {
       return {{}, "The file changed. Select it again.", true};
     }
-    if (entry.contentRevision) {
-      const auto seconds = g_file_info_get_attribute_uint64(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED);
-      const auto nanos = g_file_info_has_attribute(info.get(), "time::changed-nsec")
-          ? g_file_info_get_attribute_uint32(info.get(), "time::changed-nsec")
-          : g_file_info_get_attribute_uint32(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED_USEC) * 1000U;
-      if (*entry.contentRevision != std::to_string(seconds) + ':' + std::to_string(nanos)) {
-        return {{}, "The file changed. Select it again.", true};
-      }
+    if (entry.contentRevision && readChangeRevision(info.get()) != entry.contentRevision) {
+      return {{}, "The file changed. Select it again.", true};
     }
     constexpr std::size_t limit = 64U * 1024U;
     std::string bytes;
@@ -286,7 +284,7 @@ void luciole::PreviewService::show(
   if (unchanged
       && (pixels == m_state->pixels
           || (pixels < m_state->pixels && !m_state->view.imageUpgradeFailed)
-          || luciole::contentTypeIsText(entry->contentType.value_or("")))) {
+          || (entry->contentType && luciole::contentTypeIsText(*entry->contentType)))) {
     if (prepared && prepared->pixels && (!m_state->view.image || !m_state->view.image->pixels)) {
       m_state->view.image = std::move(prepared);
       m_state->view.status = PreviewStatus::Ready;
@@ -307,10 +305,10 @@ void luciole::PreviewService::show(
   state.view.metadata = state.metadata.fields();
   state.view.status = PreviewStatus::Unavailable;
   state.view.message = entry->type == luciole::FileType::Directory ? "Folder" : "No preview available for this file.";
-  if (entry->type == luciole::FileType::Regular && !entry->symlink && entry->access.read != false) {
+  if (entry->type == luciole::FileType::Regular && !entry->symlink && luciole::entryAccess(*entry).read != false) {
     state.view.status = PreviewStatus::Loading;
     state.view.message = "Loading preview…";
-    if (luciole::contentTypeIsText(entry->contentType.value_or(""))) {
+    if (entry->contentType && luciole::contentTypeIsText(*entry->contentType)) {
       state.pending = true;
       state.start();
     } else {

@@ -66,9 +66,12 @@ namespace {
         return {};
       }
       try {
-        const auto details = luciole::readFileDetails(source.location, token);
-        if ((source.identity && source.identity != details.identity)
-            || (source.etag && source.etag != details.etag)
+        const auto sourceLocation = source.location();
+        const auto details = luciole::readFileDetails(sourceLocation, token);
+        const auto identity = source.identity();
+        const auto etag = source.etag();
+        if ((identity && identity != details.identity)
+            || (etag && etag != details.etag)
             || (source.contentRevision && source.contentRevision != details.contentRevision)) {
           throw luciole::FileErrorException({luciole::FileErrorKind::Changed, "The selected item changed"});
         }
@@ -90,10 +93,13 @@ namespace {
             bytes += *details.size;
           }
         }
-        owner.add(details.metadata.owner);
-        group.add(details.metadata.group);
+        const auto text = [](luciole::InternedText value) {
+          return value ? std::optional<std::string>(*value) : std::nullopt;
+        };
+        owner.add(text(details.metadata.owner));
+        group.add(text(details.metadata.group));
         mode.add(details.metadata.mode ? std::optional(std::format("{:04o}", *details.metadata.mode)) : std::nullopt);
-        const auto parent = source.location.parent();
+        const auto parent = sourceLocation.parent();
         location.add(parent ? std::optional(luciole::locationEditText(*parent)) : std::nullopt);
         modified.add(details.modifiedSeconds);
         accessed.add(details.metadata.accessedSeconds);

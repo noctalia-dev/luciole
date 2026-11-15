@@ -87,12 +87,15 @@ void StatusBarController::sync(bool miller) {
   const auto& model = m_page.browser().model();
   const auto& snapshot = model.snapshot();
   const bool loading = snapshot.status == luciole::DirectoryStatus::Loading;
+  const bool alwaysShow = m_page.settings().alwaysShowStatusBar;
   std::string status;
-  // The idle folder count stays hidden; the pill appears only for something worth reading.
+  // The idle folder count stays hidden unless the setting keeps the pill visible.
   bool needed = true;
   if (status.empty()) {
     if (!m_actionError.empty()) {
       status = m_actionError;
+    } else if (!m_pins.sessionError().empty()) {
+      status = std::format("Could not save session: {}", m_pins.sessionError());
     } else if (!m_pins.error().empty()) {
       status = std::format("Could not update pins: {}", m_pins.error());
     } else if (!m_settings.error().empty()) {
@@ -117,7 +120,7 @@ void StatusBarController::sync(bool miller) {
     } else if (snapshot.status == luciole::DirectoryStatus::Cancelled) {
       status = "Loading stopped.";
     } else {
-      needed = false;
+      needed = alwaysShow;
       const auto hidden = model.filter().showHidden
           ? 0U
           : static_cast<std::size_t>(std::ranges::count_if(snapshot.entries, [](const auto& entry) {
@@ -203,7 +206,8 @@ void StatusBarController::sync(bool miller) {
 }
 
 void StatusBarController::layout(float paneWidth) {
-  const bool showFreeSpace = m_freeSpaceAvailable && paneWidth >= kMinimumFreeSpacePaneWidth;
+  const bool showFreeSpace =
+      m_freeSpaceAvailable && (paneWidth >= kMinimumFreeSpacePaneWidth || m_page.settings().alwaysShowStatusBar);
   m_freeSpace->setVisible(showFreeSpace);
   m_freeSpace->setParticipatesInLayout(showFreeSpace);
 }

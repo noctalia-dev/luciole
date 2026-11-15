@@ -1,6 +1,7 @@
 #include "ui/controls/permission_editor.h"
 
 #include "ui/builders.h"
+#include "ui/controls/card_style.h"
 #include "ui/controls/file_error_text.h"
 #include "ui/controls/input.h"
 #include "ui/controls/recursive_permission_editor.h"
@@ -9,36 +10,98 @@
 
 #include <algorithm>
 #include <format>
+#include <string_view>
 
 namespace {
   constexpr std::array<std::uint32_t, 12> bits{0400, 0200, 0100, 0040,  0020,  0010,
                                                0004, 0002, 0001, 04000, 02000, 01000};
-  constexpr float labelWidth = 88.0F, columnWidth = 100.0F;
+  constexpr float labelWidth = 88.0F;
+  // Row title on the left: SemiBold, like Settings rows; an optional caption label goes under it.
+  std::unique_ptr<Flex> rowTitle(const char* text, Label** caption = nullptr, float width = 0.0F) {
+    auto copy = ui::column(
+        {.align = FlexAlign::Stretch,
+         .gap = 2.0F,
+         .minWidth = width > 0.0F ? std::optional(width) : std::nullopt,
+         .maxWidth = width > 0.0F ? std::optional(width) : std::nullopt,
+         .flexGrow = width > 0.0F ? 0.0F : 1.0F},
+        ui::label({.text = text, .fontWeight = FontWeight::SemiBold})
+    );
+    if (caption != nullptr) {
+      copy->addChild(
+          ui::label(
+              {.out = caption,
+               .fontSize = Style::fontSizeCaption,
+               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+               .maxLines = 2}
+          )
+      );
+    }
+    return copy;
+  }
+  std::unique_ptr<Segmented> choice(Segmented** out, std::function<void()> changed) {
+    return ui::segmented(
+        {.out = out,
+         .options =
+             std::vector<ui::SegmentedOption>{
+                 {.label = "Keep", .glyph = {}, .tooltip = {}},
+                 {.label = "Allow", .glyph = {}, .tooltip = {}},
+                 {.label = "Deny", .glyph = {}, .tooltip = {}}
+             },
+         .equalSegmentWidths = true,
+         .flexGrow = 1.0F,
+         .onChange = [changed = std::move(changed)](std::size_t) { changed(); }}
+    );
+  }
 } // namespace
 std::string permissionStatusText(const luciole::PermissionSnapshot& snapshot) {
   return snapshot.error ? luciole::fileErrorText(*snapshot.error) : snapshot.message;
+}
+std::string permissionModeText(std::uint32_t mode) {
+  std::string text = "---------";
+  constexpr std::string_view letters = "rwxrwxrwx";
+  for (std::size_t i = 0; i < 9; ++i) {
+    if ((mode & bits[i]) != 0) {
+      text[i] = letters[i];
+    }
+  }
+  const auto special = [&](std::size_t index, std::uint32_t bit, char set, char unset) {
+    if ((mode & bit) != 0) {
+      text[index] = text[index] == 'x' ? set : unset;
+    }
+  };
+  special(2, 04000, 's', 'S');
+  special(5, 02000, 's', 'S');
+  special(8, 01000, 't', 'T');
+  return std::format("{}  {:04o}", text, mode & 07777U);
 }
 PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, bool folders)
     : m_multiple(multiple), m_edited(std::move(edited)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
-  setGap(Style::spaceSm);
+  setGap(Style::spaceMd);
+  const auto onChanged = [this] { changed(); };
   if (folders) {
-    addChild(
+    Flex* scope = nullptr;
+    addChild(luciole::card({}, &scope));
+    scope->addChild(
         ui::row(
-            {.align = FlexAlign::Center, .gap = Style::spaceSm},
-            ui::toggle(
-                {.out = &m_recursive,
-                 .onChange =
-                     [this](bool active) {
-                       m_direct->setVisible(!active);
-                       m_direct->setParticipatesInLayout(!active);
-                       m_tree->setVisible(active);
-                       m_tree->setParticipatesInLayout(active);
-                       changed();
-                     }}
+            {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+            ui::column(
+                {.align = FlexAlign::Stretch, .gap = 2.0F, .flexGrow = 1.0F},
+                ui::label({.text = "Include folder contents", .fontWeight = FontWeight::SemiBold}),
+                ui::label(
+                    {.text = "Change every file and folder inside, per kind.",
+                     .fontSize = Style::fontSizeCaption,
+                     .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+                )
             ),
-            ui::label({.text = "Include folder contents"})
+            ui::toggle({.out = &m_recursive, .onChange = [this](bool active) {
+                          m_direct->setVisible(!active);
+                          m_direct->setParticipatesInLayout(!active);
+                          m_tree->setVisible(active);
+                          m_tree->setParticipatesInLayout(active);
+                          changed();
+                        }})
         )
     );
     auto tree = std::make_unique<RecursivePermissionEditor>([this] { changed(); });
@@ -47,35 +110,46 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
     tree->setParticipatesInLayout(false);
     addChild(std::move(tree));
   }
-  auto direct = ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceSm});
+  auto direct = ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceMd});
   m_direct = direct.get();
-  direct->addChild(ui::label({.text = "Permissions", .fontWeight = FontWeight::SemiBold}));
+  // The current mode sits in the Access title as a monospace badge, e.g. "rwx------  0700".
+  auto badge = ui::row(
+      {.align = FlexAlign::Center,
+       .paddingV = 2.0F,
+       .paddingH = Style::spaceSm,
+       .fill = colorSpecFromRole(ColorRole::SurfaceContainer),
+       .radius = Style::radiusMd},
+      ui::label(
+          {.out = &m_mode,
+           .fontSize = Style::fontSizeCaption,
+           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+           .configure = [multiple](Label& label) {
+             if (!multiple) {
+               label.setFontFamily("monospace");
+             }
+           }}
+      )
+  );
+  Flex* access = nullptr;
+  direct->addChild(luciole::card("Access", &access, std::move(badge)));
+  Flex* special = nullptr;
+  auto specialCard = luciole::card("Special permissions", &special);
   if (multiple) {
     constexpr std::array names{"Owner read",     "Owner write",   "Owner execute", "Group read",
                                "Group write",    "Group execute", "Others read",   "Others write",
                                "Others execute", "Set user ID",   "Set group ID",  "Sticky bit"};
     for (std::size_t i = 0; i < bits.size(); ++i) {
-      direct->addChild(
-          ui::row(
-              {.align = FlexAlign::Center, .gap = Style::spaceSm},
-              ui::label({.text = names[i], .minWidth = 104.0F, .maxWidth = 104.0F}),
-              ui::segmented(
-                  {.out = &m_choices[i],
-                   .options =
-                       std::vector<ui::SegmentedOption>{
-                           {.label = "Keep", .glyph = {}, .tooltip = {}},
-                           {.label = "Allow", .glyph = {}, .tooltip = {}},
-                           {.label = "Deny", .glyph = {}, .tooltip = {}}
-                       },
-                   .equalSegmentWidths = true,
-                   .flexGrow = 1.0F,
-                   .onChange = [this](std::size_t) { changed(); }}
-              ),
-              ui::label(
-                  {.out = &m_current[i], .fontSize = Style::fontSizeCaption, .minWidth = 72.0F, .maxWidth = 72.0F}
+      (i < 9 ? access : special)
+          ->addChild(
+              ui::row(
+                  {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+                  ui::label({.text = names[i], .minWidth = 112.0F, .maxWidth = 112.0F}),
+                  choice(&m_choices[i], onChanged),
+                  ui::label(
+                      {.out = &m_current[i], .fontSize = Style::fontSizeCaption, .minWidth = 64.0F, .maxWidth = 64.0F}
+                  )
               )
-          )
-      );
+          );
     }
   } else {
     auto header = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
@@ -83,58 +157,68 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
     for (const auto* text : {"Read", "Write", "Execute"}) {
       header->addChild(
           ui::column(
-              {.align = FlexAlign::Center, .width = columnWidth},
-              ui::label({.text = text, .fontSize = Style::fontSizeCaption})
+              {.align = FlexAlign::Center, .flexGrow = 1.0F},
+              ui::label(
+                  {.text = text,
+                   .fontSize = Style::fontSizeCaption,
+                   .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+              )
           )
       );
     }
-    direct->addChild(std::move(header));
+    access->addChild(std::move(header));
     constexpr std::array names{"Owner", "Group", "Others"};
     for (std::size_t row = 0; row < names.size(); ++row) {
-      auto controls = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
-      controls->addChild(ui::label({.text = names[row], .minWidth = labelWidth, .maxWidth = labelWidth}));
+      auto controls = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F});
+      controls->addChild(
+          ui::label(
+              {.text = names[row], .fontWeight = FontWeight::SemiBold, .minWidth = labelWidth, .maxWidth = labelWidth}
+          )
+      );
       for (std::size_t column = 0; column < 3; ++column) {
         controls->addChild(
             ui::column(
-                {.align = FlexAlign::Center, .width = columnWidth},
+                {.align = FlexAlign::Center, .flexGrow = 1.0F},
                 ui::toggle({.out = &m_bits[row * 3 + column], .onChange = [this](bool) { changed(); }})
             )
         );
       }
-      direct->addChild(std::move(controls));
+      access->addChild(std::move(controls));
+    }
+    constexpr std::array specials{"Set user ID", "Set group ID", "Sticky bit"};
+    constexpr std::array hints{
+        "Executables run as the file's owner.", "Run as the group; new items inherit the folder's group.",
+        "Only owners can delete or rename items inside."
+    };
+    for (std::size_t i = 0; i < specials.size(); ++i) {
+      Label* hint = nullptr;
+      special->addChild(
+          ui::row(
+              {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F}, rowTitle(specials[i], &hint),
+              ui::toggle({.out = &m_bits[i + 9], .onChange = [this](bool) { changed(); }})
+          )
+      );
+      hint->setText(hints[i]);
     }
   }
-  direct->addChild(ui::label({.out = &m_mode, .fontSize = Style::fontSizeCaption}));
-  direct->addChild(ui::label({.text = "Ownership", .fontWeight = FontWeight::SemiBold}));
+  direct->addChild(std::move(specialCard));
+  Flex* ownership = nullptr;
+  direct->addChild(luciole::card("Ownership", &ownership));
   const auto change = [this](const std::string&) { changed(); };
-  direct->addChild(
+  ownership->addChild(
       ui::row(
-          {.align = FlexAlign::Center, .gap = Style::spaceSm},
-          ui::label({.text = "Owner", .minWidth = labelWidth, .maxWidth = labelWidth}),
+          {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+          rowTitle("Owner", &m_ownerId, labelWidth),
           ui::input({.out = &m_owner, .placeholder = "Name or numeric ID", .flexGrow = 1.0F, .onChange = change})
       )
   );
-  direct->addChild(
+  ownership->addChild(
       ui::row(
-          {.align = FlexAlign::Center, .gap = Style::spaceSm},
-          ui::label({.text = "Group", .minWidth = labelWidth, .maxWidth = labelWidth}),
+          {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+          rowTitle("Group", &m_groupId, labelWidth),
           ui::input({.out = &m_group, .placeholder = "Name or numeric ID", .flexGrow = 1.0F, .onChange = change})
       )
   );
-  direct->addChild(ui::label({.out = &m_ids, .fontSize = Style::fontSizeCaption, .maxLines = 2}));
-  if (!multiple) {
-    direct->addChild(ui::label({.text = "Special permissions", .fontWeight = FontWeight::SemiBold}));
-    constexpr std::array special{"Set user ID", "Set group ID", "Sticky bit"};
-    for (std::size_t i = 0; i < special.size(); ++i) {
-      direct->addChild(
-          ui::row(
-              {.align = FlexAlign::Center, .gap = Style::spaceSm},
-              ui::toggle({.out = &m_bits[i + 9], .onChange = [this](bool) { changed(); }}),
-              ui::label({.text = special[i]})
-          )
-      );
-    }
-  }
   for (auto** out : {&m_reason, &m_message}) {
     direct->addChild(
         ui::label({.out = out, .fontSize = Style::fontSizeCaption, .maxLines = 4, .configure = [](Label& label) {
@@ -201,7 +285,7 @@ bool PermissionEditor::canApply() const {
 void PermissionEditor::changed() {
   if (!m_syncing) {
     if (!m_multiple) {
-      m_mode->setText(std::format("Mode: {:04o}", mode()));
+      m_mode->setText(permissionModeText(mode()));
     }
     m_edited();
   }
@@ -257,31 +341,26 @@ void PermissionEditor::sync(const luciole::PermissionSnapshot& snapshot) {
     m_owner->setValue(m_initialOwner);
     m_group->setValue(m_initialGroup);
   }
+  const std::size_t items = snapshot.results ? snapshot.results->size() : 0;
   m_mode->setText(
-      m_multiple          ? std::format(
-                                "{} items · {} with unknown metadata", snapshot.results ? snapshot.results->size() : 0,
-                                snapshot.unknownItems
-                            )
-          : snapshot.info ? std::format("Mode: {:04o}", mode())
-                          : "Mode: Unknown"
+      m_multiple ? (snapshot.unknownItems > 0 ? std::format("{} items · {} unknown", items, snapshot.unknownItems)
+                                              : std::format("{} items", items))
+          : snapshot.info ? permissionModeText(mode())
+                          : "Unknown"
   );
   if (m_multiple) {
-    m_ids->setText(
-        !snapshot.info ? "Owner: Unknown · Group: Unknown"
-                       : std::format(
-                             "Owner: {} · Group: {}",
-                             snapshot.mixedOwner || snapshot.unknownItems > 0 ? "Mixed / unknown"
-                                                                              : std::to_string(snapshot.info->owner),
-                             snapshot.mixedGroup || snapshot.unknownItems > 0 ? "Mixed / unknown"
-                                                                              : std::to_string(snapshot.info->group)
-                         )
-    );
+    const auto id = [&](bool mixed, std::uint32_t value, const char* kind) {
+      return !snapshot.info                    ? std::string("Unknown")
+          : mixed || snapshot.unknownItems > 0 ? std::string("Mixed or unknown")
+                                               : std::format("{} {}", kind, value);
+    };
+    m_ownerId->setText(id(snapshot.mixedOwner, snapshot.info ? snapshot.info->owner : 0, "UID"));
+    m_groupId->setText(id(snapshot.mixedGroup, snapshot.info ? snapshot.info->group : 0, "GID"));
     m_owner->setPlaceholder("Keep current owner (name or ID to change)");
     m_group->setPlaceholder("Keep current group (name or ID to change)");
   } else {
-    m_ids->setText(
-        snapshot.info ? std::format("Owner ID: {} · Group ID: {}", snapshot.info->owner, snapshot.info->group) : ""
-    );
+    m_ownerId->setText(snapshot.info ? std::format("UID {}", snapshot.info->owner) : "");
+    m_groupId->setText(snapshot.info ? std::format("GID {}", snapshot.info->group) : "");
   }
   std::string reason = snapshot.info ? snapshot.info->reason : "";
   if (snapshot.info && snapshot.info->multipleLinks) {
@@ -312,7 +391,6 @@ void PermissionEditor::sync(const luciole::PermissionSnapshot& snapshot) {
   m_message->setParticipatesInLayout(!m_multiple && !message.empty());
   m_message->setColor(colorSpecFromRole(snapshot.failed() ? ColorRole::Error : ColorRole::OnSurfaceVariant));
   m_reason->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
-  m_ids->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
   m_syncing = false;
 }
 bool PermissionEditor::recursive() const { return m_recursive && m_recursive->checked(); }

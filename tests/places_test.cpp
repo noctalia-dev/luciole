@@ -70,6 +70,12 @@ namespace {
     luciole::PinService service(path);
     service.reload();
     pump.ready(service);
+    const std::vector<luciole::SavedWindow> updatedWindows{
+        {.tabs = {{.primary = fixture.location("restored-tab"), .secondary = std::nullopt}}}
+    };
+    TEST_CHECK(service.saveWindows(updatedWindows));
+    pump.ready(service);
+    TEST_CHECK(state.load() && state.state().windows == updatedWindows);
     const auto& places = service.userPlaces();
     TEST_CHECK(
         places.size() == 8
@@ -220,7 +226,9 @@ namespace {
     TEST_CHECK(service.removeMany({fixture.location("a"), fixture.location("b")}));
     pump.ready(service);
     TEST_CHECK((service.bookmarks() == std::vector{fixture.pin("c"), trash}));
-    TEST_CHECK(state.load() && state.state().windows == windows && state.state().bookmarks == service.bookmarks());
+    TEST_CHECK(
+        state.load() && state.state().windows == updatedWindows && state.state().bookmarks == service.bookmarks()
+    );
 
     TEST_CHECK(service.add({{"line\nbreak", fixture.location("controls")}}, 1));
     pump.ready(service);

@@ -32,6 +32,10 @@ class VirtualGridView;
 // Menus dismiss on focus/outside clicks; forms remain until explicitly closed.
 enum class PopupMode : std::uint8_t { Transient, Dialog };
 
+// Dialog width tiers: Small for one-field prompts and confirmations, Medium for forms and inspectors, Large for
+// multi-pane editors. A dialog is never wider than the window minus the dialog margin on each side.
+enum class DialogWidth : std::uint8_t { Small, Medium, Large };
+
 // The part of BrowserPage that feature controllers use. BrowserPage implements it.
 //
 // A controller (`page/<feature>_controller.{h,cpp}`) owns one feature of the page:
@@ -49,10 +53,11 @@ enum class PopupMode : std::uint8_t { Transient, Dialog };
 // sequence, and onFrame() runs sync() only when the flag was set. Keep that slot so syncs run in the same order
 // every frame.
 //
-// Dialogs: show the root with showPopup(). If menuSurface() exists afterwards, keep the widget pointers and
+// Dialogs: show the root with showDialog(). If menuSurface() exists afterwards, keep the widget pointers and
 // call activeDialog().bind(kind, onClose). onClose is the only teardown path: closeMenu() runs it whatever
 // closed the popup, and it cancels the dialog's job and drops the pointers. When the page left its window
 // (!jobs().attached()), a job that already applies changes keeps running for the page that takes it over.
+// Never size a dialog root yourself: the page sets its width from the tier and its height from its content.
 //
 // Input, layout and scene hooks that the page cannot route generically yet are small controller methods the
 // page calls at the original spot.
@@ -139,15 +144,16 @@ public:
   // Cancels file pointer gestures, drops the view anchor and scrolls the file list to the top.
   virtual void resetFileView() = 0;
 
-  // Replaces the active popup with `root`; Dialog mode retains form state across focus loss and outside clicks.
+  // Replaces the active popup with a menu or transient popover anchored at `anchor`.
   virtual void showPopup(
-      std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
-      bool alignLeft, PopupMode mode = PopupMode::Transient
+      std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height, bool alignLeft
   ) = 0;
-  // Shows `root` centered on the window, at most `preferredWidth` wide, and focuses its first control.
-  virtual void showCenteredDialog(std::unique_ptr<Flex> root, float preferredWidth) = 0;
-  // Re-measures and re-centers the popup on every frame, at most `width` wide; `height` is the current height.
-  virtual void setDialogSize(float width, float height) = 0;
+  // Shows `root` as a modal dialog centered on the window, with a drop shadow, and focuses its first control.
+  // Its height follows its content, capped by the window. While it stays open its top edge stays put, so
+  // switching to a shorter or taller page or tab only moves the bottom edge.
+  virtual void showDialog(std::unique_ptr<Flex> root, DialogWidth width) = 0;
+  // The content width a dialog of tier `width` gets in the window now; for content laid out at a fixed width.
+  virtual float dialogWidth(DialogWidth width) const = 0;
   // Closes the active dialog on the next main loop iteration.
   virtual void dismissMenu() = 0;
   // Closes the active dialog now.

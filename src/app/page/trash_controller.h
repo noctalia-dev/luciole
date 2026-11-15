@@ -29,8 +29,6 @@ public:
   void restoreChanged(OperationJob& job);
   // Frame slot in BrowserPage::prepareFrame() and pumpJobs().
   void onFrame();
-  // Menu popup hook: fits the confirmation dialog's height to its content.
-  void layoutDialog();
 
 private:
   bool canTrashItems(const std::vector<luciole::DirectoryEntry>& targets) const;

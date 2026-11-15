@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <format>
+#include <utility>
 
 namespace {
   using P = luciole::BrowserPreference;
@@ -29,11 +30,34 @@ SettingsDialog::SettingsDialog(
     std::function<void(luciole::OverrideEdit)> change, std::function<void()> reset, std::function<void()> close,
     std::function<void()> clearThumbnails
 )
-    : m_change(std::move(change)) {
+    : m_change(std::move(change)), m_resetAll(std::move(reset)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
   luciole::applyDialogStyle(*this);
-  addChild(luciole::dialogHeader("Settings", "settings", std::move(close)));
+  auto actions = ui::row(
+      {.align = FlexAlign::Center, .gap = Style::spaceSm},
+      ui::label(
+          {.out = &m_status,
+           .fontSize = Style::fontSizeCaption,
+           .maxWidth = 260.0F,
+           .maxLines = 1,
+           .configure =
+               [](Label& label) {
+                 label.setUseMarkup(false);
+                 label.setEllipsize(TextEllipsize::End);
+               }}
+      ),
+      ui::button(
+          {.out = &m_reset,
+           .text = "Reset all settings",
+           .glyph = "restore",
+           .controlHeight = Style::controlHeightSm,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] { onResetClicked(); }}
+      )
+  );
+  m_reset->setOnLeave([this] { disarmReset(); });
+  addChild(luciole::dialogHeader("Settings", "settings", std::move(close), &m_title, std::move(actions)));
   auto navigation = ui::column(
       {.out = &m_navigation, .align = FlexAlign::Stretch, .width = 192.0F},
       ui::scrollView(
@@ -62,6 +86,7 @@ SettingsDialog::SettingsDialog(
       )
   );
   section("General", "adjustments-horizontal");
+  card("Behavior");
   addChoice(
       P::ActivationMode, "Open items",
       {{"Single click", luciole::ActivationMode::SingleClick}, {"Double click", luciole::ActivationMode::DoubleClick}}
@@ -73,11 +98,14 @@ SettingsDialog::SettingsDialog(
        {"Select names", luciole::TypingMode::Typeahead}}
   );
   addBool(P::SwitchToNewTab, "Switch to new folder tabs");
+  card("Window");
+  addBool(P::RestoreLastWindow, "Restore tabs from last closed window");
+  addBool(P::AlwaysShowTabBar, "Always show tab bar");
+  addBool(P::AlwaysShowStatusBar, "Always show status bar");
+  card("Files");
   addBool(P::ShowHidden, "Show hidden files");
   addBool(P::ShowBackups, "Show backup files (*~)");
-  group("Terminal");
-  addTerminal();
-  group("Sorting");
+  card("Sorting");
   addChoice(
       P::SortBy, "Sort by",
       {{"Name", luciole::SortField::Name},
@@ -93,7 +121,10 @@ SettingsDialog::SettingsDialog(
   );
   addBool(P::SortDescending, "Reverse order");
   addBool(P::DirectoriesFirst, "Folders first");
+  card("Terminal");
+  addTerminal();
   section("Views", "layout-grid");
+  card("View");
   addChoice(
       P::ViewMode, "View",
       {{"Grid", luciole::ViewMode::Grid}, {"List", luciole::ViewMode::List}, {"Columns", luciole::ViewMode::Miller}}
@@ -103,15 +134,16 @@ SettingsDialog::SettingsDialog(
       {{"Compact", luciole::ViewDensity::Compact}, {"Comfortable", luciole::ViewDensity::Comfortable}}
   );
   addBool(P::ShowEmblems, "Link and read-only emblems");
-  group("Grid");
+  card("Grid");
   addNumber(P::GridIconSize, "Icon size", {luciole::kGridIconSizes.begin(), luciole::kGridIconSizes.end()});
   addBool(P::ShowSizeCaption, "File size caption");
   addBool(P::ShowTypeCaption, "File type caption");
   addBool(P::ShowModifiedCaption, "Modified date caption");
-  group("Columns");
+  card("Column view");
   addNumber(P::MillerColumnWidth, "Column width", {180, 208, 240, 260, 300, 360, 480, 640, 800});
   addBool(P::MillerShowParents, "Show parent folders");
   section("List columns", "list-details");
+  card("List");
   addBool(P::ExpandableFolders, "Expandable folders");
   auto orderLabel = ui::label({.fontSize = Style::fontSizeCaption, .maxWidth = 180.0F});
   auto* orderText = orderLabel.get();
@@ -122,7 +154,7 @@ SettingsDialog::SettingsDialog(
       },
       std::move(orderLabel)
   );
-  group("Visible columns");
+  card("Visible columns");
   addBool(P::ShowTypeColumn, "Type");
   addBool(P::ShowSizeColumn, "Size");
   addBool(P::ShowModifiedColumn, "Modified");
@@ -132,7 +164,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::ShowGroupColumn, "Group");
   addBool(P::ShowPermissionsColumn, "Permissions");
   addBool(P::ShowLocationColumn, "Location");
-  group("Column widths");
+  card("Column widths");
   addNumber(P::NameColumnWidth, "Name (0 = auto)", widths(160, 16384, true));
   addNumber(P::TypeColumnWidth, "Type", widths(64, 2048));
   addNumber(P::SizeColumnWidth, "Size", widths(64, 2048));
@@ -144,62 +176,42 @@ SettingsDialog::SettingsDialog(
   addNumber(P::PermissionsColumnWidth, "Permissions", widths(64, 2048));
   addNumber(P::LocationColumnWidth, "Location", widths(64, 2048));
   section("Sidebar & preview", "layout-sidebar");
-  group("Sidebar");
+  card("Sidebar");
   addBool(P::ShowSidebar, "Show sidebar");
   addBool(P::SidebarTree, "Show folder tree");
   addBool(P::ShowDrives, "Show drives");
   addNumber(P::SidebarWidth, "Sidebar width", widths(luciole::kMinSidebarWidth, luciole::kMaxSidebarWidth));
-  group("Preview");
+  card("Preview");
   addBool(P::ShowPreview, "Show preview");
   addNumber(P::PreviewWidth, "Preview width", widths(208, 800));
   section("Thumbnails", "photo");
+  card("Generation");
   addChoice(
       P::ThumbnailPolicy, "Show thumbnails",
       {{"Never", luciole::ThumbnailPolicy::Never},
        {"Local files", luciole::ThumbnailPolicy::Local},
-       {"All locations", luciole::ThumbnailPolicy::All}}
-  );
-  m_section->addChild(
-      ui::label(
-          {.text =
-               "All locations can generate thumbnails on mounted shares. Unmounted locations use cached thumbnails.",
-           .fontSize = Style::fontSizeCaption,
-           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-           .maxLines = 2}
-      )
+       {"All locations", luciole::ThumbnailPolicy::All}},
+      "All locations can generate thumbnails on mounted shares. Unmounted locations use cached thumbnails."
   );
   addNumber(P::ThumbnailMaxFileMib, "Image/PDF size limit", {1, 1024}, "MiB");
   addNumber(P::ThumbnailMaxMegapixels, "Image pixel limit", {1, 64}, "MP");
+  card("Cache");
   addNumber(P::ThumbnailCacheMib, "Disk cache limit", {16, 1024}, "MiB");
   m_section->addChild(
-      ui::button(
-          {.out = &m_clearThumbnails,
-           .text = "Clear thumbnail cache",
-           .variant = ButtonVariant::Default,
-           .onClick = std::move(clearThumbnails)}
-      )
-  );
-  selectPage(0);
-  // Fixed footer: status text never changes the dialog's layout.
-  addChild(
       ui::row(
-          {.align = FlexAlign::Center, .gap = Style::spaceMd},
-          ui::label(
-              {.out = &m_status,
-               .fontSize = Style::fontSizeCaption,
-               .maxLines = 2,
-               .flexGrow = 1.0F,
-               .configure = [](Label& label) { label.setUseMarkup(false); }}
-          ),
+          {.align = FlexAlign::Center, .gap = 8.0F, .paddingV = 6.0F},
+          ui::label({.text = "Cached thumbnails", .fontWeight = FontWeight::SemiBold, .flexGrow = 1.0F}),
           ui::button(
-              {.text = "Reset all settings",
-               .glyph = "restore",
-               .controlHeight = Style::controlHeightSm,
-               .variant = ButtonVariant::Ghost,
-               .onClick = std::move(reset)}
+              {.out = &m_clearThumbnails,
+               .text = "Clear cache",
+               .variant = ButtonVariant::Default,
+               .minWidth = 180.0F,
+               .maxWidth = 180.0F,
+               .onClick = std::move(clearThumbnails)}
           )
       )
   );
+  selectPage(0);
 }
 
 void SettingsDialog::section(const std::string& title, const std::string& glyph) {
@@ -219,40 +231,16 @@ void SettingsDialog::section(const std::string& title, const std::string& glyph)
       )
   );
   m_navButtons.push_back(button);
-  auto page = ui::column(
-      {.align = FlexAlign::Stretch, .gap = Style::spaceMd},
-      ui::row(
-          {.align = FlexAlign::Center, .gap = 8.0F},
-          ui::glyph({.glyph = glyph, .color = colorSpecFromRole(ColorRole::Primary)}),
-          ui::label(
-              {.text = title,
-               .fontSize = Style::fontSizeHeader,
-               .fontWeight = FontWeight::SemiBold,
-               .color = colorSpecFromRole(ColorRole::Primary)}
-          )
-      )
-  );
-  page->addChild(ui::column({.out = &m_section, .align = FlexAlign::Stretch, .gap = Style::spaceXs}));
+  m_pageTitles.push_back(title);
+  auto page = ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceMd});
+  m_section = nullptr;
   m_pages.push_back(page.get());
   m_body->content()->addChild(std::move(page));
 }
-void SettingsDialog::group(const std::string& title) {
-  // Same caption heading as the places sidebar; top space separates it from the previous group.
-  const float top = m_section->children().empty() ? 0.0F : Style::spaceMd;
-  m_section->addChild(
-      ui::column(
-          {.align = FlexAlign::Start,
-           .configure = [top](Flex& heading) { heading.setPadding(top, 0.0F, Style::spaceXs, 0.0F); }},
-          ui::label(
-              {.text = title,
-               .fontSize = Style::fontSizeCaption,
-               .fontWeight = FontWeight::SemiBold,
-               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
-          )
-      )
-  );
-}
+void SettingsDialog::card(const std::string& title) { m_pages.back()->addChild(luciole::card(title, &m_section)); }
 void SettingsDialog::selectPage(std::size_t selected) {
+  disarmReset();
+  m_title->setText(std::format("Settings - {}", m_pageTitles[selected]));
   for (std::size_t index = 0; index < m_pages.size(); ++index) {
     m_pages[index]->setVisible(index == selected);
     m_pages[index]->setParticipatesInLayout(index == selected);
@@ -266,23 +254,37 @@ void SettingsDialog::setCompact(bool compact) {
   m_navigation->setMinWidth(width);
   m_navigation->setMaxWidth(width);
 }
+Node* SettingsDialog::navigation() const { return m_navigation; }
 template <class T>
 void SettingsDialog::addRow(
     luciole::PreferenceKey<T> key, const std::string& title, std::function<void(const T&)> show,
-    std::unique_ptr<Node> control
+    std::unique_ptr<Node> control, std::string subtitle
 ) {
+  auto titleLabel = ui::label({.text = title, .fontWeight = FontWeight::SemiBold, .maxLines = 2, .flexGrow = 1.0F});
+  std::unique_ptr<Node> copy;
+  if (subtitle.empty()) {
+    copy = std::move(titleLabel);
+  } else {
+    copy = ui::column(
+        {.align = FlexAlign::Stretch, .gap = 2.0F, .flexGrow = 1.0F}, std::move(titleLabel),
+        ui::label(
+            {.text = std::move(subtitle),
+             .fontSize = Style::fontSizeCaption,
+             .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+             .maxLines = 3}
+        )
+    );
+  }
   m_section->addChild(
-      ui::row(
-          {.align = FlexAlign::Center, .gap = 8.0F, .paddingV = 6.0F},
-          ui::label({.text = title, .fontWeight = FontWeight::SemiBold, .maxLines = 2, .flexGrow = 1.0F}),
-          std::move(control)
-      )
+      ui::row({.align = FlexAlign::Center, .gap = 8.0F, .paddingV = 6.0F}, std::move(copy), std::move(control))
   );
   m_rows[key.id()] = [this, key, show = std::move(show)] { show(luciole::preferenceValue(m_current, key)); };
 }
 
 template <class T>
-void SettingsDialog::addChoice(luciole::PreferenceKey<T> key, const std::string& title, const Choices<T>& choices) {
+void SettingsDialog::addChoice(
+    luciole::PreferenceKey<T> key, const std::string& title, const Choices<T>& choices, std::string subtitle
+) {
   auto control = std::make_unique<Select>();
   auto* select = control.get();
   std::vector<std::string> options;
@@ -301,7 +303,7 @@ void SettingsDialog::addChoice(luciole::PreferenceKey<T> key, const std::string&
     const auto found = std::ranges::find(choices, value, &Choices<T>::value_type::second);
     select->setSelectedIndexSilently(static_cast<std::size_t>(found - choices.begin()));
   };
-  addRow<T>(key, title, show, std::move(control));
+  addRow<T>(key, title, show, std::move(control), std::move(subtitle));
 }
 
 void SettingsDialog::addTerminal() {
@@ -325,15 +327,7 @@ void SettingsDialog::addTerminal() {
           input->setValue(value);
         }
       },
-      std::move(control)
-  );
-  m_section->addChild(
-      ui::label(
-          {.text = "For example: foot or kitty. Leave empty to use $TERMINAL, then automatic discovery.",
-           .fontSize = Style::fontSizeCaption,
-           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-           .maxLines = 3}
-      )
+      std::move(control), "For example: foot or kitty. Leave empty to use $TERMINAL, then automatic discovery."
   );
 }
 
@@ -385,8 +379,7 @@ template <class T> void SettingsDialog::send(luciole::PreferenceKey<T> key, std:
   }
   luciole::preferenceValue(m_current, key) = value.value_or(luciole::preferenceValue(m_inherited, key));
   m_rows.at(key.id())();
-  m_status->setText("Saving…");
-  m_status->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
+  setStatus("Saving…", false);
   m_change(value ? luciole::OverrideEdit(key, *value) : luciole::OverrideEdit(key, std::nullopt));
 }
 void SettingsDialog::sync(
@@ -394,14 +387,36 @@ void SettingsDialog::sync(
     const std::string& error, bool clearingThumbnails
 ) {
   m_clearThumbnails->setEnabled(!clearingThumbnails);
-  m_clearThumbnails->setText(clearingThumbnails ? "Clearing…" : "Clear thumbnail cache");
+  m_clearThumbnails->setText(clearingThumbnails ? "Clearing…" : "Clear cache");
   m_current = settings;
   m_inherited = inherited;
   for (const auto& [id, show] : m_rows) {
     show();
   }
-  m_status->setText(!error.empty() ? error : clearingThumbnails ? "Clearing cache…" : busy ? "Saving…" : "");
-  m_status->setColor(colorSpecFromRole(error.empty() ? ColorRole::OnSurfaceVariant : ColorRole::Error));
+  setStatus(!error.empty() ? error : clearingThumbnails ? "Clearing cache…" : busy ? "Saving…" : "", !error.empty());
+}
+void SettingsDialog::setStatus(const std::string& text, bool error) {
+  // One line in the header: the tooltip shows an ellipsized error in full.
+  m_status->setText(text);
+  m_status->setTooltip(text);
+  m_status->setColor(colorSpecFromRole(error ? ColorRole::Error : ColorRole::OnSurfaceVariant));
+}
+void SettingsDialog::onResetClicked() {
+  if (!m_resetArmed) {
+    m_resetArmed = true;
+    m_reset->setText("Confirm reset");
+    m_reset->setVariant(ButtonVariant::Destructive);
+    return;
+  }
+  disarmReset();
+  m_resetAll();
+}
+void SettingsDialog::disarmReset() {
+  if (!std::exchange(m_resetArmed, false)) {
+    return;
+  }
+  m_reset->setText("Reset all settings");
+  m_reset->setVariant(ButtonVariant::Ghost);
 }
 void SettingsDialog::reveal(const Node* node) {
   m_navigationScroll->requestScrollIntoView(node);

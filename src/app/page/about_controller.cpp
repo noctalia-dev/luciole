@@ -33,7 +33,9 @@ void AboutController::open() {
   ScrollView* scroll = nullptr;
   Label* message = nullptr;
   Image* logo = nullptr;
-  constexpr float width = 536.0F;
+  // Text width inside the dialog padding and the scroll view's reserved gutter.
+  const float width =
+      m_page.dialogWidth(DialogWidth::Medium) - Style::spaceMd * 2.0F - Style::scrollbarWidth - Style::scrollbarGap;
   auto body = ui::scrollView(
       {.out = &scroll,
        .viewportPaddingH = 0.0F,
@@ -97,7 +99,7 @@ void AboutController::open() {
       luciole::dialogHeader("About Luciole", "info-circle", [this] { m_page.dismissMenu(); }), std::move(body)
   );
   luciole::applyDialogStyle(*root);
-  m_page.showCenteredDialog(std::move(root), 588.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::About, [this] {
       m_scroll = nullptr;

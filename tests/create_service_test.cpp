@@ -82,19 +82,18 @@ namespace {
     ));
     TEST_CHECK(info);
     const luciole::GString display(g_filename_display_name(path.filename().c_str()));
-    return {
+    luciole::DirectoryEntry result{
         .id = 1,
-        .location = location(path),
+        .place = location(path),
         .name = path.filename().native(),
-        .displayName = display.get(),
         .type = luciole::fileType(g_file_info_get_file_type(info.get())),
         .symlink = g_file_info_get_is_symlink(info.get()) != FALSE,
         .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {},
-        .identity = luciole::readFileIdentity(info.get())
+        .modifiedSeconds = {}
     };
+    result.setDisplayName(display.get());
+    result.setIdentity(luciole::readFileIdentity(info.get()));
+    return result;
   }
   void prepareLink(Pump& pump, luciole::CreateService& service, const fs::path& path) {
     TEST_CHECK(service.prepareLink(linkEntry(path)));
@@ -889,7 +888,7 @@ namespace {
     pump.until([&] { return model.rows().size() == 1; });
     const auto id = model.rows().front();
     TEST_CHECK(
-        model.entry(id)->location == service.snapshot().destination
+        model.entry(id)->location() == service.snapshot().destination
         && model.entry(id)->type == luciole::FileType::Directory
         && model.select(id)
     );
@@ -897,7 +896,7 @@ namespace {
     pump.create(service, "created.txt");
     pump.until([&] { return model.rows().size() == 2; });
     const auto file = std::ranges::find_if(model.rows(), [&](auto id) {
-      return model.entry(id)->location == service.snapshot().destination;
+      return model.entry(id)->location() == service.snapshot().destination;
     });
     TEST_CHECK(
         file != model.rows().end()

@@ -33,13 +33,7 @@ luciole::FileDetails luciole::readFileDetails(const Location& location, const Ca
   if (const char* etag = g_file_info_get_etag(info.get())) {
     details.etag = etag;
   }
-  if (g_file_info_has_attribute(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED)) {
-    const auto seconds = g_file_info_get_attribute_uint64(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED);
-    const auto nanos = g_file_info_has_attribute(info.get(), "time::changed-nsec")
-        ? g_file_info_get_attribute_uint32(info.get(), "time::changed-nsec")
-        : g_file_info_get_attribute_uint32(info.get(), G_FILE_ATTRIBUTE_TIME_CHANGED_USEC) * 1000U;
-    details.contentRevision = std::format("{}:{}", seconds, nanos);
-  }
+  details.contentRevision = readChangeRevision(info.get());
   details.identity = readFileIdentity(info.get());
   if (g_file_info_get_attribute_type(info.get(), G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME)
       == G_FILE_ATTRIBUTE_TYPE_STRING) {

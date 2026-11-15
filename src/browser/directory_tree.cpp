@@ -4,16 +4,28 @@
 #include <set>
 
 struct luciole::DirectoryTree::Node {
-  DirectoryEntry entry;
-  DirectorySession session{maxChildren};
-  bool started = false;
   struct Identity {
     EntryId id;
     std::optional<FileIdentity> identity;
   };
-  std::map<std::string, Identity> ids;
-  explicit Node(DirectoryEntry value) : entry(std::move(value)) {}
+  // A node's session always lists the same folder, so a child's name stands for its location.
+  struct Ids {
+    std::map<std::string, Identity> previous;
+    std::shared_ptr<EntryId> next;
+    EntryId resolve(const DirectoryEntry& entry) const {
+      const auto prior = previous.find(entry.name);
+      return prior != previous.end() && prior->second.identity == entry.identity() ? prior->second.id : (*next)++;
+    }
+  };
+  DirectoryEntry entry;
+  std::shared_ptr<Ids> ids;
+  DirectorySession session;
+  bool started = false;
+  Node(DirectoryEntry value, std::shared_ptr<EntryId> next)
+      : entry(std::move(value)), ids(std::make_shared<Ids>(Ids{{}, std::move(next)})),
+        session(maxChildren, [ids = ids](const DirectoryEntry& child) { return ids->resolve(child); }) {}
 };
+
 luciole::DirectoryTree::DirectoryTree(DirectoryModel& model, bool foldersOnly)
     : m_model(model), m_foldersOnly(foldersOnly) {}
 luciole::DirectoryTree::~DirectoryTree() { clear(); }
@@ -39,7 +51,7 @@ std::size_t luciole::DirectoryTree::loading() const {
 luciole::TreeRowInfo luciole::DirectoryTree::row(EntryId id) const {
   TreeRowInfo result{.depth = m_model.treeDepth(id), .enabled = true, .status = {}};
   const auto* entry = m_model.entry(id);
-  result.expandable = entry && entry->type == FileType::Directory && !entry->symlink && !entry->location.isTrash();
+  result.expandable = entry && entry->type == FileType::Directory && !entry->symlink && !entry->location().isTrash();
   if (!entry) {
     return result;
   }
@@ -64,6 +76,8 @@ luciole::TreeRowInfo luciole::DirectoryTree::row(EntryId id) const {
 bool luciole::DirectoryTree::cycle(const DirectoryEntry& entry) const {
   auto parent = m_model.treeParent(entry.id);
   std::set<EntryId> visited;
+  const auto location = entry.location();
+  const auto identity = entry.identity();
   while (parent) {
     if (!visited.insert(*parent).second) {
       return true;
@@ -72,7 +86,7 @@ bool luciole::DirectoryTree::cycle(const DirectoryEntry& entry) const {
     if (!ancestor) {
       break;
     }
-    if (ancestor->location == entry.location || (entry.identity && ancestor->identity == entry.identity)) {
+    if (ancestor->location() == location || (identity && ancestor->identity() == identity)) {
       return true;
     }
     parent = m_model.treeParent(*parent);
@@ -93,7 +107,7 @@ bool luciole::DirectoryTree::expand(EntryId id) {
     return false;
   }
   m_rejected.reset();
-  auto node = std::make_unique<Node>(entry);
+  auto node = std::make_unique<Node>(entry, m_nextId);
   node->session.setChangedCallback([this] {
     publish();
     pump();
@@ -148,7 +162,7 @@ void luciole::DirectoryTree::pump() {
     if (node.session.snapshot().location) {
       node.session.refresh();
     } else {
-      node.session.open(node.entry.location);
+      node.session.open(node.entry.location());
     }
   }
   m_pumping = false;
@@ -168,6 +182,8 @@ void luciole::DirectoryTree::refresh() {
 }
 void luciole::DirectoryTree::publish() {
   auto snapshot = m_root;
+  std::vector<DirectoryEntries> sources{m_root.entries};
+  std::vector<DirectoryEntries::Index> rows;
   std::unordered_map<EntryId, EntryId> parents;
   std::set<EntryId> retained;
   const auto append = [&](this auto&& self, const DirectoryEntry& entry, std::size_t depth) -> void {
@@ -180,28 +196,38 @@ void luciole::DirectoryTree::publish() {
     }
     auto& node = *found->second;
     if (entry.id != node.entry.id
-        || entry.identity != node.entry.identity
+        || entry.identity() != node.entry.identity()
         || entry.symlink
         || entry.type != FileType::Directory) {
       return;
     }
     retained.insert(found->first);
     std::map<std::string, Node::Identity> currentIds;
-    for (auto child : node.session.snapshot().entries) {
+    const auto source = sources.size();
+    const auto& children = node.session.snapshot().entries;
+    sources.push_back(children);
+    for (std::size_t i = 0; i < children.size(); ++i) {
+      const auto& child = children[i];
+      currentIds.emplace(child.name, Node::Identity{child.id, child.identity()});
       if (m_foldersOnly && child.type != FileType::Directory) {
         continue;
       }
-      const auto prior = node.ids.find(child.location.uri());
-      child.id = prior != node.ids.end() && prior->second.identity == child.identity ? prior->second.id : m_nextId++;
-      currentIds.emplace(child.location.uri(), Node::Identity{child.id, child.identity});
+      if (parents.empty()) {
+        rows.reserve(m_root.entries.size() + children.size());
+        for (std::size_t root = 0; root < m_root.entries.size(); ++root) {
+          rows.push_back({0, root});
+        }
+      }
       parents.emplace(child.id, entry.id);
-      snapshot.entries.push_back(child);
+      rows.push_back({source, i});
       self(child, depth + 1);
     }
-    node.ids = std::move(currentIds);
+    node.ids->previous = std::move(currentIds);
   };
-  for (const auto& entry : m_root.entries) {
-    append(entry, 0);
+  if (!m_nodes.empty()) {
+    for (const auto& entry : m_root.entries) {
+      append(entry, 0);
+    }
   }
   for (auto it = m_nodes.begin(); it != m_nodes.end();) {
     if (!retained.contains(it->first)) {
@@ -210,6 +236,9 @@ void luciole::DirectoryTree::publish() {
     } else {
       ++it;
     }
+  }
+  if (!parents.empty()) {
+    snapshot.entries = DirectoryEntries::project(std::move(sources), rows);
   }
   snapshot.generation = m_model.snapshot().generation + 1;
   m_model.applySnapshot(std::move(snapshot), std::move(parents), m_foldersOnly);

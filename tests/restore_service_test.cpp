@@ -43,7 +43,7 @@ namespace {
         m_source.dispatch(fds, first);
       }
     }
-    std::vector<luciole::DirectoryEntry> listing(const luciole::Location& location) {
+    luciole::DirectoryEntries listing(const luciole::Location& location) {
       luciole::DirectorySession session;
       session.open(location);
       until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
@@ -53,7 +53,7 @@ namespace {
     luciole::DirectoryEntry trashed(const fs::path& original) {
       auto entries = listing(luciole::Location::trash());
       const auto found = std::ranges::find_if(entries, [&](const auto& entry) {
-        return entry.trash.original == luciole::Location::fromPath(original.native());
+        return entry.trashInfo().original == luciole::Location::fromPath(original.native());
       });
       TEST_CHECK(found != entries.end());
       return *found;
@@ -83,7 +83,7 @@ namespace {
   }
   fs::path backing(const luciole::DirectoryEntry& entry) {
     const luciole::GioPtr<GFileInfo> info(g_file_query_info(
-        luciole::gioFile(entry.location).get(), G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+        luciole::gioFile(entry.location()).get(), G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
     ));
     TEST_CHECK(info);
@@ -99,8 +99,13 @@ namespace {
     auto entry = pump.listing(luciole::Location::fromPath(fixture.root.native())).front();
     luciole::RestoreService service;
     TEST_CHECK(!service.start({}) && !service.start({entry}));
-    entry.location = luciole::Location::fromUri("trash:///unavailable");
-    entry.trash.original = luciole::Location::fromPath((fixture.root / "keep.txt").native());
+    entry.place = luciole::Location::fromUri("trash:///unavailable");
+    entry.setTrash(
+        luciole::TrashInfo{
+            .original = luciole::Location::fromPath((fixture.root / "keep.txt").native()),
+            .deletionDate = entry.trashInfo().deletionDate,
+        }
+    );
     TEST_CHECK(!service.start({entry, entry}));
     TEST_CHECK(service.start({entry}) && !service.start({entry}));
     pump.done(service);

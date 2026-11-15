@@ -10,6 +10,7 @@
 #include <glib.h>
 #include <linux/fs.h>
 #include <optional>
+#include <set>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
@@ -223,6 +224,7 @@ namespace luciole::transfer {
         Stage stage(destination, work);
         work.metadataIncomplete = false;
         bool published = false;
+        bool deferred = false;
         try {
           std::optional<Tree> tree;
           if (action == TransferAction::Link) {
@@ -240,7 +242,10 @@ namespace luciole::transfer {
               requireUnchanged(source.metadata, info(source.parent.get(), source.name));
             }
           };
-          verifySource();
+          // Without a pending conflict the loop below verifies again before anything else can happen.
+          if (replace || merging) {
+            verifySource();
+          }
           for (;;) {
             work.check();
             if (replace) {
@@ -311,10 +316,14 @@ namespace luciole::transfer {
               work.recordCopy(copyProof, stage.fd());
             }
             if (action == TransferAction::Move) {
-              // The sources are about to go: the published copy must survive a crash first.
-              synchronize(destination);
-              verifySource();
-              removeSource(source.parent.get(), *tree, work);
+              // The sources go only after the published copy is durable; flushMoves() syncs a batch at once.
+              work.pendingMoves.push_back(
+                  {.node = &node,
+                   .tree = *tree,
+                   .destination = opened(::fcntl(destination, F_DUPFD_CLOEXEC, 0)),
+                   .outcome = Moved}
+              );
+              deferred = true;
               result.outcome = Moved;
             }
             break;
@@ -345,6 +354,11 @@ namespace luciole::transfer {
           appendError(
               result.error, FileErrorKind::Unsupported, " The destination does not support some extended attributes."
           );
+        }
+        if (deferred) {
+          // Partial until flushMoves() removes the source; it then applies the outcome recorded here.
+          work.pendingMoves.back().outcome = result.outcome;
+          result.outcome = Partial;
         }
       } catch (const TransferCancelled&) {
         result.outcome = Cancelled;
@@ -434,6 +448,7 @@ namespace luciole::transfer {
           execute(*child, action, work, false);
         }
         finishedChildren = true;
+        flushMoves(work);
         const bool complete = std::ranges::all_of(node.children, [action](const auto& child) {
           return child->result.outcome == (action == TransferAction::Copy ? Copied : Moved);
         });
@@ -600,6 +615,9 @@ namespace luciole::transfer {
       } else {
         requireUnchanged(work.expected(node.source.metadata), info(node.source.parent.get(), node.source.name));
         node.result = transferItem(node, destination.get(), action, work);
+        if (work.pendingMoves.size() >= kMoveSyncBatch) {
+          flushMoves(work);
+        }
       }
     } catch (const TransferCancelled&) {
       const bool effects = std::ranges::any_of(node.children, [](const auto& child) {
@@ -621,5 +639,50 @@ namespace luciole::transfer {
     }
     node.source.parent = Fd{};
     node.attempted = true;
+  }
+
+  void flushMoves(Work& work) {
+    using enum TransferOutcome;
+    auto pending = std::exchange(work.pendingMoves, {});
+    std::optional<FileError> syncError;
+    std::set<dev_t> synced;
+    for (const auto& move : pending) {
+      try {
+        if (synced.insert(statFd(move.destination.get()).st_dev).second) {
+          synchronize(move.destination.get());
+        }
+      } catch (const std::exception&) {
+        syncError = currentFileError();
+        break;
+      }
+    }
+    for (auto& move : pending) {
+      auto& result = move.node->result;
+      result.outcome = Partial;
+      if (syncError) {
+        appendError(
+            result.error, syncError->kind,
+            "The destination was created, but transfer cleanup is incomplete: " + syncError->message
+        );
+        continue;
+      }
+      try {
+        work.check();
+        const auto parent = openSourceParent(move.node->source);
+        verifyTree(parent.get(), move.tree, work);
+        removeSource(parent.get(), move.tree, work);
+        result.outcome = move.outcome;
+      } catch (const TransferCancelled&) {
+        result.error = FileError{
+            .kind = FileErrorKind::Cancelled, .message = "The copy completed; cancellation left source items in place."
+        };
+      } catch (const std::exception&) {
+        const auto error = currentFileError();
+        appendError(
+            result.error, error.kind,
+            "The destination was created, but transfer cleanup is incomplete: " + error.message
+        );
+      }
+    }
   }
 } // namespace luciole::transfer

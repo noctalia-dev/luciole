@@ -1,10 +1,7 @@
 #pragma once
 
+#include "fs/directory_entries.h"
 #include "fs/file_error.h"
-#include "fs/file_icon_source.h"
-#include "fs/file_metadata.h"
-#include "fs/location.h"
-#include "fs/trash_info.h"
 
 #include <cstdint>
 #include <functional>
@@ -15,33 +12,12 @@
 
 namespace luciole {
   enum class DirectoryStatus : std::uint8_t { Idle, Loading, Ready, Error, Cancelled };
-  struct DirectoryEntry {
-    std::uint64_t id = 0;
-    Location location;
-    std::string name; // Original filename bytes, including non-UTF-8 names on Unix.
-    std::string displayName;
-    FileType type = FileType::Unknown;
-    bool hidden = false;
-    bool symlink = false;
-    std::optional<std::uint64_t> size;
-    std::optional<std::uint64_t> modifiedSeconds;
-    std::optional<std::string> etag;
-    FileAccess access{};
-    std::string parentDisplayName; // Search result context; never an operation address.
-    FileIconSource icon{};
-    TrashInfo trash{};
-    std::optional<FileIdentity> identity = std::nullopt;
-    std::optional<std::string> contentType =
-        std::nullopt; // Provider's regular MIME type, with its fast type as a fallback.
-    EntryMetadata details{};
-    std::optional<std::string> contentRevision = std::nullopt; // Provider change time, including subsecond precision.
-  };
 
   struct DirectorySnapshot {
     std::uint64_t generation = 0;
     std::optional<Location> location;
     DirectoryStatus status = DirectoryStatus::Idle;
-    std::vector<DirectoryEntry> entries;
+    DirectoryEntries entries;
     std::optional<FileError> error;
     std::optional<FileError> monitorError;
     DirectoryMetadata metadata{};
@@ -49,13 +25,17 @@ namespace luciole {
     std::optional<FileError> accessError = std::nullopt;
     std::optional<FileError> filesystemError = std::nullopt;
     bool incrementalResults = false; // Fresh current-scan batches, rather than retained refresh entries.
+    // Some local entries still carry a name-based content type; sniffed types follow as further publications.
+    bool contentTypesPending = false;
   };
 
   // Main/default-context service. Observers run there and must not throw.
   // IDs last for this session; they are neither inodes nor persistent bookmarks.
   class DirectorySession {
   public:
-    explicit DirectorySession(std::size_t entryLimit = 0);
+    // Optional consumer-owned IDs allow several immutable sessions to share one projection.
+    using IdResolver = std::function<std::uint64_t(const DirectoryEntry&)>;
+    explicit DirectorySession(std::size_t entryLimit = 0, IdResolver resolveId = {});
     ~DirectorySession();
     DirectorySession(const DirectorySession&) = delete;
     DirectorySession& operator=(const DirectorySession&) = delete;

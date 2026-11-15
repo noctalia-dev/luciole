@@ -30,7 +30,7 @@ luciole::TabId luciole::TabWorkspace::addTab(WindowId id, bool activate) {
     (void)key;
     count += window.tabs.size();
   }
-  if (count >= 32) {
+  if (count >= tabLimit) {
     return 0;
   }
   const auto tab = ++m_nextTab;
@@ -124,7 +124,7 @@ bool luciole::TabWorkspace::reopen(WindowId id) {
     (void)key;
     count += window.tabs.size();
   }
-  if (count >= 32) {
+  if (count >= tabLimit) {
     return false;
   }
   const auto tab = m_closed.back();

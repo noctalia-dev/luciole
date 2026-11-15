@@ -47,22 +47,24 @@ void luciole::FileIcon::bind(const FileIconSource& source, ColorSpec foreground)
   m_thumbnail.reset();
   m_thumbnailPixels = 0;
   m_source = source;
+  m_sourceHandle.reset();
   m_foreground = foreground;
   markLayoutDirty();
 }
 void luciole::FileIcon::bindFile(const DirectoryEntry& entry, ColorSpec foreground) {
   const bool changed = !m_thumbnailSource
       || entry.id != m_thumbnailSource->id
-      || entry.location != m_thumbnailSource->location
-      || entry.etag != m_thumbnailSource->etag
+      || entry.location() != m_thumbnailSource->location()
+      || entry.etag() != m_thumbnailSource->etag()
       || entry.size != m_thumbnailSource->size
       || entry.modifiedSeconds != m_thumbnailSource->modifiedSeconds
       || entry.contentRevision != m_thumbnailSource->contentRevision
-      || entry.identity != m_thumbnailSource->identity
+      || entry.identity() != m_thumbnailSource->identity()
       || entry.type != m_thumbnailSource->type
       || entry.symlink != m_thumbnailSource->symlink
       || entry.contentType != m_thumbnailSource->contentType;
-  if (!changed && entry.icon == m_source && foreground == m_foreground) {
+  const bool sameHandle = entry.icon && entry.icon == m_sourceHandle;
+  if (!changed && (sameHandle || iconSource(entry.icon) == m_source) && foreground == m_foreground) {
     return;
   }
   if (changed) {
@@ -70,7 +72,10 @@ void luciole::FileIcon::bindFile(const DirectoryEntry& entry, ColorSpec foregrou
     m_thumbnailPixels = 0;
     m_thumbnailSource = entry;
   }
-  m_source = entry.icon;
+  if (!sameHandle) {
+    m_source = iconSource(entry.icon);
+  }
+  m_sourceHandle = entry.icon;
   m_foreground = foreground;
   markLayoutDirty();
 }

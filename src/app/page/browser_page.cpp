@@ -1,5 +1,6 @@
 #include "app/page/browser_page.h"
 
+#include "app/startup_trace.h"
 #include "browser/action_registry.h"
 #include "browser/browser_controller.h"
 #include "browser/location_presentation.h"
@@ -33,6 +34,7 @@
 #include "render/render_context.h"
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
+#include "render/scene/rect_node.h"
 #include "thumbnails/preview_service.h"
 #include "ui/browser/action_shortcuts.h"
 #include "ui/browser/file_icon.h"
@@ -48,6 +50,7 @@
 #include "ui/controls/tooltip_presenter.h"
 #include "ui/dialogs/name_dialog.h"
 #include "ui/palette.h"
+#include "ui/style.h"
 #include "wayland/popup_surface.h"
 #include "wayland/text_input_service.h"
 #include "wayland/toplevel_surface.h"
@@ -64,6 +67,16 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+
+namespace {
+  // Dialog width tiers (see DialogWidth) and the gap a dialog keeps to each window edge.
+  constexpr float kDialogWidthSmall = 440.0F;
+  constexpr float kDialogWidthMedium = 600.0F;
+  constexpr float kDialogWidthLarge = 880.0F;
+  constexpr float kDialogMargin = 32.0F;
+  // The lib's default popup shadow, as on its context menus.
+  constexpr ShadowStyle kDialogShadow{};
+} // namespace
 
 BrowserPage::BrowserPage(
     WaylandConnection& connection, RenderContext& renderer, TextInputService& textInput,
@@ -124,6 +137,9 @@ BrowserPage::BrowserPage(
   m_browser.setSearchRecursive(settings.typingMode != luciole::TypingMode::Filter);
   m_browser.setChangedCallback([this] {
     m_browserDirty = true;
+    if (const auto& snapshot = m_browser.model().snapshot(); snapshot.status == luciole::DirectoryStatus::Ready) {
+      luciole::startupListingReady(snapshot.entries.size());
+    }
     m_surface->requestUpdate();
   });
   m_browser.setFileActivatedCallback([this](const luciole::Location& location) { m_launcher.open(location); });
@@ -150,7 +166,7 @@ BrowserPage::BrowserPage(
     adapter->setActivateCallback([this](luciole::EntryId id) {
       auto request = actionRequest(false);
       if (const auto* entry = browser().model().entry(id)) {
-        request.targets.push_back({id, entry->location});
+        request.targets.push_back({id, entry->location()});
       }
       dispatchAction(Action::Open, request);
     });
@@ -444,7 +460,7 @@ void BrowserPage::configurationChanged() {
   m_operations.parentConfigured();
   m_dragDrop.clearExternalDrop();
   m_locationBar.cancelBlankClick();
-  if (m_menuSurface && m_dialogHeight) {
+  if (m_menuSurface && m_dialogTier) {
     m_dialogResizePending = true;
     m_menuSurface->requestLayout();
   }
@@ -702,7 +718,12 @@ void BrowserPage::pointer(const PointerEvent& event) {
   }
   const auto x = static_cast<float>(event.sx), y = static_cast<float>(event.sy);
   if (input == &m_menuDispatcher) {
-    m_batchRename.pointer(x, y, event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter);
+    // Dialog coordinates: the dialog sits inside its shadow frame on the popup surface.
+    const auto* content = m_activeDialog.root();
+    m_batchRename.pointer(
+        x - content->x(), y - content->y(),
+        event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
+    );
   }
   const bool page = input == &dispatcher();
   if (page
@@ -836,7 +857,7 @@ bool BrowserPage::openInNewTab(float x, float y) {
     if (auto index = m_list->itemAtScene(x, y); index && *index < browser().model().rows().size()) {
       const auto* entry = browser().model().entry(browser().model().rows()[*index]);
       if (entry && entry->type == luciole::FileType::Directory) {
-        m_workspaceRequest(command, entry->location);
+        m_workspaceRequest(command, entry->location());
       }
       return true;
     }
@@ -1172,7 +1193,7 @@ luciole::ActionRequest BrowserPage::actionRequest(bool withTargets) const {
 luciole::ActionRequest BrowserPage::requestFor(const std::vector<luciole::DirectoryEntry>& entries) const {
   auto request = actionRequest(false);
   for (const auto& entry : entries) {
-    request.targets.push_back({entry.id, entry.location});
+    request.targets.push_back({entry.id, entry.location()});
   }
   return request;
 }
@@ -1249,7 +1270,13 @@ void BrowserPage::runAction(
   static constexpr auto kHandlers = std::to_array<Handler>({
       {Action::Back, [](BrowserPage& page, const Call&) { (void)page.browser().back(); }},
       {Action::Forward, [](BrowserPage& page, const Call&) { (void)page.browser().forward(); }},
-      {Action::Up, [](BrowserPage& page, const Call&) { (void)page.browser().up(); }},
+      {Action::Up,
+      [](BrowserPage& page, const Call&) {
+        // Selects the folder just left once the parent loads.
+        if (auto current = page.browser().model().snapshot().location; page.browser().up()) {
+          page.revealOnReload({std::move(*current)});
+        }
+      }},
       {Action::Home, [](BrowserPage& page, const Call&) { page.browser().home(); }},
       {Action::Root, [](BrowserPage& page, const Call&) { page.browser().open(luciole::Location::fromPath("/")); }},
       {Action::Refresh, [](BrowserPage& page, const Call&) { page.browser().refresh(); }},
@@ -1286,9 +1313,9 @@ void BrowserPage::runAction(
       {Action::FoldersFirst, sort},
       {Action::Open, [](BrowserPage& page, const Call& call) { page.openTargets(call.targets); }},
       {Action::ContainingFolder,
-       [](BrowserPage& page, const Call& call) { page.showContaining(call.targets.front().location); }},
+       [](BrowserPage& page, const Call& call) { page.showContaining(call.targets.front().location()); }},
       {Action::OriginalLocation,
-       [](BrowserPage& page, const Call& call) { page.showContaining(*call.targets.front().trash.original); }},
+       [](BrowserPage& page, const Call& call) { page.showContaining(*call.targets.front().trashInfo().original); }},
       {Action::Pin, [](BrowserPage& page, const Call& call) { page.pinTargets(call.targets); }},
       {Action::Unpin, [](BrowserPage& page, const Call& call) { page.unpinTargets(call.targets); }},
       {Action::CutFiles, fileClipboard},
@@ -1314,12 +1341,12 @@ void BrowserPage::runAction(
        [](BrowserPage& page, const Call& call) { page.m_archiveController.compress(call.targets); }},
       {Action::ExtractHere,
        [](BrowserPage& page, const Call& call) {
-         page.m_archiveController.extractHere(call.targets.front().location);
+         page.m_archiveController.extractHere(call.targets.front().location());
        }},
       {Action::ExtractTo,
-       [](BrowserPage& page, const Call& call) { page.m_archiveController.extractTo(call.targets.front().location); }},
+       [](BrowserPage& page, const Call& call) { page.m_archiveController.extractTo(call.targets.front().location()); }},
       {Action::BrowseArchive,
-       [](BrowserPage& page, const Call& call) { page.m_archiveController.browse(call.targets.front().location); }},
+       [](BrowserPage& page, const Call& call) { page.m_archiveController.browse(call.targets.front().location()); }},
       {Action::CreateFolder, createItem},
       {Action::CreateFile, createItem},
       {Action::NewDocument,
@@ -1363,7 +1390,7 @@ void BrowserPage::runAction(
       {Action::Redo, [](BrowserPage& page, const Call&) { (void)page.m_hub.replayHistory(page.m_workspaceId, true); }},
       {Action::Operations, [](BrowserPage& page, const Call&) { page.m_operations.open(); }},
       {Action::TargetTerminal,
-       [](BrowserPage& page, const Call& call) { page.openTerminal(call.targets.front().location); }},
+       [](BrowserPage& page, const Call& call) { page.openTerminal(call.targets.front().location()); }},
   });
   static_assert(luciole::actionTableInOrder(kHandlers));
   kHandlers[std::to_underlying(action)].run(*this, {.action = action, .request = request, .targets = targets});
@@ -1372,7 +1399,7 @@ void BrowserPage::runAction(
 void BrowserPage::copyFiles(Action action, const std::vector<luciole::DirectoryEntry>& targets) {
   luciole::FilePayload payload{.locations = {}, .cut = action == Action::CutFiles};
   for (const auto& target : targets) {
-    payload.locations.push_back(target.location);
+    payload.locations.push_back(target.location());
   }
   if (!m_clipboard.setFiles(std::move(payload))) {
     actionError("The file selection could not be copied to the clipboard.");
@@ -1394,7 +1421,7 @@ void BrowserPage::copyPaths(
     append(*request.folder);
   } else {
     for (const auto& target : targets) {
-      append(target.location);
+      append(target.location());
     }
   }
   if (text.size() > 1024 * 1024) {
@@ -1458,8 +1485,8 @@ void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& target
 void BrowserPage::pinTargets(const std::vector<luciole::DirectoryEntry>& targets) {
   std::vector<luciole::Bookmark> pins;
   for (const auto& target : targets) {
-    if (!m_pins.contains(target.location)) {
-      pins.push_back({target.displayName, target.location});
+    if (auto location = target.location(); !m_pins.contains(location)) {
+      pins.push_back({target.displayName(), std::move(location)});
     }
   }
   m_sidebar.pinFolders(std::move(pins), m_pins.bookmarks().size());
@@ -1469,15 +1496,14 @@ void BrowserPage::unpinTargets(const std::vector<luciole::DirectoryEntry>& targe
   std::vector<luciole::Location> locations;
   locations.reserve(targets.size());
   for (const auto& target : targets) {
-    locations.push_back(target.location);
+    locations.push_back(target.location());
   }
   m_pins.removeMany(locations);
 }
 
 void BrowserPage::openPatternSelection(const luciole::ActionRequest& request) {
-  const float width = std::min(440.0F, static_cast<float>(m_surface->width()) - 32.0F);
   auto editor = std::make_unique<NameDialog>(
-      width, "Select by pattern", "cursor-text", m_selectionPattern,
+      dialogWidth(DialogWidth::Small), "Select by pattern", "cursor-text", m_selectionPattern,
       "Use * for any text and ? for one character. Matches visible names, ignoring case.",
       luciole::selectionPatternProblem,
       [this, request](std::string pattern) {
@@ -1498,14 +1524,7 @@ void BrowserPage::openPatternSelection(const luciole::ActionRequest& request) {
   );
   auto* control = editor.get();
   control->input()->setPlaceholder("Pattern");
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = editor->measure(m_surface->renderTarget().renderer(), constraints).height;
-  showPopup(
-      std::move(editor), nullptr, {(m_surface->width() - width) * 0.5F, (m_surface->height() - height) * 0.5F, 1, 1},
-      width, height, false, PopupMode::Dialog
-  );
+  showDialog(std::move(editor), DialogWidth::Small);
   if (m_menuSurface) {
     m_activeDialog.bind(ActiveDialog::Kind::PatternSelection, [this] { m_patternEditor = nullptr; });
     m_patternEditor = control;
@@ -1558,7 +1577,7 @@ bool BrowserPage::targetsCurrent(const std::vector<luciole::DirectoryEntry>& tar
   const bool current = std::ranges::all_of(targets, [this](const auto& target) {
     const auto* entry = browser().model().entry(target.id);
     return entry != nullptr
-        && entry->location == target.location
+        && entry->location() == target.location()
         && std::ranges::contains(browser().model().rows(), target.id);
   });
   if (!current) {
@@ -1664,34 +1683,6 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
   m_savedSettings = settings;
   m_browserDirty = true;
   m_surface->requestLayout();
-}
-
-void BrowserPage::showCenteredDialog(std::unique_ptr<Flex> root, float preferredWidth) {
-  const float width = std::min(preferredWidth, static_cast<float>(m_surface->width()) - 32.0F);
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float preferredHeight = root->measure(m_surface->renderTarget().renderer(), constraints).height;
-  const float height = std::min(preferredHeight, static_cast<float>(m_surface->height()) - 64.0F);
-  showPopup(
-      std::move(root), nullptr, {(m_surface->width() - width) * 0.5F, (m_surface->height() - height) * 0.5F, 1, 1},
-      width, height, false, PopupMode::Dialog
-  );
-  if (!m_menuSurface) {
-    return;
-  }
-  m_dialogHeight = preferredHeight;
-  m_dialogWidth = preferredWidth;
-  m_menuDispatcher.setFocusChangeCallback([this](InputArea*, InputArea* focused) {
-    m_operations.revealFocus(focused);
-    m_aboutController.revealFocus(focused);
-    m_applicationChooser.revealFocus(focused);
-    if (m_menuSurface) {
-      m_menuSurface->requestLayout();
-    }
-  });
-  (void)m_menuDispatcher.cycleTabFocus(false);
-  m_menuSurface->requestLayout();
 }
 
 void BrowserPage::cancelDrag() { m_dragDrop.cancelDrag(); }
@@ -1948,7 +1939,7 @@ void BrowserPage::revealPendingTargets() {
     const bool properties = std::exchange(m_revealProperties, false);
     std::vector<luciole::EntryId> ids;
     for (const auto id : model.rows()) {
-      if (const auto* entry = model.entry(id); entry && std::ranges::contains(targets, entry->location)) {
+      if (const auto* entry = model.entry(id); entry && std::ranges::contains(targets, entry->location())) {
         ids.push_back(id);
       }
     }
@@ -2372,7 +2363,7 @@ std::unique_ptr<Flex> BrowserPage::buildFilePane() {
   miller->activate = [this](luciole::EntryId id) {
     auto request = actionRequest(false);
     if (const auto* entry = browser().model().entry(id)) {
-      request.targets.push_back({id, entry->location});
+      request.targets.push_back({id, entry->location()});
     }
     dispatchAction(Action::Open, request);
   };
@@ -2414,8 +2405,9 @@ void BrowserPage::closeMenu() {
   if (m_menuSurface != nullptr) {
     m_menuSurface->setSceneRoot(nullptr);
   }
-  m_dialogHeight.reset();
-  m_dialogWidth = 588.0F;
+  m_dialogTier.reset();
+  m_dialogTop.reset();
+  m_dialogShadow = nullptr;
   m_dialogPosition.reset();
   m_dialogResizePending = false;
   m_menuDispatcher.setFocusChangeCallback({});
@@ -2425,11 +2417,6 @@ void BrowserPage::closeMenu() {
   m_popupMode = PopupMode::Transient;
   dispatcher().setTextInputContext(m_surface->wlSurface(), &m_textInput);
   m_surface->requestLayout();
-}
-
-void BrowserPage::setDialogSize(float width, float height) {
-  m_dialogHeight = height;
-  m_dialogWidth = width;
 }
 
 PopupSurface* BrowserPage::menuSurface() { return m_menuSurface.get(); }
@@ -2498,23 +2485,162 @@ void BrowserPage::requestWorkspace(
 LayoutRect BrowserPage::menuAnchor() const { return sceneRect(*m_menuButton); }
 
 void BrowserPage::showPopup(
-    std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height, bool alignLeft,
-    PopupMode mode
+    std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height, bool alignLeft
+) {
+  closeMenu();
+  auto* content = root.get();
+  openPopup(
+      std::move(root), content, menu,
+      {.anchorX = static_cast<int>(anchor.x),
+       .anchorY = static_cast<int>(anchor.y),
+       .anchorWidth = std::max(1, static_cast<int>(anchor.width)),
+       .anchorHeight = std::max(1, static_cast<int>(anchor.height)),
+       .width = static_cast<std::uint32_t>(width),
+       .height = static_cast<std::uint32_t>(height),
+       .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+       .gravity = alignLeft ? XDG_POSITIONER_GRAVITY_BOTTOM_LEFT : XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
+       .constraintAdjustment =
+           XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
+      PopupMode::Transient
+  );
+}
+
+float BrowserPage::dialogWidth(DialogWidth width) const {
+  const float tier = width == DialogWidth::Small ? kDialogWidthSmall
+      : width == DialogWidth::Medium             ? kDialogWidthMedium
+                                                 : kDialogWidthLarge;
+  return std::floor(std::max(1.0F, std::min(tier, static_cast<float>(m_surface->width()) - kDialogMargin * 2.0F)));
+}
+
+popup_chrome::Geometry BrowserPage::dialogGeometry(Flex& content) {
+  auto& renderer = (m_menuSurface ? m_menuSurface->renderTarget() : m_surface->renderTarget()).renderer();
+  const float width = dialogWidth(*m_dialogTier);
+  m_settingsController.layoutDialog(width);
+  m_propertiesController.layoutDialog(width);
+  LayoutConstraints constraints;
+  constraints.setExactWidth(width);
+  const float height = std::ceil(
+      std::max(
+          1.0F,
+          std::min(
+              content.measure(renderer, constraints).height,
+              static_cast<float>(m_surface->height()) - kDialogMargin * 2.0F
+          )
+      )
+  );
+  return popup_chrome::computeGeometry(width, height, kDialogShadow, Style::popupShadowsEnabled());
+}
+
+std::pair<int, int> BrowserPage::dialogPosition(const popup_chrome::Geometry& chrome) {
+  // Centered when it opens and when the window height changes; otherwise the top edge stays put so switching
+  // tabs or pages only moves the bottom edge. A taller page slides it up just enough to stay inside the margin.
+  const auto windowHeight = static_cast<float>(m_surface->height());
+  if (windowHeight != m_dialogWindowHeight) {
+    m_dialogWindowHeight = windowHeight;
+    m_dialogTop.reset();
+  }
+  const float lowest = std::max(kDialogMargin, windowHeight - kDialogMargin - chrome.contentHeight);
+  const float top = std::clamp(m_dialogTop.value_or((windowHeight - chrome.contentHeight) / 2), kDialogMargin, lowest);
+  m_dialogTop = top;
+  return {
+      static_cast<int>((static_cast<float>(m_surface->width()) - chrome.contentWidth) / 2) - chrome.bleed.left,
+      static_cast<int>(top) - chrome.bleed.up
+  };
+}
+
+void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width) {
+  // The frame holds the shadow in the bleed around the dialog; only the dialog itself takes input.
+  auto* content = root.get();
+  content->setFlexGrow(1.0F);
+  auto frame = ui::column({.align = FlexAlign::Stretch}, std::move(root));
+  closeMenu();
+  m_dialogTier = width;
+  // Measured before the popup exists so the first configure already has the final size.
+  UiPhaseScope phase(UiPhase::Layout);
+  const auto chrome = dialogGeometry(*content);
+  frame->setPadding(
+      static_cast<float>(chrome.bleed.up), static_cast<float>(chrome.bleed.right),
+      static_cast<float>(chrome.bleed.down), static_cast<float>(chrome.bleed.left)
+  );
+  if (auto* shadow = popup_chrome::addShadow(*frame, chrome, kDialogShadow, Style::radiusLg)) {
+    shadow->setParticipatesInLayout(false);
+    m_dialogShadow = shadow;
+  }
+  const auto position = dialogPosition(chrome);
+  openPopup(
+      std::move(frame), content, nullptr,
+      {.anchorX = position.first,
+       .anchorY = position.second,
+       .anchorWidth = 1,
+       .anchorHeight = 1,
+       .width = chrome.surfaceWidth,
+       .height = chrome.surfaceHeight,
+       .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+       .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
+       .constraintAdjustment =
+           XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
+      PopupMode::Dialog
+  );
+  if (!m_menuSurface) {
+    return;
+  }
+  m_dialogPosition = position;
+  popup_chrome::setContentInputRegion(*m_menuSurface, chrome);
+  m_menuDispatcher.setFocusChangeCallback([this](InputArea*, InputArea* focused) {
+    m_operations.revealFocus(focused);
+    m_aboutController.revealFocus(focused);
+    m_applicationChooser.revealFocus(focused);
+    if (m_menuSurface) {
+      m_menuSurface->requestLayout();
+    }
+  });
+  (void)m_menuDispatcher.cycleTabFocus(false);
+  m_menuSurface->requestLayout();
+}
+
+void BrowserPage::layoutDialogFrame() {
+  const auto chrome = dialogGeometry(*m_activeDialog.root());
+  if (chrome.surfaceWidth != m_menuSurface->width() || chrome.surfaceHeight != m_menuSurface->height()) {
+    (void)m_menuSurface->resize(chrome.surfaceWidth, chrome.surfaceHeight, false);
+    popup_chrome::setContentInputRegion(*m_menuSurface, chrome);
+    m_dialogResizePending = true;
+  }
+  if (m_dialogShadow != nullptr) {
+    m_dialogShadow->setFrameSize(chrome.contentWidth, chrome.contentHeight);
+  }
+  const auto position = dialogPosition(chrome);
+  if (m_dialogPosition != position) {
+    m_dialogPosition = position;
+    (void)m_menuSurface->repositionAnchor(
+        {.anchorX = position.first,
+         .anchorY = position.second,
+         .anchorWidth = 1,
+         .anchorHeight = 1,
+         .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+         .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
+         .constraintAdjustment =
+             XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
+        false
+    );
+  }
+}
+
+void BrowserPage::openPopup(
+    std::unique_ptr<Flex> scene, Flex* content, ContextMenuControl* menu, PopupSurfaceConfig config, PopupMode mode
 ) {
   m_fileKeys.clearTypeahead();
   m_locationBar.clearCompletions();
-  closeMenu();
   dispatcher().setTextInputContext(nullptr, nullptr);
   m_menuController.setMenu(menu);
   m_popupMode = mode;
-  m_activeDialog.open(std::move(root));
+  m_activeDialog.open(std::move(scene), content);
   m_menuSurface = std::make_unique<PopupSurface>(m_connection);
   m_menuSurface->setRenderContext(&m_renderer);
   m_menuSurface->setAnimationManager(&m_animations);
   m_menuSurface->setDismissedCallback([this] { dismissMenu(); });
-  m_activeDialog.root()->setAnimationManager(&m_animations);
-  m_menuSurface->setSceneRoot(m_activeDialog.root());
-  m_menuDispatcher.setSceneRoot(m_activeDialog.root());
+  m_activeDialog.scene()->setAnimationManager(&m_animations);
+  m_menuSurface->setSceneRoot(m_activeDialog.scene());
+  m_menuDispatcher.setSceneRoot(m_activeDialog.scene());
   m_menuDispatcher.setCursorShapeCallback([this](std::uint32_t serial, std::uint32_t shape) {
     m_connection.extension<luciole::DesktopIntegration>().setCursorShape(serial, shape);
   });
@@ -2523,44 +2649,12 @@ void BrowserPage::showPopup(
       return;
     }
     UiPhaseScope phase(UiPhase::Layout);
-    if (m_dialogHeight) {
-      const auto width =
-          static_cast<std::uint32_t>(std::min(m_dialogWidth, static_cast<float>(m_surface->width()) - 32.0F));
-      LayoutConstraints constraints;
-      constraints.setExactWidth(static_cast<float>(width));
-      m_settingsController.layoutDialog(static_cast<float>(width));
-      m_propertiesController.layoutDialog(static_cast<float>(width));
-      m_batchRename.layoutDialog(static_cast<float>(width));
-      m_dialogHeight = m_activeDialog.root()->measure(m_menuSurface->renderTarget().renderer(), constraints).height;
-      const auto height = static_cast<std::uint32_t>(
-          std::ceil(std::min(*m_dialogHeight, static_cast<float>(m_surface->height()) - 64.0F))
-      );
-      if (width != m_menuSurface->width() || height != m_menuSurface->height()) {
-        (void)m_menuSurface->resize(width, height, false);
-        m_dialogResizePending = true;
-      }
-      const std::pair<int, int> position{
-          static_cast<int>((m_surface->width() - width) / 2), static_cast<int>((m_surface->height() - height) / 2)
-      };
-      if (m_dialogPosition != position) {
-        m_dialogPosition = position;
-        (void)m_menuSurface->repositionAnchor(
-            {.anchorX = position.first,
-             .anchorY = position.second,
-             .anchorWidth = 1,
-             .anchorHeight = 1,
-             .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
-             .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
-             .constraintAdjustment =
-                 XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
-            false
-        );
-      }
+    if (m_dialogTier) {
+      layoutDialogFrame();
     }
     m_operations.layoutDialog();
-    m_trashController.layoutDialog();
     m_aboutController.layoutDialog();
-    m_activeDialog.root()->arrange(
+    m_activeDialog.scene()->arrange(
         m_menuSurface->renderTarget().renderer(),
         {0, 0, static_cast<float>(m_menuSurface->width()), static_cast<float>(m_menuSurface->height())}
     );
@@ -2578,23 +2672,11 @@ void BrowserPage::showPopup(
     }
     m_menuSurface->requestLayout();
   });
-  PopupSurfaceConfig config{
-      .anchorX = static_cast<int>(anchor.x),
-      .anchorY = static_cast<int>(anchor.y),
-      .anchorWidth = std::max(1, static_cast<int>(anchor.width)),
-      .anchorHeight = std::max(1, static_cast<int>(anchor.height)),
-      .width = static_cast<std::uint32_t>(width),
-      .height = static_cast<std::uint32_t>(height),
-      .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
-      .gravity = alignLeft ? XDG_POSITIONER_GRAVITY_BOTTOM_LEFT : XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
-      .constraintAdjustment = static_cast<std::uint32_t>(
-          XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X
-          | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y
-          | (mode == PopupMode::Transient ? XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y : 0)
-      ),
-      .serial = m_popupSerial != 0 ? m_popupSerial : m_connection.lastInputSerial(),
-      .grab = mode == PopupMode::Transient,
-  };
+  config.serial = m_popupSerial != 0 ? m_popupSerial : m_connection.lastInputSerial();
+  config.grab = mode == PopupMode::Transient;
+  if (mode == PopupMode::Transient) {
+    config.constraintAdjustment |= static_cast<std::uint32_t>(XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y);
+  }
   if (!m_menuSurface->initializeAsChild(
           m_surface->xdgSurface(), m_connection.outputForSurface(m_surface->wlSurface()), config
       )) {

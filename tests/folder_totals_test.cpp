@@ -32,19 +32,13 @@ namespace {
   }
   luciole::DirectoryEntry entry(const fs::path& path) {
     luciole::DirectoryEntry result{
-        .location = luciole::Location::fromPath(path.native()),
-        .name = {},
-        .displayName = {},
-        .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {}
+        .place = luciole::Location::fromPath(path.native()), .name = {}, .size = {}, .modifiedSeconds = {}
     };
-    const auto facts = luciole::readFileDetails(result.location, {});
+    const auto facts = luciole::readFileDetails(result.location(), {});
     result.type = facts.type;
     result.symlink = facts.type == luciole::FileType::Symlink;
-    result.identity = facts.identity;
-    result.etag = facts.etag;
+    result.setIdentity(facts.identity);
+    result.setEtag(facts.etag);
     result.contentRevision = facts.contentRevision;
     return result;
   }
@@ -81,7 +75,7 @@ namespace {
     const auto broken = walk({entry(tree / "broken")});
     TEST_CHECK(!broken.partial() && broken.links == 1 && broken.bytes == 7);
     auto stale = source;
-    stale.identity = luciole::FileIdentity{"wrong", "wrong"};
+    stale.setIdentity(luciole::FileIdentity{"wrong", "wrong"});
     const auto changed = walk({stale});
     TEST_CHECK(changed.changed == 1 && changed.bytes == 0 && changed.partial());
     auto removed = entry(tree / ".hidden");
@@ -89,9 +83,9 @@ namespace {
     const auto missing = walk({removed});
     TEST_CHECK(missing.unavailable == 1 && missing.partial());
     auto remote = source;
-    remote.location = luciole::Location::fromUri("sftp://example.invalid/folder");
+    remote.place = luciole::Location::fromUri("sftp://example.invalid/folder");
     auto trash = source;
-    trash.location = luciole::Location::trash();
+    trash.place = luciole::Location::trash();
     const auto unsupported = walk({remote, trash});
     TEST_CHECK(unsupported.unsupported == 2 && unsupported.partial() && unsupported.bytes == 0);
   }

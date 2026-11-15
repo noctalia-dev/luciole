@@ -80,8 +80,39 @@ luciole::FileType luciole::fileType(GFileType type) {
   return FileType::Unknown;
 }
 
+namespace {
+  // GIO resolves an attribute name on every call; this checks the type and reads the value with one lookup.
+  // Strings are returned directly, other types as a pointer to their storage.
+  gpointer typedAttribute(GFileInfo* info, const char* attribute, GFileAttributeType expected) {
+    GFileAttributeType type = G_FILE_ATTRIBUTE_TYPE_INVALID;
+    gpointer value = nullptr;
+    if (g_file_info_get_attribute_data(info, attribute, &type, &value, nullptr) == FALSE || type != expected) {
+      return nullptr;
+    }
+    return value;
+  }
+} // namespace
+
+const char* luciole::infoString(GFileInfo* info, const char* attribute) {
+  return static_cast<const char*>(typedAttribute(info, attribute, G_FILE_ATTRIBUTE_TYPE_STRING));
+}
+
+std::optional<bool> luciole::infoBoolean(GFileInfo* info, const char* attribute) {
+  const auto* value = static_cast<const gboolean*>(typedAttribute(info, attribute, G_FILE_ATTRIBUTE_TYPE_BOOLEAN));
+  return value != nullptr ? std::optional(*value != FALSE) : std::nullopt;
+}
+
+std::optional<std::uint32_t> luciole::infoUint32(GFileInfo* info, const char* attribute) {
+  const auto* value = static_cast<const guint32*>(typedAttribute(info, attribute, G_FILE_ATTRIBUTE_TYPE_UINT32));
+  return value != nullptr ? std::optional<std::uint32_t>(*value) : std::nullopt;
+}
+
+std::optional<std::uint64_t> luciole::infoUint64(GFileInfo* info, const char* attribute) {
+  const auto* value = static_cast<const guint64*>(typedAttribute(info, attribute, G_FILE_ATTRIBUTE_TYPE_UINT64));
+  return value != nullptr ? std::optional<std::uint64_t>(*value) : std::nullopt;
+}
+
 bool luciole::readIsSymlink(GFileInfo* info) {
-  return g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_STANDARD_TYPE) == G_FILE_TYPE_SYMBOLIC_LINK
-      || (g_file_info_has_attribute(info, G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK)
-          && g_file_info_get_attribute_boolean(info, G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK));
+  return infoUint32(info, G_FILE_ATTRIBUTE_STANDARD_TYPE) == std::uint32_t{G_FILE_TYPE_SYMBOLIC_LINK}
+  || infoBoolean(info, G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK).value_or(false);
 }

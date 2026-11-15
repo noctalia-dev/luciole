@@ -26,12 +26,14 @@ namespace luciole {
     bool removeMany(const std::vector<Location>& locations);
     bool move(const Location& location, std::size_t position);
     bool rename(const Bookmark& expected, std::string label);
+    bool saveWindows(std::vector<SavedWindow> windows);
     bool contains(const Location& location) const;
     bool editable() const;
     bool busy() const;
     const std::vector<Bookmark>& bookmarks() const;
     const std::vector<UserPlace>& userPlaces() const;
     const std::string& error() const;
+    const std::string& sessionError() const;
     void setChangedCallback(std::function<void()> callback);
 
   private:

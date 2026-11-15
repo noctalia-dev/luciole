@@ -22,17 +22,17 @@ bool luciole::samePermissions(const struct stat& a, const struct stat& b) {
 }
 
 luciole::PermissionTarget::PermissionTarget(DirectoryEntry entry)
-    : entry(std::move(entry)), path(*this->entry.location.nativePath()),
+    : entry(std::move(entry)), path(*this->entry.location().nativePath()),
       fd(checkedFd(::open(path.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC))), baseline(statFd(fd.get())) {}
 
 luciole::PermissionTarget::PermissionTarget(
     DirectoryEntry entry, int descriptor, std::vector<std::shared_ptr<PermissionTarget>> ancestors
 )
-    : entry(std::move(entry)), path(*this->entry.location.nativePath()), fd(checkedFd(descriptor)),
+    : entry(std::move(entry)), path(*this->entry.location().nativePath()), fd(checkedFd(descriptor)),
       baseline(statFd(fd.get())), identified(true), ancestors(std::move(ancestors)) {
   this->entry.type = typeFromMode(baseline.st_mode);
   this->entry.symlink = S_ISLNK(baseline.st_mode);
-  this->entry.identity.reset(); // Identified directly by the held native descriptor.
+  this->entry.setIdentity(std::nullopt); // Identified directly by the held native descriptor.
 }
 
 bool luciole::PermissionTarget::current() const {
@@ -128,15 +128,17 @@ void luciole::PermissionTarget::loadAcl(bool adopt) {
 
 std::shared_ptr<luciole::PermissionTarget>
 luciole::preparePermissionTarget(const DirectoryEntry& entry, bool captureCurrentLocation) {
-  if (!entry.location.nativePath() || entry.location.isTrash()) {
+  const auto location = entry.location();
+  if (!location.nativePath() || location.isTrash()) {
     throwFileError(FileErrorKind::Unsupported, "Permission editing is available for native items outside Trash.");
   }
   auto target = std::make_shared<PermissionTarget>(entry);
   const GioPtr<GFileInfo> info(g_file_query_info(
-      gioFile(entry.location).get(), "id::file,id::filesystem,unix::device,unix::inode",
-      G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
+      gioFile(location).get(), "id::file,id::filesystem,unix::device,unix::inode", G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+      nullptr, nullptr
   ));
-  if (!info || !target->current() || (entry.identity && readFileIdentity(info.get()) != entry.identity)) {
+  const auto identity = entry.identity();
+  if (!info || !target->current() || (identity && readFileIdentity(info.get()) != identity)) {
     changed("The item changed. Reopen Properties.");
   }
   if (g_file_info_has_attribute(info.get(), "unix::device")
@@ -145,7 +147,6 @@ luciole::preparePermissionTarget(const DirectoryEntry& entry, bool captureCurren
           || g_file_info_get_attribute_uint64(info.get(), "unix::inode") != target->baseline.st_ino)) {
     changed("The item changed. Reopen Properties.");
   }
-  target->identified =
-      entry.identity.has_value() || (captureCurrentLocation && readFileIdentity(info.get()).has_value());
+  target->identified = identity.has_value() || (captureCurrentLocation && readFileIdentity(info.get()).has_value());
   return target;
 }

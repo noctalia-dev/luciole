@@ -22,8 +22,8 @@ namespace {
 bool luciole::sameTooltipFile(const FileTooltipTarget& a, const FileTooltipTarget& b) {
   return a.context == b.context
       && a.entry.id == b.entry.id
-      && a.entry.location == b.entry.location
-      && a.entry.identity == b.entry.identity;
+      && a.entry.location() == b.entry.location()
+      && a.entry.identity() == b.entry.identity();
 }
 
 struct luciole::FileTooltipData::State {
@@ -57,11 +57,11 @@ void luciole::FileTooltipData::show(const FileTooltipTarget& target) {
   m_state->error.clear();
   m_state->details = {
       .type = target.entry.type,
-      .displayName = target.entry.displayName,
+      .displayName = target.entry.displayName(),
       .typeDescription = target.typeLabel,
       .size = target.entry.size,
       .modifiedSeconds = target.entry.modifiedSeconds,
-      .identity = target.entry.identity,
+      .identity = target.entry.identity(),
       .linkTarget = std::nullopt,
   };
   refresh();
@@ -75,13 +75,13 @@ void luciole::FileTooltipData::refresh() {
   state.pending = true;
   state.token = CancelToken{};
   const auto serial = state.serial;
-  queryFileDetails(state.target->entry.location, state.token, [weak = std::weak_ptr(m_state), serial](auto reply) {
+  queryFileDetails(state.target->entry.location(), state.token, [weak = std::weak_ptr(m_state), serial](auto reply) {
     const auto state = weak.lock();
     if (!state || !state->target || state->serial != serial) {
       return;
     }
     state->pending = false;
-    const auto identity = state->target->entry.identity;
+    const auto identity = state->target->entry.identity();
     if (!reply || (identity && reply->identity != identity)) {
       state->details = {};
       state->error = reply ? "This item changed" : "Metadata unavailable";
@@ -98,7 +98,7 @@ std::vector<TooltipRow> luciole::FileTooltipData::rows() const {
   if (!state.target) {
     return {};
   }
-  std::vector<TooltipRow> rows{{"Name", state.details.displayName.value_or(state.target->entry.displayName)}};
+  std::vector<TooltipRow> rows{{"Name", state.details.displayName.value_or(state.target->entry.displayName())}};
   if (!state.error.empty()) {
     rows.push_back({"Status", state.error});
     return rows;

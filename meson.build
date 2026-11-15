@@ -119,9 +119,11 @@ fs_lib = static_library('luciole-fs',
     'src/fs/atomic_file.cpp',
     'src/fs/background_job.cpp',
     'src/fs/cancel_token.cpp',
+    'src/fs/directory_entries.cpp',
     'src/fs/directory_session.cpp',
     'src/fs/directory_watch.cpp',
     'src/fs/drive_monitor.cpp',
+    'src/fs/entry_access.cpp',
     'src/fs/file_error.cpp',
     'src/fs/file_icon_source.cpp',
     'src/fs/file_metadata.cpp',
@@ -130,7 +132,10 @@ fs_lib = static_library('luciole-fs',
     'src/fs/folder_totals.cpp',
     'src/fs/folder_totals_walk.cpp',
     'src/fs/gio_interop.cpp',
+    'src/fs/heap_trim.cpp',
+    'src/fs/interned_text.cpp',
     'src/fs/location.cpp',
+    'src/fs/native_listing.cpp',
     'src/fs/transfer_location.cpp',
     'src/fs/posix_fd.cpp',
     'src/fs/recursive_search.cpp',
@@ -324,6 +329,7 @@ ui_lib = static_library('luciole-ui',
     'src/ui/controls/acl_editor.cpp',
     'src/ui/controls/archive_view.cpp',
     'src/ui/controls/bulk_acl_editor.cpp',
+    'src/ui/controls/card_style.cpp',
     'src/ui/controls/file_error_text.cpp',
     'src/ui/controls/file_preview_view.cpp',
     'src/ui/controls/file_metadata_view.cpp',
@@ -391,6 +397,7 @@ app = executable('luciole',
     'src/app/page/operations_controller.cpp',
     'src/app/page/trash_controller.cpp',
     'src/app/palette_watcher.cpp',
+    'src/app/startup_trace.cpp',
     'src/app/workspace_application.cpp',
     'src/main.cpp',
   ),
@@ -416,6 +423,9 @@ build_tests = tests_opt.enabled() or (
 )
 if build_tests
   subdir('tests')
+endif
+if get_option('benchmarks')
+  subdir('tools/bench')
 endif
 
 install_data('LICENSE', install_dir: get_option('datadir') / 'licenses/luciole')

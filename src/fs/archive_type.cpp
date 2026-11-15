@@ -61,7 +61,7 @@ std::optional<unsigned> luciole::splitZipPart(const Location& location) {
   return static_cast<unsigned>((index[0] - '0') * 100 + (index[1] - '0') * 10 + index[2] - '0');
 }
 
-bool luciole::isSupportedArchive(const Location& location, const std::optional<std::string>& mime) {
+bool luciole::isSupportedArchive(const Location& location, std::string_view mime) {
   if (!location.nativePath()) {
     return false;
   }
@@ -83,25 +83,24 @@ bool luciole::isSupportedArchive(const Location& location, const std::optional<s
   if (rarVolumeName(text)) {
     return false;
   }
-  if (mime
-      && (*mime == "application/zip"
-          || *mime == "application/x-tar"
-          || *mime == "application/x-7z-compressed"
-          || *mime == "application/vnd.rar"
-          || *mime == "application/x-rar"
-          || *mime == "application/x-rar-compressed")) {
+  if (mime == "application/zip"
+      || mime == "application/x-tar"
+      || mime == "application/x-7z-compressed"
+      || mime == "application/vnd.rar"
+      || mime == "application/x-rar"
+      || mime == "application/x-rar-compressed") {
     return true;
   }
-  if (mime && (*mime == "application/gzip" || *mime == "application/x-compressed-tar")) {
+  if (mime == "application/gzip" || mime == "application/x-compressed-tar") {
     return archiveCompressionAvailable(ArchiveCompression::Gzip);
   }
-  if (mime && (*mime == "application/x-bzip2-compressed-tar" || *mime == "application/x-bzip-compressed-tar")) {
+  if (mime == "application/x-bzip2-compressed-tar" || mime == "application/x-bzip-compressed-tar") {
     return archiveCompressionAvailable(ArchiveCompression::Bzip2);
   }
-  if (mime && *mime == "application/x-zstd-compressed-tar") {
+  if (mime == "application/x-zstd-compressed-tar") {
     return archiveCompressionAvailable(ArchiveCompression::Zstd);
   }
-  if (mime && *mime == "application/x-xz-compressed-tar") {
+  if (mime == "application/x-xz-compressed-tar") {
     return archiveCompressionAvailable(ArchiveCompression::Xz);
   }
   if (text.ends_with(".zip") || text.ends_with(".tar") || text.ends_with(".7z") || text.ends_with(".rar")) {

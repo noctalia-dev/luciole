@@ -35,7 +35,7 @@ void ArchiveController::compress(const std::vector<luciole::DirectoryEntry>& tar
   std::vector<luciole::Location> sources;
   sources.reserve(targets.size());
   for (const auto& target : targets) {
-    sources.push_back(target.location);
+    sources.push_back(target.location());
   }
   openDialog(std::move(sources), {}, true);
 }
@@ -170,21 +170,8 @@ void ArchiveController::openDialog(
       [this] { m_page.dismissMenu(); }
   );
   auto* dialog = root.get();
-  auto& surface = m_page.surface();
-  const float width = std::min(520.0F, static_cast<float>(surface.width()) - 32.0F);
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = std::min(
-      root->measure(surface.renderTarget().renderer(), constraints).height, static_cast<float>(surface.height()) - 48.0F
-  );
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
-    // The dialog keeps the page's default dialog width.
-    m_page.setDialogSize(588.0F, height);
     m_page.menuDispatcher().setFocus(dialog->focusArea());
     m_page.menuDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
       if (auto* form = dynamic_cast<ArchiveDialog*>(m_page.activeDialog().root())) {
@@ -233,7 +220,7 @@ void ArchiveController::syncPassword() {
       [this] { m_page.dismissMenu(); }, request->format
   );
   auto* dialog = root.get();
-  m_page.showCenteredDialog(std::move(root), 464.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.menuSurface()) {
     m_passwordDialog = active;
     m_page.activeDialog().bind(ActiveDialog::Kind::ArchivePassword, [this] {

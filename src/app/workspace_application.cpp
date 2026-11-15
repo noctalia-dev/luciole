@@ -1,10 +1,12 @@
 #include "app/workspace_application.h"
 
 #include "app/file_manager_service.h"
+#include "app/startup_trace.h"
 #include "browser/location_presentation.h"
 #include "browser/tab_workspace.h"
 #include "clipboard/text_clipboard.h"
 #include "config/settings.h"
+#include "config/state_store.h"
 #include "config/view_preference_writer.h"
 #include "core/deferred_call.h"
 #include "core/input/key_symbols.h"
@@ -116,6 +118,12 @@ WorkspaceApplication::WorkspaceApplication(
   );
   m_preferences.startWatching();
   m_pins.setChangedCallback([this] {
+    if (m_pendingWindows && m_pins.editable()) {
+      auto windows = std::exchange(m_pendingWindows, std::nullopt);
+      if (!m_pins.saveWindows(*windows)) {
+        m_pendingWindows = std::move(*windows);
+      }
+    }
     for (auto& [id, page] : m_pages) {
       (void)id;
       page->placesChanged();
@@ -140,6 +148,10 @@ WorkspaceApplication::WorkspaceApplication(
       page->thumbnailsChanged();
     }
   });
+  luciole::StateStore state(luciole::StateStore::pathFromEnvironment());
+  if (state.load()) {
+    m_savedWindows = state.state().windows;
+  }
   m_pins.reload();
 }
 
@@ -172,6 +184,9 @@ void WorkspaceApplication::start(std::optional<luciole::Location> initial) {
   if (!id) {
     throw std::runtime_error("Cannot create a Luciole window.");
   }
+  if (!initial && restoreLastWindow(id)) {
+    return;
+  }
   newTab(id, std::move(initial));
 }
 
@@ -181,7 +196,14 @@ void WorkspaceApplication::open(const luciole::InstanceRequest& request) {
     throw std::runtime_error("Cannot create a Luciole window.");
   }
   auto& host = *m_hosts.at(window);
-  luciole::TabId first = request.locations.empty() ? newTab(window, std::nullopt) : 0;
+  luciole::TabId first = 0;
+  if (request.locations.empty()) {
+    if (restoreLastWindow(window)) {
+      first = m_model.windows().at(window).selected;
+    } else {
+      first = newTab(window, std::nullopt);
+    }
+  }
   for (const auto& location : request.locations) {
     const auto tab = newTab(window, location);
     if (!tab) {
@@ -296,6 +318,13 @@ bool WorkspaceApplication::running() {
       }
       // Leave the workspace before the pages close their dialogs, so a job that applies changes keeps running.
       if (auto found = m_model.windows().find(id); found != m_model.windows().end()) {
+        if (m_defaults.restoreLastWindow) {
+          if (auto saved = savedWindow(id)) {
+            saveWindows({std::move(*saved)});
+          }
+        } else {
+          saveWindows({});
+        }
         const auto tabs = found->second.tabs;
         for (auto tab : tabs) {
           m_model.close(tab);
@@ -317,7 +346,7 @@ bool WorkspaceApplication::running() {
     m_hub.shutdown();
   }
   m_hub.update(m_focused);
-  bool busy = m_hub.busy() || m_thumbnails.clearing();
+  bool busy = m_hub.busy() || m_thumbnails.clearing() || m_pins.busy();
   for (auto& [id, page] : m_pages) {
     if (!live) {
       page->shutdown();
@@ -768,6 +797,18 @@ luciole::WindowId WorkspaceApplication::newWindow() {
   host->surface.setAnimationManager(&m_animations);
   host->surface.setPrepareFrameCallback([this, raw](bool, bool) { prepare(*raw); });
   host->surface.setUpdateCallback([] {});
+  host->surface.setFrameCallbacks(
+      [] { luciole::startupRendered(); },
+      [this] {
+        luciole::startupFrameDone();
+        // Device rows follow the first frame instead of delaying it.
+        if (!m_drivesStarted) {
+          m_drivesStarted = true;
+          m_drives.start();
+          luciole::startupTrace("drives-started");
+        }
+      }
+  );
   host->surface.setConfigureCallback([this, raw](std::uint32_t, std::uint32_t) {
     if (raw->tooltip) {
       raw->tooltip->dismiss();
@@ -805,7 +846,7 @@ luciole::WindowId WorkspaceApplication::newWindow() {
 luciole::TabId WorkspaceApplication::newTab(
     luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate, bool activate
 ) {
-  if (m_pages.size() >= 64) {
+  if (m_pages.size() >= pageLimit) {
     return 0;
   }
   const auto previous = m_model.windows().at(window).active;
@@ -819,7 +860,7 @@ luciole::TabId WorkspaceApplication::newTab(
 luciole::TabId WorkspaceApplication::newPane(
     luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate
 ) {
-  if (m_pages.size() >= 64) {
+  if (m_pages.size() >= pageLimit) {
     return 0;
   }
   const auto previous = m_model.windows().at(window).active;
@@ -984,6 +1025,9 @@ void WorkspaceApplication::execute(
     break;
   }
   case WorkspaceCommand::Close:
+    if (m_model.windows().at(window).tabs.size() == 1) {
+      saveWindows({});
+    }
     m_model.close(tab);
     break;
   case WorkspaceCommand::Reopen:
@@ -997,7 +1041,8 @@ void WorkspaceApplication::execute(
     break;
   case WorkspaceCommand::NewWindow: {
     if (auto id = newWindow()) {
-      if (!newTab(id, destination ? destination : page.location())) {
+      const bool restored = !destination && restoreLastWindow(id);
+      if (!restored && !newTab(id, destination ? destination : page.location())) {
         m_hosts.at(id)->surface.close();
         page.workspaceError("Close a tab before opening another window.");
       }
@@ -1041,12 +1086,16 @@ void WorkspaceApplication::execute(
         m_pages.at(pageId)->unmount();
         std::erase(host.mounted, pageId);
       }
-      m_model.move(tab, destinationWindow, m_model.windows().at(destinationWindow).tabs.size());
-      auto& target = *m_hosts.at(destinationWindow);
-      for (auto pageId : pages) {
-        m_pages.at(pageId)->rebind(target.surface, target.dispatcher);
+      if (m_model.move(tab, destinationWindow, m_model.windows().at(destinationWindow).tabs.size())) {
+        if (m_model.windows().at(window).tabs.empty()) {
+          saveWindows({});
+        }
+        auto& target = *m_hosts.at(destinationWindow);
+        for (auto pageId : pages) {
+          m_pages.at(pageId)->rebind(target.surface, target.dispatcher);
+        }
+        target.surface.requestLayout();
       }
-      target.surface.requestLayout();
     }
     break;
   }
@@ -1102,6 +1151,94 @@ void WorkspaceApplication::releaseChrome(Host& host) {
   host.chromeOwner = 0;
 }
 
+std::optional<luciole::SavedWindow> WorkspaceApplication::savedWindow(luciole::WindowId window) const {
+  const auto found = m_model.windows().find(window);
+  if (found == m_model.windows().end() || found->second.tabs.empty()) {
+    return std::nullopt;
+  }
+  luciole::SavedWindow saved;
+  const auto selected = std::ranges::find(found->second.tabs, found->second.selected);
+  if (selected != found->second.tabs.end()) {
+    saved.activeTab = static_cast<std::size_t>(selected - found->second.tabs.begin());
+  }
+  for (const auto tab : found->second.tabs) {
+    const auto layout = m_model.layout(tab);
+    if (!layout || !m_pages.contains(layout->primary)) {
+      return std::nullopt;
+    }
+    const auto primary = m_pages.at(layout->primary)->location();
+    if (!primary) {
+      return std::nullopt;
+    }
+    luciole::SavedTab value{.primary = *primary, .secondary = std::nullopt, .activePane = luciole::ActivePane::Primary};
+    if (layout->secondary) {
+      if (!m_pages.contains(*layout->secondary)) {
+        return std::nullopt;
+      }
+      const auto secondary = m_pages.at(*layout->secondary)->location();
+      if (!secondary) {
+        return std::nullopt;
+      }
+      value.secondary = *secondary;
+      value.activePane =
+          layout->active == *layout->secondary ? luciole::ActivePane::Secondary : luciole::ActivePane::Primary;
+    }
+    saved.tabs.push_back(std::move(value));
+  }
+  return saved;
+}
+
+bool WorkspaceApplication::restoreWindow(luciole::WindowId window, const luciole::SavedWindow& saved) {
+  std::size_t openTabs = 0;
+  for (const auto& [id, record] : m_model.windows()) {
+    (void)id;
+    openTabs += record.tabs.size();
+  }
+  const auto requiredPages =
+      std::ranges::count_if(saved.tabs, [](const auto& tab) { return tab.secondary.has_value(); });
+  if (saved.tabs.size() > luciole::TabWorkspace::tabLimit - openTabs
+      || saved.tabs.size() + requiredPages > pageLimit - m_pages.size()) {
+    return false;
+  }
+  std::vector<luciole::TabId> tabs;
+  for (const auto& savedTab : saved.tabs) {
+    const auto tab = newTab(window, savedTab.primary);
+    if (!tab) {
+      break;
+    }
+    tabs.push_back(tab);
+    if (savedTab.secondary) {
+      if (const auto pane = newPane(window, savedTab.secondary)) {
+        (void)m_model.focus(window, savedTab.activePane == luciole::ActivePane::Secondary ? pane : tab);
+      }
+    }
+  }
+  if (tabs.empty()) {
+    return false;
+  }
+  select(window, tabs[std::min(saved.activeTab, tabs.size() - 1)]);
+  return true;
+}
+
+bool WorkspaceApplication::restoreLastWindow(luciole::WindowId window) {
+  if (!m_defaults.restoreLastWindow || m_savedWindows.empty()) {
+    return false;
+  }
+  const auto saved = m_savedWindows.back();
+  if (!restoreWindow(window, saved)) {
+    return false;
+  }
+  saveWindows({});
+  return true;
+}
+
+void WorkspaceApplication::saveWindows(std::vector<luciole::SavedWindow> windows) {
+  m_savedWindows = windows;
+  if (!m_pins.saveWindows(windows)) {
+    m_pendingWindows = std::move(windows);
+  }
+}
+
 void WorkspaceApplication::tabMenu(Host& host, luciole::TabId tab, float x, float y) {
   auto& page = *m_pages.at(m_model.windows().at(host.id).active);
   std::vector<ContextMenuControlEntry> entries{
@@ -1152,10 +1289,19 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
     labels.emplace_back(id, m_pages.at(m_model.layout(id)->active)->title());
   }
   const bool decorated = !host.surface.serverDecorated() && !host.surface.fullscreen();
-  if (host.strip && labels == host.labels && decorated == host.decorated) {
+  // Client-side window controls keep the strip when tabs are hidden.
+  const bool tabsHidden = labels.size() <= 1 && !m_defaults.alwaysShowTabBar;
+  const bool stripVisible = !tabsHidden || decorated;
+  if (host.strip
+      && labels == host.labels
+      && decorated == host.decorated
+      && stripVisible == host.stripVisible
+      && tabsHidden == host.tabsHidden) {
     return;
   }
   host.decorated = decorated;
+  host.stripVisible = stripVisible;
+  host.tabsHidden = tabsHidden;
   const float scrollOffset = host.tabScroll ? host.tabScroll->scrollOffset() : 0.0F;
   // Only a press held on the strip is lost with it; presses held in the panes survive the rebuild.
   if (host.dispatcher.pointerCaptured() && !host.pointerPage) {
@@ -1178,6 +1324,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
        .fillHeight = true,
        .flexGrow = 1}
   );
+  scroll->setVisible(!host.tabsHidden);
   auto tabs = ui::row({.align = FlexAlign::Center, .gap = Style::spaceXs, .height = kTabStripHeight});
   scroll->content()->setDirection(FlexDirection::Horizontal);
   const auto windowId = host.id;
@@ -1294,6 +1441,9 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
         )
     );
   }
+  host.splitButton->setVisible(!host.tabsHidden);
+  strip->setJustify(host.tabsHidden ? FlexJustify::End : FlexJustify::Start);
+  strip->setVisible(host.stripVisible);
   strip->setZIndex(50);
   host.root->addChild(std::move(strip));
 }
@@ -1438,6 +1588,7 @@ void WorkspaceApplication::prepare(Host& host) {
     host.chromeOwner = window.active;
   }
   rebuildStrip(host, window);
+  const float stripHeight = host.stripVisible ? kTabStripHeight : 0.0F;
   host.splitButton->setSelected(window.secondary.has_value());
   std::vector<luciole::TabId> visible{window.primary};
   if (window.secondary && !active.overlay()) {
@@ -1489,14 +1640,14 @@ void WorkspaceApplication::prepare(Host& host) {
     host.activePaneBar->setVisible(false);
     host.previewDivider->setVisible(false);
     active.setPreviewBounds(std::nullopt);
-    active.prepare({0, kTabStripHeight, width, height - kTabStripHeight}, true, false);
+    active.prepare({0, stripHeight, width, height - stripHeight}, true, false);
     syncTooltip(host);
     return;
   }
-  host.toolbarNode->arrange(renderer, {0, kTabStripHeight, width, kNavigationToolbarHeight});
+  host.toolbarNode->arrange(renderer, {0, stripHeight, width, kNavigationToolbarHeight});
   // Chrome (tabs, toolbar, sidebar) wraps one flush content plane: panes and the docked preview touch, separated
   // only by 1px lines; the plane's top-left corner is rounded where it meets the sidebar.
-  const float top = kTabStripHeight + kNavigationToolbarHeight;
+  const float top = stripHeight + kNavigationToolbarHeight;
   const float bodyHeight = std::max(1.0F, height - top);
   const float sidebar = active.sidebarWidth();
   active.sidebar()->arrange(renderer, {0, top, active.sidebarControlWidth(), bodyHeight});

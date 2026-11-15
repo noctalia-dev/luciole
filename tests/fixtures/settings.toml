@@ -2,6 +2,7 @@ schema_version = 1
 
 [browser]
 show_hidden = true
+restore_last_window = false
 sort_by = "size"
 sort_descending = true
 directories_first = false

@@ -160,7 +160,8 @@ namespace {
       pump.until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
       TEST_CHECK(session.snapshot().status == luciole::DirectoryStatus::Ready);
       const auto found = std::ranges::find_if(session.snapshot().entries, [&](const auto& entry) {
-        return entry.trash.original == luciole::Location::fromPath((fixture.root / "delete-selected-test").native());
+        return entry.trashInfo().original
+            == luciole::Location::fromPath((fixture.root / "delete-selected-test").native());
       });
       TEST_CHECK(found != session.snapshot().entries.end());
       return *found;
@@ -191,7 +192,7 @@ namespace {
         !fs::exists(trashFiles() / "delete-selected-test")
         && read(trashFiles() / "keep-selected-test") == "keep unrelated"
     );
-    entry.location = luciole::Location::trash();
+    entry.place = luciole::Location::trash();
     TEST_CHECK(service.prepareSelection({entry}));
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(service.snapshot().status == Status::Error && !service.empty());

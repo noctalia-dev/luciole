@@ -273,14 +273,15 @@ std::optional<std::pair<luciole::Location, LayoutRect>> DragDropController::fore
       return std::nullopt;
     }
     const auto* entry = m_page.browser().model().entry(rows[*index]);
-    if (!entry
-        || entry->symlink
-        || entry->type != luciole::FileType::Directory
-        || !luciole::transferLocationSupported(entry->location)) {
+    if (!entry || entry->symlink || entry->type != luciole::FileType::Directory) {
+      return std::nullopt;
+    }
+    auto location = entry->location();
+    if (!luciole::transferLocationSupported(location)) {
       return std::nullopt;
     }
     if (auto rect = m_page.fileList()->itemRect(*index)) {
-      return std::pair(entry->location, *rect);
+      return std::pair(std::move(location), *rect);
     }
     return std::nullopt;
   }
@@ -301,7 +302,7 @@ bool DragDropController::dragCurrent() const {
   return !m_page.jobs().busy() && std::ranges::all_of(m_drag->entries, [this](const auto& target) {
     const auto* entry = m_page.browser().model().entry(target.id);
     return entry != nullptr
-        && entry->location == target.location
+        && entry->location() == target.location
         && std::ranges::contains(m_page.browser().model().rows(), target.id);
   });
 }
@@ -389,11 +390,10 @@ std::optional<DragDropController::DropTarget> DragDropController::dropTarget() c
       if (const auto row = grid->itemAtScene(m_page.pointerX(), m_page.pointerY())) {
         if (*row < model.rows().size()) {
           const auto* entry = model.entry(model.rows()[*row]);
-          if (entry
-              && entry->type == luciole::FileType::Directory
-              && !entry->symlink
-              && validDropFolder(entry->location)) {
-            return DropTarget{entry->location, *grid->itemRect(*row), entry->id};
+          if (entry && entry->type == luciole::FileType::Directory && !entry->symlink) {
+            if (auto location = entry->location(); validDropFolder(location)) {
+              return DropTarget{std::move(location), *grid->itemRect(*row), entry->id};
+            }
           }
         }
         return std::nullopt;
@@ -410,12 +410,11 @@ std::optional<DragDropController::DropTarget> DragDropController::dropTarget() c
       const auto& rows = m_page.browser().model().rows();
       if (*index < rows.size()) {
         const auto* entry = m_page.browser().model().entry(rows[*index]);
-        if (entry != nullptr
-            && entry->type == luciole::FileType::Directory
-            && !entry->symlink
-            && validDropFolder(entry->location)) {
-          if (const auto rect = m_page.fileList()->itemRect(*index)) {
-            return DropTarget{entry->location, *rect, entry->id};
+        if (entry != nullptr && entry->type == luciole::FileType::Directory && !entry->symlink) {
+          if (auto location = entry->location(); validDropFolder(location)) {
+            if (const auto rect = m_page.fileList()->itemRect(*index)) {
+              return DropTarget{std::move(location), *rect, entry->id};
+            }
           }
         }
       }
@@ -449,22 +448,25 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
   for (const auto id : ids) {
     const auto* entry = m_page.browser().model().entry(id);
     if (entry == nullptr
-        || entry->location.isTrash()
         || (entry->type != luciole::FileType::Directory
             && entry->type != luciole::FileType::Regular
             && !entry->symlink)) {
       return;
     }
+    auto location = entry->location();
+    if (location.isTrash()) {
+      return;
+    }
     drag.foldersOnly = drag.foldersOnly && entry->type == luciole::FileType::Directory && !entry->symlink;
-    drag.entries.push_back({id, entry->location});
-    drag.bookmarks.push_back({entry->displayName, entry->location});
+    drag.entries.push_back({id, location});
+    drag.bookmarks.push_back({entry->displayName(), std::move(location)});
   }
   const auto* entry = m_page.browser().model().entry(ids.front());
   if (entry) {
     m_dragArtwork = m_thumbnails.prepared(*entry);
     if (!m_dragArtwork || !m_dragArtwork->pixels) {
       m_dragArtwork = m_icons.request(
-          entry->icon,
+          luciole::iconSource(entry->icon),
           static_cast<int>(std::ceil(
               (m_page.viewMode() == luciole::ViewMode::Grid ? m_page.gridIconSize() : 24)
               * m_page.surface().effectiveBufferScale()
@@ -672,7 +674,7 @@ void DragDropController::layout(Renderer& renderer) {
   }
   if (!m_drag->entries.empty()) {
     if (const auto* entry = m_page.browser().model().entry(m_drag->entries.front().id)) {
-      icon = entry->icon;
+      icon = luciole::iconSource(entry->icon);
     }
   }
   m_dragIcon->bind(icon, colorSpecFromRole(ColorRole::OnSurface));

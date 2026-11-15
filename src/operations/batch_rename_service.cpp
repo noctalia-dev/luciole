@@ -103,7 +103,7 @@ namespace {
   };
   std::shared_ptr<Prepared>
   prepareItems(std::vector<luciole::DirectoryEntry> entries, const luciole::CancelToken& token) {
-    const auto first = entries.front().location.parent();
+    const auto first = entries.front().location().parent();
     if (!first) {
       luciole::throwFileError(FileErrorKind::InvalidArgument, "Select entries inside a native folder.");
     }
@@ -116,21 +116,22 @@ namespace {
       if (token.cancelled()) {
         return {};
       }
-      if (!entry.location.nativePath() || !entry.identity || entry.location.parent() != first) {
+      const auto location = entry.location();
+      if (!location.nativePath() || !entry.identity() || location.parent() != first) {
         luciole::throwFileError(FileErrorKind::InvalidArgument, "Select identified items from one native folder.");
       }
-      const std::string name = entry.location.basename().value_or(std::string{});
+      const std::string name = location.basename().value_or(std::string{});
       if (name.empty() || name == "." || name == ".." || name != entry.name || !names.insert(name).second) {
         luciole::throwFileError(FileErrorKind::InvalidArgument, "The selection contains invalid or repeated names.");
       }
       auto item = std::make_unique<Item>(entry, prepared->fd.get(), name);
       const luciole::GioPtr<GFileInfo> info(g_file_query_info(
-          luciole::gioFile(entry.location).get(),
+          luciole::gioFile(location).get(),
           "id::file,id::filesystem,standard::type,standard::is-symlink,access::can-rename",
           G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
       ));
       if (!info
-          || luciole::readFileIdentity(info.get()) != entry.identity
+          || luciole::readFileIdentity(info.get()) != entry.identity()
           || luciole::fileType(g_file_info_get_file_type(info.get())) != entry.type
           || (g_file_info_get_is_symlink(info.get()) != FALSE) != entry.symlink
           || !item->at(prepared->fd.get(), name)
@@ -153,7 +154,7 @@ namespace {
     for (std::size_t i = 0; i < names.size(); ++i) {
       sources.emplace(plan.items[i]->name, i);
       rows->push_back(
-          {plan.items[i]->entry.displayName,
+          {plan.items[i]->entry.displayName(),
            luciole::filenameDisplayText(names[i]),
            names[i],
            {},
@@ -303,7 +304,7 @@ namespace {
     std::vector<Position> positions(rows.size(), Position::Original);
     for (std::size_t i = 0; i < rows.size(); ++i) {
       results->push_back(
-          {plan.items[i]->entry.location, std::nullopt, rows[i].changed ? O::Cancelled : O::Unchanged, {}}
+          {plan.items[i]->entry.location(), std::nullopt, rows[i].changed ? O::Cancelled : O::Unchanged, {}}
       );
       if (!rows[i].changed) {
         completed.fetch_add(1);
@@ -461,9 +462,9 @@ namespace {
         continue;
       }
       auto entry = plan.items[i]->entry;
-      entry.location = *results[i].actual;
+      entry.place = *results[i].actual;
       entry.name = rows[i].name;
-      entry.displayName = rows[i].after;
+      entry.setDisplayName(rows[i].after);
       captureItem(*reverse, *plan.items[i], std::move(entry), rows[i].name, revisions);
       targets->push_back({rows[i].after, rows[i].before, plan.items[i]->name, {}, true});
     }

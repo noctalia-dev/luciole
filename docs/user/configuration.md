@@ -16,7 +16,7 @@ Settings load in this order:
 
 When `XDG_CONFIG_HOME` is unset, use `~/.config`. Luciole never writes through your base configuration. This lets Nix or another declarative tool own `config.toml` while GUI changes remain writable in `settings.toml`. A base edit hidden by a GUI override becomes effective after resetting that preference.
 
-Valid external changes apply automatically. Invalid reloads keep the last working settings and report the error. Unknown keys, incorrect types and unsupported values are errors. Luciole does not search `/etc/xdg` or a packaged default configuration.
+Valid external changes apply automatically. Unknown keys in either settings file produce a warning and are ignored, so obsolete settings do not prevent startup or reload. Recognized preferences still apply. GUI saves and Reset preserve unknown keys and their values; they never rewrite your base file. Unknown options do not enable unsupported features. Incorrect types, unsupported values, incompatible schema versions and invalid TOML remain errors; invalid reloads keep the last working settings. `luciole config validate <file>` remains strict and reports unknown keys too. Luciole does not search `/etc/xdg` or a packaged default configuration.
 
 This is a valid starting configuration, not a required file:
 
@@ -31,6 +31,7 @@ preview_width = 320
 activation_mode = "double_click"
 typing_mode = "search"
 switch_to_new_tab = true
+restore_last_window = false
 sort_by = "name"
 directories_first = true
 ```
@@ -62,9 +63,12 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `show_emblems` | `true` | File emblems |
 | `show_hidden` | `false` | Hidden entries |
 | `show_backups` | `true` | Non-directory backup names ending in `~` |
+| `always_show_tab_bar` | `true` | Keep the tab bar visible when a window has only one tab |
+| `always_show_status_bar` | `false` | Keep the status pill visible when idle, showing the item count and free space |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
 | `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |
+| `restore_last_window` | `false` | Reopen tabs from the last closed window once in a new window, or at startup without a requested location |
 | `terminal_command` | `""` | Terminal command and optional arguments, for example `"foot"`; empty uses `$TERMINAL`, then automatic discovery |
 | `sort_by` | `"name"` | `"name"`, `"type"`, `"size"`, `"modified"`, `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"` |
 | `sort_descending` | `false` | Reverse sort direction |
@@ -121,7 +125,7 @@ The Image/PDF size limit applies to image and PDF sources. Video stills and embe
 
 ## Other writable data
 
-Places state lives in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. It is separate from settings and is not a complete saved window/tab session.
+Places and optional last-window tab state live in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. Tab restoration is controlled by `browser.restore_last_window`.
 
 Thumbnails use the shared `$XDG_CACHE_HOME/thumbnails/` cache plus a Luciole ownership ledger under `$XDG_CACHE_HOME/luciole/`. The default cache root is `~/.cache`. Custom actions live in the [Scripts directory](scripts.md).
 

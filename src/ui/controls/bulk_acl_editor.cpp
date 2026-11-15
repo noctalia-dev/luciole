@@ -1,6 +1,7 @@
 #include "ui/controls/bulk_acl_editor.h"
 
 #include "ui/builders.h"
+#include "ui/controls/card_style.h"
 #include "ui/controls/input.h"
 #include "ui/controls/permission_editor.h"
 #include "ui/controls/segmented.h"
@@ -35,14 +36,14 @@ namespace {
 BulkAclEditor::BulkAclEditor(std::function<void()> changed) : m_changed(std::move(changed)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
-  setGap(Style::spaceSm);
-  addChild(ui::label({.text = "Access control for selected items", .fontWeight = FontWeight::SemiBold}));
+  setGap(Style::spaceMd);
   addChild(
       ui::label(
-          {.text = "Keep preserves each item's rules. Changes apply only to the selection, without visiting "
-                   "folder contents. Copy report includes actual ACLs and effective rights.",
+          {.text = "Keep preserves each item's rules. Changes apply only to the selected items, without visiting "
+                   "folder contents.",
            .fontSize = Style::fontSizeCaption,
-           .maxLines = 4}
+           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+           .maxLines = 3}
       )
   );
   addChild(ui::label({.out = &m_summary, .fontSize = Style::fontSizeCaption, .maxLines = 3}));
@@ -142,8 +143,13 @@ void BulkAclEditor::rebuild() {
     for (std::size_t bit = 0; bit < names.size(); ++bit) {
       parent.addChild(
           ui::row(
-              {.align = FlexAlign::Center, .gap = Style::spaceSm},
-              ui::label({.text = names[bit], .minWidth = 104, .maxWidth = 104}),
+              {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+              ui::label(
+                  {.text = names[bit],
+                   .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+                   .minWidth = 104,
+                   .maxWidth = 104}
+              ),
               ui::segmented(
                   {.options = options({"Keep", "Allow", "Deny"}),
                    .selectedIndex = values[bit],
@@ -160,13 +166,27 @@ void BulkAclEditor::rebuild() {
       );
     }
   };
+  const auto caption = [](const char* text) {
+    return ui::label(
+        {.text = text,
+         .fontSize = Style::fontSizeCaption,
+         .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+         .maxLines = 4}
+    );
+  };
+  // A role's title over its Read/Write/Execute rows; a separator splits it from the previous role.
+  const auto section = [](Flex& parent, std::unique_ptr<Node> title) {
+    if (!parent.children().empty()) {
+      parent.addChild(ui::separator({}));
+    }
+    parent.addChild(std::move(title));
+  };
   for (std::size_t index = 0; index < m_lists.size(); ++index) {
     auto& list = m_lists[index];
-    m_rows->addChild(
-        ui::label({.text = index == 0 ? "Access ACL" : "Folder default ACL", .fontWeight = FontWeight::SemiBold})
-    );
+    Flex* body = nullptr;
+    m_rows->addChild(luciole::card(index == 0 ? "Rules" : "Defaults for new items in folders", &body));
     if (index == 1) {
-      m_rows->addChild(
+      body->addChild(
           ui::segmented(
               {.options = options({"Keep", "Edit existing", "Create", "Remove"}),
                .selectedIndex = static_cast<std::size_t>(m_defaults),
@@ -178,58 +198,61 @@ void BulkAclEditor::rebuild() {
                }}
           )
       );
-      m_rows->addChild(
-          ui::label(
-              {.text = "Edit existing preserves absent defaults. Create starts from each folder's "
-                       "updated access ACL when defaults are absent. Files and existing children are unaffected by "
-                       "default rules.",
-               .fontSize = Style::fontSizeCaption,
-               .maxLines = 4}
-          )
-      );
+      body->addChild(caption(
+          "Edit existing preserves absent defaults. Create starts from each folder's updated rules when defaults are "
+          "absent. Files and existing children are unaffected."
+      ));
       if (m_defaults == luciole::AclDefaultPolicy::Keep || m_defaults == luciole::AclDefaultPolicy::Remove) {
         continue;
       }
     }
-    m_rows->addChild(ui::label({.text = "Mask policy", .fontWeight = FontWeight::SemiBold}));
-    m_rows->addChild(
-        ui::segmented(
-            {.options = options({"Keep", "Recalculate", "Remove unused"}),
-             .selectedIndex = static_cast<std::size_t>(list.mask),
-             .enabled = m_ready,
-             .equalSegmentWidths = true,
-             .onChange = [this, index](std::size_t value) {
-               m_lists[index].mask = static_cast<luciole::AclMaskPolicy>(value);
-               changed(true);
-             }}
+    Flex* roles = nullptr;
+    body->addChild(ui::column({.out = &roles, .align = FlexAlign::Stretch, .gap = Style::spaceXs}));
+    section(
+        *roles,
+        ui::row(
+            {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
+            ui::label({.text = "Mask", .fontWeight = FontWeight::SemiBold, .minWidth = 104, .maxWidth = 104}),
+            ui::segmented(
+                {.options = options({"Keep", "Recalculate", "Remove unused"}),
+                 .selectedIndex = static_cast<std::size_t>(list.mask),
+                 .enabled = m_ready,
+                 .equalSegmentWidths = true,
+                 .flexGrow = 1,
+                 .onChange = [this, index](std::size_t value) {
+                   m_lists[index].mask = static_cast<luciole::AclMaskPolicy>(value);
+                   changed(true);
+                 }}
+            )
         )
     );
-    m_rows->addChild(
-        ui::label(
-            {.text = "Keep preserves masks; a newly required mask starts with owning-group rights. "
-                     "Recalculate may widen effective access. Remove unused requires no named rules and restores "
-                     "owning-group rights.",
-             .fontSize = Style::fontSizeCaption,
-             .maxLines = 4}
-        )
-    );
-    constexpr std::array names{"Owner", "Owning group", "Others", "Mask (group class)"};
+    roles->addChild(caption(
+        "Keep preserves masks; a newly required mask starts with owning-group rights. Recalculate may widen effective "
+        "access. Remove unused requires no named rules and restores owning-group rights."
+    ));
+    constexpr std::array names{"Owner", "Owning group", "Others", "Mask rights"};
     for (std::size_t role = 0; role < tags.size(); ++role) {
       if (tags[role] == luciole::AclTag::Mask && list.mask != luciole::AclMaskPolicy::Keep) {
         continue;
       }
-      m_rows->addChild(ui::label({.text = names[role], .fontWeight = FontWeight::SemiBold}));
-      bitRows(*m_rows, list.bits[role], true, [this, index, role](std::size_t bit, std::size_t value) {
+      section(*roles, ui::label({.text = names[role], .fontWeight = FontWeight::SemiBold}));
+      bitRows(*roles, list.bits[role], true, [this, index, role](std::size_t bit, std::size_t value) {
         m_lists[index].bits[role][bit] = value;
         changed(false);
       });
     }
     for (std::size_t rule = 0; rule < list.named.size(); ++rule) {
       const auto& value = list.named[rule];
-      m_rows->addChild(
+      roles->addChild(ui::separator({}));
+      roles->addChild(
           ui::row(
               {.align = FlexAlign::Center, .gap = Style::spaceSm},
-              ui::label({.text = value.tag == luciole::AclTag::User ? "User" : "Group"}),
+              ui::label(
+                  {.text = value.tag == luciole::AclTag::User ? "User" : "Group",
+                   .fontWeight = FontWeight::SemiBold,
+                   .minWidth = 104,
+                   .maxWidth = 104}
+              ),
               ui::input(
                   {.value = value.account,
                    .placeholder = "Name or numeric ID",
@@ -260,7 +283,7 @@ void BulkAclEditor::rebuild() {
               )
           )
       );
-      m_rows->addChild(
+      roles->addChild(
           ui::segmented(
               {.options = options({"Set bits", "Remove rule"}),
                .selectedIndex = value.remove ? 1U : 0U,
@@ -275,18 +298,20 @@ void BulkAclEditor::rebuild() {
                }}
           )
       );
-      bitRows(*m_rows, value.bits, !value.remove, [this, index, rule](std::size_t bit, std::size_t choice) {
+      bitRows(*roles, value.bits, !value.remove, [this, index, rule](std::size_t bit, std::size_t choice) {
         m_lists[index].named[rule].bits[bit] = choice;
         changed(false);
       });
     }
-    auto actions = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
+    auto actions = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = Style::spaceXs});
     for (const bool user : {true, false}) {
       actions->addChild(
           ui::button(
-              {.text = user ? "Add user change" : "Add group change",
+              {.text = user ? "Add user rule" : "Add group rule",
+               .glyph = user ? "user-plus" : "users-plus",
+               .controlHeight = Style::controlHeightSm,
                .enabled = m_ready && list.named.size() < luciole::maxAclEntries - tags.size(),
-               .variant = ButtonVariant::Ghost,
+               .variant = ButtonVariant::Default,
                .onClick = [this, index, user] {
                  m_lists[index].named.push_back({user ? luciole::AclTag::User : luciole::AclTag::Group, {}, {}, false});
                  changed(true);
@@ -294,7 +319,7 @@ void BulkAclEditor::rebuild() {
           )
       );
     }
-    m_rows->addChild(std::move(actions));
+    body->addChild(std::move(actions));
   }
 }
 void BulkAclEditor::prepareRows() {

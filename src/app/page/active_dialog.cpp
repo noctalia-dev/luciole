@@ -2,8 +2,9 @@
 
 #include <utility>
 
-void ActiveDialog::open(std::unique_ptr<Flex> root) {
-  m_root = std::move(root);
+void ActiveDialog::open(std::unique_ptr<Flex> scene, Flex* content) {
+  m_scene = std::move(scene);
+  m_content = content;
   m_kind = Kind::Menu;
 }
 
@@ -20,4 +21,7 @@ void ActiveDialog::close() {
   }
 }
 
-void ActiveDialog::release() { m_root.reset(); }
+void ActiveDialog::release() {
+  m_content = nullptr;
+  m_scene.reset();
+}

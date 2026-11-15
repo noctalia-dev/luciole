@@ -266,7 +266,7 @@ void TransferController::chooseDrop(
   root->addChild(ui::button({.text = "Cancel", .variant = ButtonVariant::Ghost, .onClick = [this] {
                                m_page.dismissMenu();
                              }}));
-  m_page.showCenteredDialog(std::move(root), 360.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::DropAction, [pending] { pending->cancel(); });
     if (focus) {
@@ -326,8 +326,7 @@ void TransferController::syncConflict() {
   const bool archive = job->kind() == JobKind::Archive;
   const bool restore = job->kind() == JobKind::Restore;
   const ActiveConflict active{.job = job->id(), .conflict = conflict->id};
-  auto& surface = m_page.surface();
-  const float width = std::min(520.0F, static_cast<float>(surface.width()) - 32.0F);
+  const float width = m_page.dialogWidth(DialogWidth::Medium);
   auto facts = [&](const std::string& title, bool folder, std::optional<std::uint64_t> bytes,
                    std::optional<std::uint64_t> modified) {
     std::string description = folder ? "Folder" : "File";
@@ -459,16 +458,7 @@ void TransferController::syncConflict() {
       )
   );
   luciole::applyDialogStyle(*root);
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = std::min(
-      root->measure(surface.renderTarget().renderer(), constraints).height, static_cast<float>(surface.height()) - 64.0F
-  );
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::TransferConflict, [this] {
       if (const auto shown = std::exchange(m_activeConflict, std::nullopt)) {

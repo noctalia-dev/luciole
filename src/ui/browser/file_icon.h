@@ -40,6 +40,7 @@ namespace luciole {
     float m_size;
     float m_previewHeight = 0;
     FileIconSource m_source;
+    SharedFileIcon m_sourceHandle;
     ColorSpec m_foreground = colorSpecFromRole(ColorRole::OnSurface);
     ImageNode* m_image = nullptr;
     Flex* m_linkEmblem = nullptr;

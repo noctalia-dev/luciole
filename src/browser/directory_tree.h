@@ -36,7 +36,7 @@ namespace luciole {
     bool m_foldersOnly = false, m_pumping = false;
     DirectorySnapshot m_root;
     std::map<EntryId, std::unique_ptr<Node>> m_nodes;
-    EntryId m_nextId = EntryId{1} << 62;
+    std::shared_ptr<EntryId> m_nextId = std::make_shared<EntryId>(EntryId{1} << 62);
     std::optional<std::pair<EntryId, std::string>> m_rejected;
     std::function<void()> m_changed;
   };

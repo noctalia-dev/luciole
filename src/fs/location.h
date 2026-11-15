@@ -9,6 +9,8 @@ namespace luciole {
   public:
     static Location fromUri(const std::string& uri);
     static Location fromPath(const std::string& absolutePath);
+    // For a URI that already is g_file_get_uri() output of a native file; skips revalidation and re-canonicalization.
+    static Location fromCanonicalNativeUri(std::string uri);
     static Location trash();
 
     const std::string& uri() const { return m_uri; }

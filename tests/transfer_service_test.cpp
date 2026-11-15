@@ -3013,6 +3013,29 @@ namespace {
         read(target.destination("merge/sub/value")) == "cross-filesystem merge"
         && read(target.destination("merge/sub/keep")) == "existing"
     );
+    // Sources are removed in durability batches; every item, including a final partial batch, still completes.
+    std::vector<luciole::Location> many;
+    for (int index = 0; index < 150; ++index) {
+      const auto name = std::format("batch-{:03d}", index);
+      write(source.source(name), name);
+      many.push_back(location(source.source(name)));
+    }
+    fs::create_directories(source.source("wide"));
+    fs::create_directories(target.destination("wide"));
+    for (int index = 0; index < 70; ++index) {
+      write(source.source(std::format("wide/child-{:02d}", index)), "child");
+    }
+    many.push_back(location(source.source("wide")));
+    pump.run(service, many, target.destination(""), TransferAction::Move, [](const auto&) {
+      return TransferConflictChoice::Merge;
+    });
+    TEST_CHECK(service.results().size() == 151);
+    TEST_CHECK(std::ranges::all_of(service.results(), [](const auto& result) {
+      return result.outcome == TransferOutcome::Moved;
+    }));
+    TEST_CHECK(!fs::exists(source.source("batch-000")) && !fs::exists(source.source("batch-149")));
+    TEST_CHECK(read(target.destination("batch-149")) == "batch-149" && !fs::exists(source.source("wide")));
+    TEST_CHECK(read(target.destination("wide/child-69")) == "child");
     source.clean();
     target.clean();
   }

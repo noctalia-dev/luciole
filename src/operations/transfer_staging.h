@@ -37,6 +37,19 @@ namespace luciole::transfer {
     std::shared_ptr<const Destination> ancestor;
   };
 
+  struct Node;
+
+  // A moved item whose copy is published but whose source waits for the next durability flush.
+  struct PendingMove {
+    Node* node;
+    Tree tree;
+    Fd destination;
+    // The node's outcome once its source is removed.
+    TransferOutcome outcome = TransferOutcome::Moved;
+  };
+  // Cross-filesystem moves sync the destination filesystem once per this many items, not once per item.
+  constexpr std::size_t kMoveSyncBatch = 64;
+
   struct Work : CopyWork {
     // Asks how to resolve a name conflict; forcePrompt bypasses remembered policies.
     using Choose = std::function<TransferConflictChoice(
@@ -57,6 +70,8 @@ namespace luciole::transfer {
     std::function<void(const std::shared_ptr<const CopyEffect>&, int)> recordCopy;
     bool allowMerge = true;
     std::size_t mergedItems = 0;
+    // Owned by flushMoves(); nodes outlive the job's final flush.
+    std::vector<PendingMove> pendingMoves;
   };
 
   struct Node {
@@ -97,6 +112,9 @@ namespace luciole::transfer {
   Fd openSourceParent(const Source& source);
   // Runs node once, or on retry only its retryable parts.
   void execute(Node& node, TransferAction action, Work& work, bool retry);
+  // Makes pending moved copies durable with one syncfs per destination filesystem, then removes their sources.
+  // Every job flushes before it reports outcomes.
+  void flushMoves(Work& work);
   std::size_t retryCount(const Node& node);
   TransferResult snapshot(const Node& node);
 } // namespace luciole::transfer

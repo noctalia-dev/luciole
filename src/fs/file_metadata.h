@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fs/interned_text.h"
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -8,7 +10,7 @@ namespace luciole {
   enum class FileType : std::uint8_t { Unknown, Regular, Directory, Symlink, Special, Shortcut, Mountable };
 
   // Shared presentation for list, tooltip, preview and Properties. Does not inspect file contents.
-  std::string fileTypeDescription(FileType type, bool symlink, const std::optional<std::string>& contentType);
+  std::string fileTypeDescription(FileType type, bool symlink, InternedText contentType);
   // MIME inheritance includes application-based text formats; image/media renderers take precedence.
   bool contentTypeIsText(const std::string& contentType);
 
@@ -20,9 +22,18 @@ namespace luciole {
     bool operator==(const FileIdentity&) const = default;
   };
 
+  // A provider's change time (ctime), with subsecond precision; detects edits that restore the modification time.
+  struct ChangeRevision {
+    std::uint64_t seconds = 0;
+    std::uint32_t nanoseconds = 0;
+    bool operator==(const ChangeRevision&) const = default;
+    // "<seconds>:<nanoseconds>", for cache keys and persisted records.
+    std::string text() const;
+  };
+
   struct EntryMetadata {
     std::optional<std::uint64_t> accessedSeconds, createdSeconds;
-    std::optional<std::string> owner, group;
+    InternedText owner = nullptr, group = nullptr;
     std::optional<std::uint32_t> mode;
     bool operator==(const EntryMetadata&) const = default;
   };

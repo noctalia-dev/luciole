@@ -19,6 +19,7 @@ namespace luciole {
   // Each logical tab owns one or two browser pages. A split is never a second tab.
   class TabWorkspace {
   public:
+    static constexpr std::size_t tabLimit = 32;
     WindowId addWindow();
     // A background tab leaves the current tab and its split/focus untouched.
     // The first tab of an empty window is always activated.

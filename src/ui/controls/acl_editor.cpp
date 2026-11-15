@@ -2,6 +2,7 @@
 
 #include "ui/builders.h"
 #include "ui/controls/button.h"
+#include "ui/controls/card_style.h"
 #include "ui/controls/input.h"
 #include "ui/controls/permission_editor.h"
 #include "ui/controls/toggle.h"
@@ -20,13 +21,14 @@ namespace {
 AclEditor::AclEditor(std::function<void()> changed) : m_changed(std::move(changed)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
-  setGap(Style::spaceSm);
-  addChild(ui::label({.text = "Access control", .fontWeight = FontWeight::SemiBold}));
+  setGap(Style::spaceMd);
   addChild(
       ui::label(
-          {.text = "The mask limits the owning group and named users/groups. Mask changes are explicit.",
+          {.text = "Rules grant rights to more users and groups. The mask caps the owning group and every named rule; "
+                   "rights above it show their effective value.",
            .fontSize = Style::fontSizeCaption,
-           .maxLines = 2}
+           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+           .maxLines = 3}
       )
   );
   addChild(
@@ -101,7 +103,10 @@ void AclEditor::updateEffective() {
     const auto effective = (named(row.tag) || row.tag == Tag::OwningGroup) && mask != rows.end()
         ? row.permissions & mask->permissions
         : row.permissions;
-    label->setText("Effective: " + permissions(effective));
+    // Only rights the mask actually cuts are worth a note.
+    label->setText("Effective " + permissions(effective));
+    label->setVisible(effective != row.permissions);
+    label->setParticipatesInLayout(effective != row.permissions);
   }
 }
 void AclEditor::recalculate(bool defaults) {
@@ -128,62 +133,147 @@ void AclEditor::rebuild() {
   if (!m_actual || !m_actual->supported) {
     return;
   }
-  constexpr std::array names{"Owner", "Named user", "Owning group", "Named group", "Mask (group class)", "Others"};
+  constexpr std::array names{"Owner", "User", "Owning group", "Group", "Mask", "Others"};
+  constexpr float nameWidth = 168.0F, removeWidth = Style::controlHeightSm;
   for (const bool defaults : {false, true}) {
     if (defaults && !m_actual->directory) {
       continue;
     }
     auto& rows = defaults ? m_defaults : m_access;
-    m_rows->addChild(ui::label({.text = defaults ? "Default ACL" : "Access ACL", .fontWeight = FontWeight::SemiBold}));
+    const bool mask = std::ranges::any_of(rows, [](const auto& row) { return row.tag == Tag::Mask; });
+    std::unique_ptr<Node> removeDefaults;
+    if (defaults && !rows.empty()) {
+      removeDefaults = ui::button(
+          {.text = "Remove defaults",
+           .glyph = "trash",
+           .controlHeight = Style::controlHeightSm,
+           .enabled = m_editable,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] {
+             m_defaults.clear();
+             changed(true);
+           }}
+      );
+    }
+    Flex* body = nullptr;
+    m_rows->addChild(luciole::card(defaults ? "Defaults for new items" : "Rules", &body, std::move(removeDefaults)));
     if (defaults) {
-      m_rows->addChild(
+      body->addChild(
           ui::label(
-              {.text = "Defaults affect newly created children. Existing children keep their ACLs.",
+              {.text = "New files and folders created inside inherit these rules. Existing items keep theirs.",
                .fontSize = Style::fontSizeCaption,
+               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
                .maxLines = 2}
           )
       );
       if (rows.empty()) {
-        m_rows->addChild(
-            ui::button(
-                {.text = "Add default ACL", .enabled = m_editable, .variant = ButtonVariant::Ghost, .onClick = [this] {
-                   m_defaults = m_access;
-                   changed(true);
-                 }}
+        body->addChild(
+            ui::row(
+                {.paddingV = Style::spaceXs},
+                ui::button(
+                    {.text = "Add defaults",
+                     .glyph = "plus",
+                     .controlHeight = Style::controlHeightSm,
+                     .enabled = m_editable,
+                     .variant = ButtonVariant::Default,
+                     .tooltip = "Start from this folder's rules",
+                     .onClick = [this] {
+                       m_defaults = m_access;
+                       changed(true);
+                     }}
+                )
             )
         );
         continue;
       }
     }
+    // Same grid as the Access card: name column, Read/Write/Execute, then the remove column.
+    auto header = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
+    header->addChild(ui::label({.text = "", .minWidth = nameWidth, .maxWidth = nameWidth}));
+    for (const auto* text : {"Read", "Write", "Execute"}) {
+      header->addChild(
+          ui::column(
+              {.align = FlexAlign::Center, .flexGrow = 1.0F},
+              ui::label(
+                  {.text = text,
+                   .fontSize = Style::fontSizeCaption,
+                   .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+              )
+          )
+      );
+    }
+    header->addChild(ui::label({.text = "", .minWidth = removeWidth, .maxWidth = removeWidth}));
+    body->addChild(std::move(header));
     for (std::size_t i = 0; i < rows.size(); ++i) {
       const auto& rule = rows[i];
-      auto heading = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
-      heading->addChild(
-          ui::label({.text = names[static_cast<std::size_t>(rule.tag)], .flexGrow = named(rule.tag) ? 0.0F : 1.0F})
-      );
+      auto entry = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F});
+      auto who = ui::column({.align = FlexAlign::Stretch, .gap = 2.0F, .minWidth = nameWidth, .maxWidth = nameWidth});
       if (named(rule.tag)) {
-        heading->addChild(
-            ui::input(
-                {.value = rule.qualifier,
-                 .placeholder = "Name or numeric ID",
-                 .enabled = m_editable,
-                 .flexGrow = 1.0F,
-                 .onChange = [this, defaults, i](const std::string& value) {
-                   (defaults ? m_defaults : m_access)[i].qualifier = value.substr(0, 1025);
-                   changed(false);
-                 }}
+        // A person or people glyph tells user rules from group rules.
+        who->addChild(
+            ui::row(
+                {.align = FlexAlign::Center, .gap = Style::spaceSm},
+                ui::glyph(
+                    {.glyph = rule.tag == Tag::User ? "user" : "users",
+                     .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+                ),
+                ui::input(
+                    {.value = rule.qualifier,
+                     .placeholder = rule.tag == Tag::User ? "User name or ID" : "Group name or ID",
+                     .enabled = m_editable,
+                     .flexGrow = 1.0F,
+                     .onChange = [this, defaults, i](const std::string& value) {
+                       (defaults ? m_defaults : m_access)[i].qualifier = value.substr(0, 1025);
+                       changed(false);
+                     }}
+                )
+            )
+        );
+      } else {
+        who->addChild(
+            ui::label({.text = names[static_cast<std::size_t>(rule.tag)], .fontWeight = FontWeight::SemiBold})
+        );
+      }
+      Label* effective = nullptr;
+      who->addChild(
+          ui::label(
+              {.out = &effective,
+               .fontSize = Style::fontSizeCaption,
+               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+          )
+      );
+      m_effective.push_back({effective, {defaults, i}});
+      entry->addChild(std::move(who));
+      for (std::size_t bit = 0; bit < 3; ++bit) {
+        const auto value = 4U >> bit;
+        entry->addChild(
+            ui::column(
+                {.align = FlexAlign::Center, .flexGrow = 1.0F},
+                ui::toggle(
+                    {.checkedImmediate = (rule.permissions & value) != 0,
+                     .enabled = m_editable,
+                     .onChange = [this, defaults, i, value](bool checked) {
+                       auto& permissions = (defaults ? m_defaults : m_access)[i].permissions;
+                       permissions = checked ? permissions | value : permissions & ~value;
+                       changed(false);
+                     }}
+                )
             )
         );
       }
       if (named(rule.tag) || rule.tag == Tag::Mask) {
+        // The mask can go only once no named rule needs it.
         const bool removable =
             named(rule.tag) || std::ranges::none_of(rows, [](const auto& row) { return named(row.tag); });
-        heading->addChild(
+        entry->addChild(
             ui::button(
                 {.glyph = "x",
+                 .controlHeight = Style::controlHeightSm,
                  .enabled = m_editable && removable,
                  .variant = ButtonVariant::Ghost,
-                 .tooltip = "Remove entry",
+                 .tooltip = "Remove rule",
+                 .minWidth = removeWidth,
+                 .maxWidth = removeWidth,
                  .onClick = [this, defaults, i] {
                    auto& values = defaults ? m_defaults : m_access;
                    values.erase(values.begin() + static_cast<std::ptrdiff_t>(i));
@@ -191,47 +281,20 @@ void AclEditor::rebuild() {
                  }}
             )
         );
+      } else {
+        entry->addChild(ui::label({.text = "", .minWidth = removeWidth, .maxWidth = removeWidth}));
       }
-      auto flags = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
-      constexpr std::array labels{"Read", "Write", "Execute"};
-      for (std::size_t bit = 0; bit < labels.size(); ++bit) {
-        const auto value = 4U >> bit;
-        flags->addChild(
-            ui::toggle(
-                {.checkedImmediate = (rule.permissions & value) != 0,
-                 .enabled = m_editable,
-                 .onChange = [this, defaults, i, value](bool checked) {
-                   auto& permissions = (defaults ? m_defaults : m_access)[i].permissions;
-                   permissions = checked ? permissions | value : permissions & ~value;
-                   changed(false);
-                 }}
-            )
-        );
-        flags->addChild(ui::label({.text = labels[bit], .fontSize = Style::fontSizeCaption}));
-      }
-      Label* effective = nullptr;
-      flags->addChild(
-          ui::label(
-              {.out = &effective,
-               .text = "",
-               .fontSize = Style::fontSizeCaption,
-               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-               .flexGrow = 1.0F}
-          )
-      );
-      m_effective.push_back({effective, {defaults, i}});
-      m_rows->addChild(
-          ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceXs}, std::move(heading), std::move(flags))
-      );
+      body->addChild(std::move(entry));
     }
-    auto actions = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm});
-    const bool mask = std::ranges::any_of(rows, [](const auto& row) { return row.tag == Tag::Mask; });
+    auto actions = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = Style::spaceXs});
     for (const bool user : {true, false}) {
       actions->addChild(
           ui::button(
               {.text = user ? "Add user" : "Add group",
+               .glyph = user ? "user-plus" : "users-plus",
+               .controlHeight = Style::controlHeightSm,
                .enabled = m_editable && rows.size() + (mask ? 1 : 2) <= luciole::maxAclEntries,
-               .variant = ButtonVariant::Ghost,
+               .variant = ButtonVariant::Default,
                .onClick = [this, defaults, user] {
                  auto& values = defaults ? m_defaults : m_access;
                  if (std::ranges::none_of(values, [](const auto& row) { return row.tag == Tag::Mask; })) {
@@ -244,25 +307,19 @@ void AclEditor::rebuild() {
           )
       );
     }
+    actions->addChild(ui::spacer());
     actions->addChild(
         ui::button(
             {.text = "Recalculate mask",
+             .glyph = "calculator",
+             .controlHeight = Style::controlHeightSm,
              .enabled = m_editable && (mask || rows.size() < luciole::maxAclEntries),
              .variant = ButtonVariant::Ghost,
+             .tooltip = "Set the mask to the union of the owning group and named rules",
              .onClick = [this, defaults] { recalculate(defaults); }}
         )
     );
-    m_rows->addChild(std::move(actions));
-    if (defaults) {
-      m_rows->addChild(
-          ui::button(
-              {.text = "Remove default ACL", .enabled = m_editable, .variant = ButtonVariant::Ghost, .onClick = [this] {
-                 m_defaults.clear();
-                 changed(true);
-               }}
-          )
-      );
-    }
+    body->addChild(std::move(actions));
   }
   updateEffective();
 }

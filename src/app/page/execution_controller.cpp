@@ -97,7 +97,7 @@ void ExecutionController::confirm(const luciole::ActionRequest& request, luciole
       )
   );
   root->addChild(std::move(buttons));
-  m_page.showCenteredDialog(std::move(root), 500.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
     // Dismissal retires this confirmation, not a launch accepted just before
     // the deferred popup close runs.

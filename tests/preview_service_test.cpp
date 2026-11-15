@@ -27,23 +27,20 @@ namespace {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
-  luciole::DirectoryEntry entry(const std::filesystem::path& path, std::string mime = "text/plain") {
+  luciole::DirectoryEntry entry(const std::filesystem::path& path, const std::string& mime = "text/plain") {
     luciole::DirectoryEntry result{
         .id = 1,
-        .location = luciole::Location::fromPath(path.native()),
+        .place = luciole::Location::fromPath(path.native()),
         .name = path.filename().native(),
-        .displayName = path.filename().native(),
         .size = std::nullopt,
-        .modifiedSeconds = std::nullopt,
-        .etag = std::nullopt,
-        .parentDisplayName = {}
+        .modifiedSeconds = std::nullopt
     };
     result.id = 1;
-    result.location = luciole::Location::fromPath(path.native());
+    result.place = luciole::Location::fromPath(path.native());
     result.name = path.filename().native();
-    result.displayName = result.name;
+    result.setDisplayName(result.name);
     result.type = luciole::FileType::Regular;
-    result.contentType = std::move(mime);
+    result.contentType = mime;
     struct stat stat{};
     if (::lstat(path.c_str(), &stat) == 0) {
       result.size = static_cast<std::uint64_t>(stat.st_size);
@@ -126,7 +123,9 @@ namespace {
     }
     preview.show(entry(b), 512, {});
     finish();
-    TEST_CHECK(preview.snapshot().text == "current file" && preview.snapshot().entry->location == entry(b).location);
+    TEST_CHECK(
+        preview.snapshot().text == "current file" && preview.snapshot().entry->location() == entry(b).location()
+    );
     write(a, std::string(1000000, 'a'));
     preview.show(entry(a), 512, {});
     finish();
@@ -155,7 +154,7 @@ namespace {
     finish();
     TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Unavailable);
     auto remote = entry(b);
-    remote.location = luciole::Location::fromUri("sftp://example.invalid/file.txt");
+    remote.place = luciole::Location::fromUri("sftp://example.invalid/file.txt");
     preview.show(remote, 512, {});
     finish();
     TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Unavailable);
@@ -197,7 +196,7 @@ namespace {
     preview.show(source, 1024, {}, seed);
     TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Ready && preview.snapshot().image == seed);
     auto obsolete = source;
-    obsolete.contentRevision = "changed";
+    obsolete.contentRevision = luciole::ChangeRevision{.seconds = 1, .nanoseconds = 2};
     TEST_CHECK(!grid.prepared(obsolete));
     preview.clear();
     finish();

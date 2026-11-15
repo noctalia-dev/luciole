@@ -34,13 +34,13 @@ std::string luciole::entryColumnText(const DirectoryEntry& entry, DetailsColumn 
   case DetailsColumn::Created:
     return metadataTime(entry.details.createdSeconds);
   case DetailsColumn::Owner:
-    return entry.details.owner.value_or("Unknown");
+    return std::string(entry.details.owner.value_or("Unknown"));
   case DetailsColumn::Group:
-    return entry.details.group.value_or("Unknown");
+    return std::string(entry.details.group.value_or("Unknown"));
   case DetailsColumn::Permissions:
     return entry.details.mode ? std::format("{:04o}", *entry.details.mode) : "Unknown";
   case DetailsColumn::Location: {
-    const auto parent = entry.location.parent();
+    const auto parent = entry.location().parent();
     return parent ? locationEditText(*parent) : "Unknown";
   }
   }

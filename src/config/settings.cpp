@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdio>
 #include <fcntl.h>
 #include <format>
 #include <iterator>
 #include <optional>
+#include <print>
 #include <sstream>
 #include <string_view>
 #include <sys/stat.h>
@@ -207,8 +209,11 @@ namespace {
       ),
       describe(P::TypingMode, "typing_mode", [](S& s) -> auto& { return s.typingMode; }, {kTypingModes}),
       describe(P::SwitchToNewTab, "switch_to_new_tab", [](S& s) -> auto& { return s.switchToNewTab; }),
+      describe(P::RestoreLastWindow, "restore_last_window", [](S& s) -> auto& { return s.restoreLastWindow; }),
       describe(P::ShowHidden, "show_hidden", [](S& s) -> auto& { return s.showHidden; }),
       describe(P::ShowBackups, "show_backups", [](S& s) -> auto& { return s.showBackups; }),
+      describe(P::AlwaysShowTabBar, "always_show_tab_bar", [](S& s) -> auto& { return s.alwaysShowTabBar; }),
+      describe(P::AlwaysShowStatusBar, "always_show_status_bar", [](S& s) -> auto& { return s.alwaysShowStatusBar; }),
       describe(P::SortBy, "sort_by", [](S& s) -> auto& { return s.sort.field; }, {kSortFields}),
       describe(P::SortDescending, "sort_descending", [](S& s) -> auto& { return s.sort.descending; }),
       describe(P::DirectoriesFirst, "directories_first", [](S& s) -> auto& { return s.sort.directoriesFirst; }),
@@ -410,12 +415,25 @@ namespace {
     }
   }
 
-  std::expected<Patch, luciole::ConfigIssues> parse(const std::filesystem::path& file, std::string_view text) {
+  enum class UnknownSettings { Reject, Warn };
+
+  std::expected<Patch, luciole::ConfigIssues> parse(
+      const std::filesystem::path& file, std::string_view text, UnknownSettings unknown = UnknownSettings::Reject,
+      toml::table* document = nullptr
+  ) {
     auto table = luciole::parseToml(text, file);
     if (!table) {
       return std::unexpected(std::move(table.error()));
     }
     luciole::TomlDecoder decoder(file);
+    luciole::TomlDecoder warnings(file);
+    const auto unknownSetting = [&](const toml::node& node, std::string key) {
+      if (unknown == UnknownSettings::Reject) {
+        decoder.issue(node, std::move(key), "unknown setting");
+      } else {
+        warnings.issue(node, std::move(key), "unknown setting; ignored");
+      }
+    };
     Patch patch;
     for (const auto& [key, node] : *table) {
       if (key == "schema_version") {
@@ -445,15 +463,21 @@ namespace {
             }
           });
           if (!known) {
-            decoder.issue(value, std::format("browser.{}", name.str()), "unknown setting");
+            unknownSetting(value, std::format("browser.{}", name.str()));
           }
         }
       } else {
-        decoder.issue(node, std::string(key.str()), "unknown setting");
+        unknownSetting(node, std::string(key.str()));
       }
     }
     if (!decoder.issues.empty()) {
       return std::unexpected(std::move(decoder.issues));
+    }
+    for (const auto& warning : warnings.issues) {
+      std::println(stderr, "luciole: warning: {}", warning.format());
+    }
+    if (document != nullptr) {
+      *document = std::move(*table);
     }
     return patch;
   }
@@ -472,17 +496,23 @@ namespace {
     });
   }
 
-  std::string formatPatch(const Patch& patch) {
+  std::string formatPatch(const Patch& patch, toml::table document) {
     toml::table browser;
+    if (const auto* existing = document["browser"].as_table()) {
+      browser = *existing;
+    }
     forEachPreference([&](auto index) {
+      const auto& descriptor = std::get<index>(kPreferences);
+      browser.erase(descriptor.key);
       if (const auto& value = std::get<index>(patch)) {
-        const auto& descriptor = std::get<index>(kPreferences);
         encode(browser, descriptor.key, descriptor.rule, *value);
       }
     });
-    toml::table document{{"schema_version", luciole::kSchemaVersion}};
-    if (!browser.empty()) {
-      document.insert("browser", std::move(browser));
+    document.insert_or_assign("schema_version", luciole::kSchemaVersion);
+    if (browser.empty()) {
+      document.erase("browser");
+    } else {
+      document.insert_or_assign("browser", std::move(browser));
     }
     std::ostringstream output;
     output << toml::toml_formatter{
@@ -571,7 +601,7 @@ static luciole::SettingsResult loadLayers(const luciole::ConfigPaths& paths, boo
     if (!*text) {
       continue;
     }
-    auto parsed = parse(*file, **text);
+    auto parsed = parse(*file, **text, UnknownSettings::Warn);
     if (!parsed) {
       auto& errors = parsed.error();
       issues.insert(issues.end(), std::make_move_iterator(errors.begin()), std::make_move_iterator(errors.end()));
@@ -646,14 +676,15 @@ luciole::AtomicWriteState luciole::ConfigService::saveOverrides(std::span<const 
           return std::unexpected("cannot load base configuration");
         }
         if (*base) {
-          const auto parsed = parse(m_paths.base, **base);
+          const auto parsed = parse(m_paths.base, **base, UnknownSettings::Warn);
           if (!parsed) {
             m_issues = parsed.error();
             return std::unexpected("invalid base configuration");
           }
           applyPatch(candidate, *parsed);
         }
-        auto patch = parse(m_paths.overrides, current.value_or(""));
+        toml::table document;
+        auto patch = parse(m_paths.overrides, current.value_or(""), UnknownSettings::Warn, &document);
         if (!patch) {
           m_issues = std::move(patch.error());
           return std::unexpected("invalid existing settings");
@@ -666,7 +697,7 @@ luciole::AtomicWriteState luciole::ConfigService::saveOverrides(std::span<const 
         if (*patch == previous) {
           return std::nullopt;
         }
-        return formatPatch(*patch);
+        return formatPatch(*patch, std::move(document));
       }
   );
   if (result.state != AtomicWriteState::NotCommitted) {

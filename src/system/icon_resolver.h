@@ -17,6 +17,8 @@ struct IconSearchDir {
   std::string theme;
   int minSize = 0;
   int maxSize = 0;
+  // Whether the directory existed when the plan was built; a plan is rebuilt when one appears.
+  bool exists = false;
 };
 
 struct IconThemeWatchPaths {
@@ -49,6 +51,8 @@ public:
   static std::shared_ptr<const IconThemeWatchPaths> themeWatchPaths();
   static std::uint64_t themeGeneration();
   static std::string activeThemeName();
+  // Icon lookups performed so far in this process.
+  static std::uint64_t lookupCount();
 
 private:
   void rebuild();

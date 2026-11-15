@@ -14,13 +14,7 @@
 #include "wayland/wayland_connection.h"
 #include "wayland/wayland_seat.h"
 
-#include <algorithm>
 #include <utility>
-
-namespace {
-  constexpr float kDialogWidth = 880.0F;
-  constexpr float kDialogHeight = 640.0F;
-} // namespace
 
 SettingsController::SettingsController(
     PageContext& page, luciole::ViewPreferenceWriter& preferences, luciole::ThumbnailService& thumbnails,
@@ -55,12 +49,11 @@ void SettingsController::layoutDialog(float width) {
   if (!m_view) {
     return;
   }
-  const float height = std::min(kDialogHeight, static_cast<float>(m_page.surface().height()) - 64.0F);
-  if (width != m_view->width() || height != m_view->height()) {
+  // A width change moves the open dropdown's anchor.
+  if (width != m_view->width()) {
     closeSelectDropdown();
   }
   m_view->setCompact(width < 720.0F);
-  m_view->setSize(width, height);
 }
 
 void SettingsController::sync() {
@@ -100,30 +93,21 @@ void SettingsController::toggle() {
   root->setPopupContext(this);
   m_view = root.get();
   sync();
-  auto& surface = m_page.surface();
-  const float width = std::min(kDialogWidth, static_cast<float>(surface.width()) - 32.0F);
-  const float height = std::min(kDialogHeight, static_cast<float>(surface.height()) - 64.0F);
-  m_view->setCompact(width < 720.0F);
-  root->setSize(width, height);
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_view->setCompact(m_page.dialogWidth(DialogWidth::Large) < 720.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Large);
   if (!m_page.menuSurface()) {
     m_view = nullptr;
     m_viewLifetime.reset();
     return;
   }
   m_page.activeDialog().bind(ActiveDialog::Kind::Settings, [this] { teardown(); });
-  // Keep the preferred width so a dialog opened in a small window can grow again.
-  m_page.setDialogSize(kDialogWidth, height);
   m_page.menuDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
     if (m_view) {
       m_view->reveal(focused);
       m_page.menuSurface()->requestLayout();
     }
   });
-  m_page.menuDispatcher().setFocus(m_page.menuDispatcher().firstTabFocusUnder(m_view));
+  m_page.menuDispatcher().setFocus(m_page.menuDispatcher().firstTabFocusUnder(m_view->navigation()));
 }
 
 bool SettingsController::key(const KeyboardEvent& event) {

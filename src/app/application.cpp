@@ -4,6 +4,7 @@
 #include "app/instance_service.h"
 #include "app/library_setup.h"
 #include "app/main_loop.h"
+#include "app/startup_trace.h"
 #include "app/workspace_application.h"
 #include "browser/location_presentation.h"
 #include "clipboard/text_clipboard.h"
@@ -95,10 +96,14 @@ namespace {
 } // namespace
 
 int luciole::runApplication(const std::optional<std::string>& initialLocation, bool fileManagerActivation) {
+  startupTrace("main");
 #ifdef __GLIBC__
   // Every short-lived worker thread (GIO tasks, decoders, Mesa) would otherwise get its own arena and keep its freed
   // memory resident; two arenas hold the same work with several MB less RSS.
   mallopt(M_ARENA_MAX, 2);
+  // A fixed threshold keeps large listing arrays mmapped, so they return to the system when freed; glibc's dynamic
+  // threshold would otherwise grow and leave them in the heap (measured: 14 MiB less at 100,000 entries).
+  mallopt(M_MMAP_THRESHOLD, 128 * 1024);
 #endif
   initLogLevelFromEnvironment();
   std::optional<luciole::Location> location;
@@ -109,6 +114,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, b
     return EXIT_FAILURE;
   }
   luciole::InstanceService instance;
+  startupTrace("instance-ready");
   if (!fileManagerActivation && instance.role() == luciole::InstanceService::Role::Secondary) {
     const char* token = std::getenv("XDG_ACTIVATION_TOKEN");
     if (instance.forward(location, token != nullptr ? token : "")) {
@@ -135,6 +141,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, b
     if (!connection.connect()) {
       throw std::runtime_error("could not connect to Wayland: " + connection.describeDisplayError());
     }
+    startupTrace("wayland-connected");
     connection.setTextInputService(&textInput);
     auto& desktop = connection.extension<luciole::DesktopIntegration>();
     WaylandTextClipboard clipboard(
@@ -150,11 +157,13 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, b
     graphics.initialize(connection.display());
     RenderContext renderer;
     renderer.initialize(graphics);
+    startupTrace("graphics-ready");
     WorkspaceApplication application(connection, renderer, textInput, clipboard, config.settings().browser);
     application.imageTextures().initialize(&graphics);
     if (!fileManagerActivation) {
       application.start(std::move(location));
     }
+    startupTrace("workspace-ready");
     instance.setHandler([&application](const luciole::InstanceRequest& request) { application.open(request); });
     luciole::FileManagerService fileManager(
         [&application](const luciole::FileManagerRequest& request) { application.show(request); }, fileManagerActivation

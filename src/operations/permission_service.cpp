@@ -142,16 +142,7 @@ void luciole::PermissionService::cancel() {
 }
 bool luciole::PermissionService::prepare(DirectoryEntry entry) { return prepareEntry(std::move(entry), false); }
 bool luciole::PermissionService::prepare(const Location& location) {
-  return prepareEntry(
-      {.location = location,
-       .name = {},
-       .displayName = {},
-       .size = {},
-       .modifiedSeconds = {},
-       .etag = {},
-       .parentDisplayName = {}},
-      true
-  );
+  return prepareEntry({.place = location, .name = {}, .size = {}, .modifiedSeconds = {}}, true);
 }
 bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
   if (busy() || entries.size() < 2 || entries.size() > 4096) {
@@ -170,12 +161,13 @@ bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
         bulk->results = std::make_shared<std::vector<PermissionResult>>();
         std::set<std::string> uris;
         for (const auto& entry : entries) {
-          if (!uris.insert(entry.location.uri()).second) {
+          const auto location = entry.location();
+          if (!uris.insert(location.uri()).second) {
             throwFileError(FileErrorKind::InvalidArgument, "The selection contains repeated locations.");
           }
           bulk->results->push_back(
-              {.location = entry.location,
-               .name = entry.displayName,
+              {.location = location,
+               .name = entry.displayName(),
                .info = {},
                .outcome = PermissionOutcome::Cancelled,
                .error = {},
@@ -281,8 +273,8 @@ bool luciole::PermissionService::applyRecursive(RecursivePermissionEdit edit) {
     roots->targets.push_back(m_state->target);
     roots->results = std::make_shared<std::vector<PermissionResult>>();
     roots->results->push_back(
-        {.location = m_state->target->entry.location,
-         .name = m_state->target->entry.displayName,
+        {.location = m_state->target->entry.location(),
+         .name = m_state->target->entry.displayName(),
          .info = m_state->snapshot.info,
          .outcome = PermissionOutcome::Ready,
          .error = {},

@@ -62,14 +62,7 @@ void BatchRenameController::open(const std::vector<luciole::DirectoryEntry>& tar
       }
   );
   auto* dialog = root.get();
-  auto& surface = m_page.surface();
-  const float width = std::min(760.0F, static_cast<float>(surface.width()) - 32.0F);
-  const float height = std::min(560.0F, static_cast<float>(surface.height()) - 64.0F);
-  root->setSize(width, height);
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Large);
   if (m_page.menuSurface()) {
     m_dialog = dialog;
     m_page.activeDialog().bind(ActiveDialog::Kind::BatchRename, [this] {
@@ -84,7 +77,6 @@ void BatchRenameController::open(const std::vector<luciole::DirectoryEntry>& tar
       m_job.reset();
     });
     m_reported = false;
-    m_page.setDialogSize(width, height);
     m_page.menuDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
       if (m_dialog) {
         m_dialog->reveal(focused);
@@ -174,12 +166,6 @@ void BatchRenameController::pointer(float x, float y, bool hover) {
   }
 }
 
-void BatchRenameController::layoutDialog(float width) {
-  if (m_dialog) {
-    m_dialog->setSize(width, std::min(560.0F, static_cast<float>(m_page.surface().height()) - 64.0F));
-  }
-}
-
 void BatchRenameController::syncTooltip(Renderer& renderer) {
   if (m_dialog) {
     m_dialog->syncTooltip(renderer);
@@ -197,7 +183,7 @@ void BatchRenameController::revealRenamed(VirtualGridView& list) {
       }
       std::vector<luciole::EntryId> ids;
       for (const auto id : model.rows()) {
-        if (const auto* entry = model.entry(id); entry && uris.contains(entry->location.uri())) {
+        if (const auto* entry = model.entry(id); entry && uris.contains(entry->location().uri())) {
           ids.push_back(id);
         }
       }

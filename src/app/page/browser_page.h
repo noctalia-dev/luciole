@@ -56,6 +56,7 @@
 #include "ui/controls/separator.h"
 #include "ui/controls/tooltip_presenter.h"
 #include "ui/dialogs/name_dialog.h"
+#include "ui/popup_chrome.h"
 #include "wayland/popup_surface.h"
 #include "wayland/text_input_service.h"
 #include "wayland/toplevel_surface.h"
@@ -181,6 +182,17 @@ public:
   void keyboard(const KeyboardEvent& event);
 
 private:
+  // Shared popup setup after closeMenu(): `scene` goes on a new child surface configured by `config`;
+  // `content` is what ActiveDialog::root() returns. Menus pass their root as both.
+  void openPopup(
+      std::unique_ptr<Flex> scene, Flex* content, ContextMenuControl* menu, PopupSurfaceConfig config, PopupMode mode
+  );
+  // The dialog's content size and shadow geometry for the current window: content height capped by the window.
+  popup_chrome::Geometry dialogGeometry(Flex& content);
+  // Where the dialog's surface goes: centered on open and on window resizes, else the top edge stays put.
+  std::pair<int, int> dialogPosition(const popup_chrome::Geometry& chrome);
+  // Resizes, positions and arranges the dialog frame on its surface for the current window.
+  void layoutDialogFrame();
   luciole::ActionContext actionContext() const;
   luciole::ActionRequest actionRequest(bool withTargets) const override;
   luciole::ActionRequest requestFor(const std::vector<luciole::DirectoryEntry>& entries) const override;
@@ -238,7 +250,8 @@ private:
 
   void applySettings(const luciole::BrowserSettings& settings, bool force) override;
 
-  void showCenteredDialog(std::unique_ptr<Flex> root, float preferredWidth) override;
+  void showDialog(std::unique_ptr<Flex> root, DialogWidth width) override;
+  float dialogWidth(DialogWidth width) const override;
 
   void cancelDrag() override;
 
@@ -282,9 +295,8 @@ private:
 
   void showPopup(
       std::unique_ptr<Flex> root, ContextMenuControl* menu, LayoutRect anchor, float width, float height,
-      bool alignLeft = false, PopupMode mode = PopupMode::Transient
+      bool alignLeft = false
   ) override;
-  void setDialogSize(float width, float height) override;
   PopupSurface* menuSurface() override;
   InputDispatcher& menuDispatcher() override;
   ActiveDialog& activeDialog() override;
@@ -323,8 +335,12 @@ private:
   luciole::FileViewAdapter m_gridAdapter;
   luciole::ViewPreferenceWriter& m_preferences;
   luciole::BrowserSettings m_savedSettings;
-  std::optional<float> m_dialogHeight;
-  float m_dialogWidth = 588.0F;
+  // The open dialog's tier; unset while a menu or nothing is shown.
+  std::optional<DialogWidth> m_dialogTier;
+  // The dialog's top edge in window coordinates and the window height it was placed for.
+  std::optional<float> m_dialogTop;
+  float m_dialogWindowHeight = 0.0F;
+  RectNode* m_dialogShadow = nullptr;
   std::optional<std::pair<int, int>> m_dialogPosition;
   bool m_dialogResizePending = false;
   luciole::PinService& m_pins;

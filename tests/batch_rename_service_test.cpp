@@ -46,19 +46,18 @@ namespace {
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
     ));
     TEST_CHECK(info);
-    return {
+    luciole::DirectoryEntry result{
         .id = 1,
-        .location = location(path),
+        .place = location(path),
         .name = path.filename().native(),
-        .displayName = luciole::filenameDisplayText(path.filename().native()),
         .type = luciole::fileType(g_file_info_get_file_type(info.get())),
         .symlink = g_file_info_get_is_symlink(info.get()) != FALSE,
         .size = {},
-        .modifiedSeconds = {},
-        .etag = {},
-        .parentDisplayName = {},
-        .identity = luciole::readFileIdentity(info.get())
+        .modifiedSeconds = {}
     };
+    result.setDisplayName(luciole::filenameDisplayText(path.filename().native()));
+    result.setIdentity(luciole::readFileIdentity(info.get()));
+    return result;
   }
   class Pump {
   public:
@@ -155,7 +154,7 @@ namespace {
     pump.settle(service);
     TEST_CHECK(service.snapshot().phase == P::Error);
     auto invalid = entry(f.root / "b.txt");
-    invalid.identity.reset();
+    invalid.setIdentity(std::nullopt);
     TEST_CHECK(service.prepare({entry(f.root / "a.txt"), invalid}));
     pump.settle(service);
     TEST_CHECK(service.snapshot().phase == P::Error);

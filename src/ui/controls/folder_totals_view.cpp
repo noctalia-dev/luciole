@@ -16,11 +16,16 @@ FolderTotalsView::FolderTotalsView(
   setAlign(FlexAlign::Stretch);
   setGap(Style::spaceXs);
   const auto literal = [](Label& label) { label.setUseMarkup(false); };
-  addChild(ui::separator({}));
   addChild(
       ui::row(
           {.align = FlexAlign::Center, .gap = Style::spaceSm},
-          ui::label({.text = "Contents", .fontWeight = FontWeight::SemiBold, .flexGrow = 1}),
+          ui::label(
+              {.text = "Contents",
+               .fontSize = Style::fontSizeTitle,
+               .fontWeight = FontWeight::Bold,
+               .color = colorSpecFromRole(ColorRole::OnSurface),
+               .flexGrow = 1}
+          ),
           ui::button(
               {.out = &m_stop,
                .text = "Stop",

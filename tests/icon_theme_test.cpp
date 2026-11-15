@@ -12,16 +12,25 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <print>
+#include <source_location>
 #include <string_view>
 #include <unordered_set>
 
 namespace {
   class Pump {
   public:
-    void until(IconThemePollSource* icons, const std::function<bool()>& done) {
+    void until(
+        std::unique_ptr<IconThemePollSource>* source, const std::function<bool()>& done,
+        const std::source_location where = std::source_location::current()
+    ) {
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
       while (!done()) {
-        TEST_CHECK(std::chrono::steady_clock::now() < deadline);
+        if (std::chrono::steady_clock::now() >= deadline) {
+          std::println(stderr, "icon theme wait timed out at {}:{}", where.file_name(), where.line());
+          TEST_CHECK(false);
+        }
+        auto* icons = source != nullptr ? source->get() : nullptr;
         std::vector<pollfd> fds;
         const auto glibStart = m_glib.addPollFds(fds);
         const auto iconStart = icons != nullptr ? icons->addPollFds(fds) : fds.size();
@@ -32,8 +41,8 @@ namespace {
         }
         TEST_CHECK(::poll(fds.data(), fds.size(), timeout) >= 0);
         m_glib.dispatch(fds, glibStart);
-        if (icons != nullptr) {
-          icons->dispatch(fds, iconStart);
+        if (source != nullptr && *source) {
+          (*source)->dispatch(fds, iconStart);
         }
       }
     }
@@ -65,6 +74,9 @@ namespace {
       ++changes;
       cache.invalidate();
     });
+    writeColor(root / "data/icons" / (hasSchema ? "Red" : "Blue") / "scalable/places/folder.svg", "#00ff00");
+    pump.until(&watcher, [&] { return !watcher->refreshing(); });
+    changes = 0;
     TEST_CHECK(IconResolver::activeThemeName() == (hasSchema ? "Red" : "Blue"));
     const auto initialPaths = IconResolver::themeWatchPaths();
     TEST_CHECK(initialPaths == IconResolver::themeWatchPaths());
@@ -74,15 +86,15 @@ namespace {
     TEST_CHECK(initialPaths == IconResolver::themeWatchPaths());
     const std::string initialIcon = other.resolve("folder", 48);
     auto image = cache.request(source, 48);
-    pump.until(watcher.get(), [&] { return image->ready; });
-    TEST_CHECK(image->pixels && image->pixels->rgba[hasSchema ? 0 : 2] == 255);
+    pump.until(&watcher, [&] { return image->ready; });
+    TEST_CHECK(image->pixels && image->pixels->rgba[1] == 255);
 
     if (settings) {
       TEST_CHECK(g_settings_set_string(settings.get(), "icon-theme", "Blue"));
-      pump.until(watcher.get(), [&] { return changes > 0; });
+      pump.until(&watcher, [&] { return changes > 0; });
     } else {
       std::ofstream(root / "config/gtk-3.0/settings.ini") << "[Settings]\ngtk-icon-theme-name=Red\n";
-      pump.until(watcher.get(), [&] { return changes > 0; });
+      pump.until(&watcher, [&] { return changes > 0; });
     }
     TEST_CHECK(initialPaths != IconResolver::themeWatchPaths());
     TEST_CHECK(initialPaths->iconDirs == initialDirs);
@@ -90,7 +102,7 @@ namespace {
     TEST_CHECK(other.resolve("folder", 48).contains(hasSchema ? "/Blue/" : "/Red/"));
     const auto switched = cache.request(source, 48);
     TEST_CHECK(switched != image);
-    pump.until(watcher.get(), [&] { return switched->ready; });
+    pump.until(&watcher, [&] { return switched->ready; });
     TEST_CHECK(switched->pixels && switched->pixels->rgba[hasSchema ? 2 : 0] == 255);
     const std::string current = hasSchema ? "Blue" : "Red";
     const auto artwork = root / "data/icons" / current / "scalable/places/folder.svg";
@@ -103,18 +115,111 @@ namespace {
       if (atomic) {
         std::filesystem::rename(path, artwork);
       }
-      pump.until(watcher.get(), [&] { return changes > before; });
+      pump.until(&watcher, [&] { return changes > before; });
       TEST_CHECK(heldPaths->iconDirs == heldDirs);
       TEST_CHECK(heldDirs == IconResolver::themeWatchPaths()->iconDirs);
       image = cache.request(source, 48);
-      pump.until(watcher.get(), [&] { return image->ready; });
+      pump.until(&watcher, [&] { return image->ready; });
       TEST_CHECK(image->pixels && image->pixels->rgba[atomic ? 2 : 1] == 255);
     }
+    // Replacing the logical root must rearm its new target, not merely invalidate once.
+    const auto logical = root / "data/icons" / current;
+    const auto replacement = root / "artwork" / (current + "-replacement");
+    std::filesystem::create_directories(replacement / "scalable/places");
+    std::filesystem::copy_file(logical / "index.theme", replacement / "index.theme");
+    writeColor(replacement / "scalable/places/folder.svg", "#ff00ff");
+    const auto nextLink = root / "data/icons" / ("next-" + current);
+    std::filesystem::create_directory_symlink(replacement, nextLink);
+    auto before = changes;
+    if (!std::filesystem::is_symlink(logical)) {
+      std::filesystem::rename(logical, root / "artwork" / (current + "-original"));
+    }
+    std::filesystem::rename(nextLink, logical);
+    pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+    image = cache.request(source, 48);
+    pump.until(&watcher, [&] { return image->ready; });
+    TEST_CHECK(image->pixels && image->pixels->rgba[0] == 255 && image->pixels->rgba[2] == 255);
+    before = changes;
+    writeColor(replacement / "scalable/places/folder.svg", "#00ffff");
+    pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+    image = cache.request(source, 48);
+    pump.until(&watcher, [&] { return image->ready; });
+    TEST_CHECK(image->pixels && image->pixels->rgba[1] == 255 && image->pixels->rgba[2] == 255);
+
+    // A directory declared by the index may appear only after initial setup.
+    before = changes;
+    std::ofstream(replacement / "index.theme")
+        << "[Icon Theme]\nName=Replacement\nDirectories=scalable/places,future/nested\n"
+           "[scalable/places]\nSize=48\nType=Scalable\n[future/nested]\nSize=48\nType=Scalable\n";
+    pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+    const luciole::FileIconSource lateSource{.names = {"late"}, .filePath = {}, .desktopFile = {}};
+    image = cache.request(lateSource, 48);
+    pump.until(&watcher, [&] { return image->ready; });
+    TEST_CHECK(!image->pixels);
+    before = changes;
+    std::filesystem::create_directories(replacement / "future/nested");
+    writeColor(replacement / "future/nested/late.svg", "#00ff00");
+    pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+    image = cache.request(lateSource, 48);
+    pump.until(&watcher, [&] { return image->ready; });
+    TEST_CHECK(image->pixels && image->pixels->rgba[1] == 255);
+
+    // Overflow must refresh an in-place edit whose own notification was dropped.
+    int queueLimit = 0;
+    std::ifstream("/proc/sys/fs/inotify/max_queued_events") >> queueLimit;
+    if (queueLimit > 0 && queueLimit <= 65536) {
+      before = changes;
+      const auto scratch = replacement / "scalable/places/burst.tmp";
+      for (int i = 0; i < queueLimit / 3 + 32; ++i) {
+        std::ofstream(scratch) << "x";
+        std::filesystem::remove(scratch);
+      }
+      writeColor(replacement / "scalable/places/folder.svg", "#ff00ff");
+      pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+      image = cache.request(source, 48);
+      pump.until(&watcher, [&] { return image->ready; });
+      TEST_CHECK(image->pixels && image->pixels->rgba[0] == 255 && image->pixels->rgba[2] == 255);
+    } else {
+      std::println("Inotify overflow fixture omitted: queue limit {} exceeds the bounded fixture", queueLimit);
+    }
+
+    // Edits queued behind an asynchronous refresh converge on the latest selection.
+    before = changes;
+    const std::string finalTheme = current == "Red" ? "Blue" : "Red";
+    for (int i = 0; i < 8; ++i) {
+      if (settings) {
+        TEST_CHECK(
+            g_settings_set_string(settings.get(), "icon-theme", i % 2 == 0 ? current.c_str() : finalTheme.c_str())
+        );
+      } else {
+        std::ofstream(root / "config/gtk-3.0/settings.ini")
+            << "[Settings]\ngtk-icon-theme-name="
+            << (i % 2 == 0 ? current.c_str() : finalTheme.c_str())
+            << "\n";
+      }
+    }
+    pump.until(&watcher, [&] { return changes > before && !watcher->refreshing(); });
+    TEST_CHECK(IconResolver::activeThemeName() == finalTheme);
+
+    for (int i = 0; i < 8; ++i) {
+      auto abandoned = std::make_unique<IconThemePollSource>();
+      abandoned->setChangeCallback([] { TEST_CHECK(false); });
+    }
+    auto closing = std::make_unique<IconThemePollSource>();
+    bool closed = false;
+    closing->setChangeCallback([&] {
+      closing.reset();
+      closed = true;
+    });
+    pump.until(&closing, [&] { return closed; });
+
     if (settings) {
+      TEST_CHECK(g_settings_set_string(settings.get(), "icon-theme", "Blue"));
+      pump.until(&watcher, [&] { return !watcher->refreshing(); });
       const auto before = changes;
       std::ofstream(root / "config/gtk-3.0/settings.ini") << "[Settings]\ngtk-icon-theme-name=Red\n";
       TEST_CHECK(g_settings_set_string(settings.get(), "icon-theme", "Missing"));
-      pump.until(watcher.get(), [&] { return changes > before; });
+      pump.until(&watcher, [&] { return changes > before; });
       TEST_CHECK(IconResolver::activeThemeName() == "Red");
       // Pending settings notifications cannot reach a destroyed watcher.
       TEST_CHECK(g_settings_set_string(settings.get(), "icon-theme", "Red"));

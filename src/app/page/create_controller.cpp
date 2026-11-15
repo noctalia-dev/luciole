@@ -96,12 +96,10 @@ void CreateController::openCreateItem(
     m_page.actionError("Open an available writable folder to create a file or folder.");
     return;
   }
-  auto& surface = m_page.surface();
-  const float width = std::min(420.0F, static_cast<float>(surface.width()) - 32.0F);
   const bool document = kind == luciole::CreateKind::Document;
   const auto display = source ? luciole::filenameDisplayText(source->name) : std::string{};
   auto editor = std::make_unique<NameDialog>(
-      width,
+      m_page.dialogWidth(DialogWidth::Small),
       kind == luciole::CreateKind::Folder ? "New folder"
           : document                      ? "New document"
                                           : "New file",
@@ -114,14 +112,7 @@ void CreateController::openCreateItem(
       "Creating…"
   );
   auto* control = editor.get();
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = editor->measure(surface.renderTarget().renderer(), constraints).height;
-  m_page.showPopup(
-      std::move(editor), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(editor), DialogWidth::Small);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::CreateItem, [this] { closeCreation(); });
     m_createEditor = control;
@@ -164,17 +155,17 @@ void CreateController::openLinkDialog(const luciole::DirectoryEntry& target) {
     m_page.actionError("This item cannot be linked right now.");
     return;
   }
-  const auto parent = target.location.parent();
+  const auto location = target.location();
+  const auto parent = location.parent();
   if (!parent) {
     m_page.actionError("The source has no containing folder.");
     return;
   }
   const auto& base = *parent;
-  auto& surface = m_page.surface();
-  const float width = std::min(480.0F, static_cast<float>(surface.width()) - 32.0F);
+  const float width = m_page.dialogWidth(DialogWidth::Medium);
   auto root = std::make_unique<LinkDialog>(
-      width, luciole::locationEditText(target.location), "Link to " + target.displayName,
-      luciole::locationEditText(base), target.type == luciole::FileType::Regular && !target.symlink,
+      width, luciole::locationEditText(location), "Link to " + target.displayName(), luciole::locationEditText(base),
+      target.type == luciole::FileType::Regular && !target.symlink,
       [this, base](std::string name, const std::string& path, luciole::CreateKind kind) {
         if (!m_linkDialog || !m_job) {
           return;
@@ -199,21 +190,11 @@ void CreateController::openLinkDialog(const luciole::DirectoryEntry& target) {
       [this] { m_page.dismissMenu(); }
   );
   auto* dialog = root.get();
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = std::min(
-      root->measure(surface.renderTarget().renderer(), constraints).height, static_cast<float>(surface.height()) - 64.0F
-  );
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
     m_page.activeDialog().bind(ActiveDialog::Kind::Link, [this] { closeCreation(); });
     m_linkDialog = dialog;
     m_linkPreparing = true;
-    m_page.setDialogSize(width, height);
     m_page.menuDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
       if (m_linkDialog) {
         m_linkDialog->reveal(focused);

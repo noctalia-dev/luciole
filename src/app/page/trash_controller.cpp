@@ -41,7 +41,7 @@ void TrashController::trashItems(const std::vector<luciole::DirectoryEntry>& tar
   std::vector<luciole::Location> sources;
   sources.reserve(targets.size());
   for (const auto& target : targets) {
-    sources.push_back(target.location);
+    sources.push_back(target.location());
   }
   const auto job = m_page.jobs().create<luciole::TrashService>();
   if (!job->service<luciole::TrashService>().prepare(
@@ -91,8 +91,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
     return;
   }
   m_page.cancelDrag();
-  auto& surface = m_page.surface();
-  const float width = std::min(420.0F, static_cast<float>(surface.width()) - 32.0F);
+  const float width = m_page.dialogWidth(DialogWidth::Small);
   Label* message = nullptr;
   Label* size = nullptr;
   Button* confirm = nullptr;
@@ -131,14 +130,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
       )
   );
   luciole::applyDialogStyle(*root);
-  UiPhaseScope phase(UiPhase::Layout);
-  LayoutConstraints constraints;
-  constraints.setExactWidth(width);
-  const float height = root->measure(surface.renderTarget().renderer(), constraints).height;
-  m_page.showPopup(
-      std::move(root), nullptr, {(surface.width() - width) * 0.5F, (surface.height() - height) * 0.5F, 1, 1}, width,
-      height, false, PopupMode::Dialog
-  );
+  m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.menuSurface() != nullptr) {
     m_page.activeDialog().bind(ActiveDialog::Kind::EmptyTrash, [this] {
       if (const auto job = std::exchange(m_emptyTrash, nullptr)) {
@@ -290,36 +282,5 @@ void TrashController::trashChanged(OperationJob& job) {
     }
     m_page.actionError(std::move(message));
     m_page.browser().refresh();
-  }
-}
-
-void TrashController::layoutDialog() {
-  if (!m_emptyTrash) {
-    return;
-  }
-  auto& surface = m_page.surface();
-  auto* menuSurface = m_page.menuSurface();
-  LayoutConstraints constraints;
-  constraints.setExactWidth(static_cast<float>(menuSurface->width()));
-  const auto height = static_cast<std::uint32_t>(std::ceil(
-      std::clamp(
-          m_page.activeDialog().root()->measure(menuSurface->renderTarget().renderer(), constraints).height, 1.0F,
-          static_cast<float>(surface.height()) - 64.0F
-      )
-  ));
-  if (height != menuSurface->height()) {
-    const auto width = menuSurface->width();
-    (void)menuSurface->resize(width, height, false);
-    (void)menuSurface->repositionAnchor(
-        {.anchorX = static_cast<int>((surface.width() - width) / 2),
-         .anchorY = static_cast<int>((surface.height() - height) / 2),
-         .anchorWidth = 1,
-         .anchorHeight = 1,
-         .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
-         .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
-         .constraintAdjustment =
-             XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
-        false
-    );
   }
 }

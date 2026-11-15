@@ -32,6 +32,10 @@ namespace luciole {
     DriveMonitor(const DriveMonitor&) = delete;
     DriveMonitor& operator=(const DriveMonitor&) = delete;
 
+    // Starts GIO's volume monitor; drives() stays empty before. Blocks while GIO starts its monitor services,
+    // so the application calls it after its first frame. Idempotent.
+    void start();
+
     const std::vector<Drive>& drives() const;
     const Drive* find(const std::string& key) const;
     void setChangedCallback(std::function<void()> callback);

@@ -49,9 +49,17 @@ namespace luciole {
     explicit WindowSurface(WaylandConnection& connection);
     ~WindowSurface() override;
     bool serverDecorated() const;
+    // rendered runs after each drawn frame; frameDone after each completed frame callback and may destroy the surface.
+    void setFrameCallbacks(std::function<void()> rendered, std::function<void()> frameDone);
+
+  protected:
+    void render() override;
+    void onFrameCallbackDone() override;
 
   private:
     struct Decoration;
     std::shared_ptr<Decoration> m_decoration;
+    std::function<void()> m_rendered;
+    std::function<void()> m_frameDone;
   };
 } // namespace luciole

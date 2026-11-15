@@ -128,20 +128,19 @@ namespace {
     return {};
   }
   luciole::FileTooltipTarget target(const fs::path& path) {
-    return {
+    luciole::FileTooltipTarget result{
         .context = "page:column:context",
         .entry =
             {.id = 1,
-             .location = luciole::Location::fromPath(path.native()),
+             .place = luciole::Location::fromPath(path.native()),
              .name = path.filename().native(),
-             .displayName = "<literal> café",
              .type = luciole::FileType::Regular,
              .size = std::nullopt,
-             .modifiedSeconds = std::nullopt,
-             .etag = std::nullopt,
-             .parentDisplayName = {}},
+             .modifiedSeconds = std::nullopt},
         .typeLabel = "Unknown",
     };
+    result.entry.setDisplayName("<literal> café");
+    return result;
   }
   void cursorChecks(const fs::path& root) {
     MetricsRenderer renderer;
@@ -232,7 +231,7 @@ namespace {
     wait([&] { return value(data, "Status") == "Metadata unavailable"; });
     TEST_CHECK(value(data, "Size").empty() && value(data, "Modified").empty());
     auto stale = first;
-    stale.entry.identity = luciole::FileIdentity{"filesystem", "obsolete"};
+    stale.entry.setIdentity(luciole::FileIdentity{"filesystem", "obsolete"});
     data.show(stale);
     wait([&] { return value(data, "Status") == "This item changed"; });
     TEST_CHECK(value(data, "Size").empty());

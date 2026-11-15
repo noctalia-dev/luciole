@@ -201,7 +201,7 @@ void OperationsController::details(std::uint64_t id) {
       )
   );
   luciole::applyDialogStyle(*root);
-  m_page.showCenteredDialog(std::move(root), 556.0F);
+  m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.menuSurface()) {
     m_detailsScroll = scroll;
     m_reportLabel = label;
@@ -240,7 +240,8 @@ void OperationsController::layoutDialog() {
     }
   }
   if (m_reportLabel) {
-    m_reportLabel->setMaxWidth(std::max(1.0F, static_cast<float>(m_page.menuSurface()->width()) - 48.0F));
+    // The dialog's own width; the popup surface also holds its shadow.
+    m_reportLabel->setMaxWidth(std::max(1.0F, m_page.activeDialog().root()->width() - 48.0F));
   }
 }
 

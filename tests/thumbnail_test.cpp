@@ -1,4 +1,5 @@
 #include "core/log.h"
+#include "directory_fixture.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
 #include "imaging/pixbuf_image_decoder.h"
@@ -158,11 +159,11 @@ namespace {
     const auto entry = source(path, pump);
     luciole::ThumbnailStore store;
     fs::create_directories(store.root() / "normal");
-    const auto target = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location.uri());
+    const auto target = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location().uri());
     luciole::ThumbnailPng foreign{
         .image = picture(),
         .text = {
-            {"Thumb::URI", entry.location.uri()},
+            {"Thumb::URI", entry.location().uri()},
             {"Thumb::MTime", std::to_string(*entry.modifiedSeconds)},
             {"Thumb::Size", std::to_string(*entry.size)},
             {"Software", "another file manager"}
@@ -181,7 +182,7 @@ namespace {
       const auto asset = service.request(entry, 256);
       pump.until([&] { return asset && asset->ready; });
       TEST_CHECK(asset->pixels && asset->pixels->rgba == foreign.image.rgba);
-      TEST_CHECK(!store.read(entry.location.uri(), 256, *entry.modifiedSeconds, entry.size));
+      TEST_CHECK(!store.read(entry.location().uri(), 256, *entry.modifiedSeconds, entry.size));
       auto replacement = foreign;
       replacement.image = picture();
       store.write(std::move(replacement), 128, 16U * 1024U * 1024U, cancel.get());
@@ -199,7 +200,9 @@ namespace {
       const auto asset = preview.request(entry, 256);
       pump.until([&] { return asset && asset->ready; });
       TEST_CHECK(asset->pixels && asset->pixels->rgba != foreign.image.rgba);
-      pump.until([&] { return store.read(entry.location.uri(), 256, *entry.modifiedSeconds, entry.size).has_value(); });
+      pump.until([&] {
+        return store.read(entry.location().uri(), 256, *entry.modifiedSeconds, entry.size).has_value();
+      });
       // PNG publication precedes the worker's ledger commit; clearing can still see its write lock.
       pump.until([&] {
         const auto error = store.clear();
@@ -372,7 +375,7 @@ namespace {
     session.open(luciole::Location::fromPath(fs::absolute(directory).native()));
     pump.until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
     TEST_CHECK(session.snapshot().status == luciole::DirectoryStatus::Ready);
-    auto entries = session.snapshot().entries;
+    std::vector<luciole::DirectoryEntry> entries(session.snapshot().entries.begin(), session.snapshot().entries.end());
     std::erase_if(entries, [videos](const auto& entry) {
       return entry.type != luciole::FileType::Regular
           || !entry.contentType
@@ -417,7 +420,7 @@ namespace {
     const auto cache = luciole::ThumbnailStore{}.root() / "normal";
     pump.until([&] {
       return std::ranges::all_of(entries, [&](const auto& entry) {
-        return fs::exists(cache / luciole::ThumbnailStore::filename(entry.location.uri()));
+        return fs::exists(cache / luciole::ThumbnailStore::filename(entry.location().uri()));
       });
     });
     service.invalidate();
@@ -910,7 +913,7 @@ namespace {
     pump.until([&] { return thumbnail && thumbnail->ready; });
     TEST_CHECK(thumbnail->pixels && thumbnail->pixels->rgba == framed->rgba);
     luciole::ThumbnailStore store;
-    const auto cachePath = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location.uri());
+    const auto cachePath = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location().uri());
     pump.until([&] { return fs::exists(cachePath); });
     const auto cached = luciole::readThumbnailFile(cachePath, 8U * 1024U * 1024U);
     TEST_CHECK(cached);
@@ -971,7 +974,7 @@ namespace {
     store.write(
         {.image = old,
          .text =
-             {{"Thumb::URI", entry.location.uri()},
+             {{"Thumb::URI", entry.location().uri()},
               {"Thumb::MTime", std::to_string(*entry.modifiedSeconds)},
               {"Thumb::Size", std::to_string(*entry.size)}}},
         128, 16U * 1024U * 1024U, cancel.get()
@@ -984,17 +987,17 @@ namespace {
         (static_cast<std::size_t>(asset->pixels->height / 2) * asset->pixels->width + asset->pixels->width / 2) * 4;
     TEST_CHECK(asset->pixels->rgba[center] > 200 && asset->pixels->rgba[center + 1] < 20);
     pump.until([&] {
-      const auto cached = store.read(entry.location.uri(), 128, *entry.modifiedSeconds, entry.size);
+      const auto cached = store.read(entry.location().uri(), 128, *entry.modifiedSeconds, entry.size);
       return cached
           && cached->text.contains("X-Luciole::VideoVersion")
           && cached->text.at("X-Luciole::VideoVersion") == luciole::kVideoThumbnailVersion;
     });
-    const auto target = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location.uri());
+    const auto target = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location().uri());
     fs::rename(target, target.string() + ".old");
     luciole::ThumbnailPng foreign{
         .image = picture(),
         .text = {
-            {"Thumb::URI", entry.location.uri()},
+            {"Thumb::URI", entry.location().uri()},
             {"Thumb::MTime", std::to_string(*entry.modifiedSeconds)},
             {"Thumb::Size", std::to_string(*entry.size)},
             {"Software", "ffmpegthumbnailer"}
@@ -1074,7 +1077,7 @@ namespace {
     TEST_CHECK(thumbnail->pixels && thumbnail->pixels->rgba == decoded->rgba);
     luciole::ThumbnailStore store;
     pump.until([&] {
-      const auto cached = store.read(entry.location.uri(), 128, *entry.modifiedSeconds, entry.size);
+      const auto cached = store.read(entry.location().uri(), 128, *entry.modifiedSeconds, entry.size);
       return cached && cached->image.rgba == decoded->rgba;
     });
     const auto fallback = service.request(source(broken, pump), 128);
@@ -1097,7 +1100,7 @@ namespace {
     store.write(
         {.image = picture(),
          .text =
-             {{"Thumb::URI", warm.location.uri()},
+             {{"Thumb::URI", warm.location().uri()},
               {"Thumb::MTime", std::to_string(*warm.modifiedSeconds)},
               {"Thumb::Size", std::to_string(*warm.size)}}},
         128, 16U * 1024U * 1024U, cancel.get()
@@ -1155,14 +1158,14 @@ namespace {
     TEST_CHECK(asset != nullptr);
     pump.until([&] { return asset->ready; });
     const auto cachePath =
-        luciole::ThumbnailStore{}.root() / "normal" / luciole::ThumbnailStore::filename(entry.location.uri());
+        luciole::ThumbnailStore{}.root() / "normal" / luciole::ThumbnailStore::filename(entry.location().uri());
     TEST_CHECK(asset->pixels && !fs::exists(cachePath));
     pump.until([&] { return fs::exists(cachePath); });
     luciole::DirectorySnapshot snapshot;
     snapshot.generation = 100;
     snapshot.location = luciole::Location::fromPath(fixture.root.native());
     snapshot.status = luciole::DirectoryStatus::Ready;
-    snapshot.entries.push_back(entry);
+    test::editEntries(snapshot, [&](auto& entries) { entries.push_back(entry); });
     service.synchronizeSources(snapshot);
     ++snapshot.generation;
     service.synchronizeSources(snapshot);
@@ -1254,14 +1257,11 @@ namespace {
     const auto remote = luciole::Location::fromUri("sftp://example.invalid/photo.png");
     luciole::DirectoryEntry remoteEntry{
         .id = 99,
-        .location = remote,
+        .place = remote,
         .name = "photo.png",
-        .displayName = "photo.png",
         .type = luciole::FileType::Regular,
         .size = 42,
         .modifiedSeconds = 123,
-        .etag = std::nullopt,
-        .parentDisplayName = {},
         .contentType = "image/png"
     };
     TEST_CHECK(!thumbnails.request(remoteEntry, 48));

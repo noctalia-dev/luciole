@@ -2,29 +2,33 @@
 
 #include "fs/gio_interop.h"
 
-namespace {
-  std::optional<bool> boolean(GFileInfo* info, const char* attribute) {
-    if (g_file_info_get_attribute_type(info, attribute) != G_FILE_ATTRIBUTE_TYPE_BOOLEAN) {
-      return std::nullopt;
-    }
-    return g_file_info_get_attribute_boolean(info, attribute) != FALSE;
-  }
-} // namespace
+#include <format>
 
-std::optional<std::string> luciole::readContentType(GFileInfo* info) {
+luciole::InternedText luciole::readContentType(GFileInfo* info) {
   for (const auto* attribute : {G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE}) {
-    if (g_file_info_get_attribute_type(info, attribute) != G_FILE_ATTRIBUTE_TYPE_STRING) {
-      continue;
-    }
-    const char* value = g_file_info_get_attribute_string(info, attribute);
+    const char* value = infoString(info, attribute);
     if (value != nullptr && *value != '\0' && g_utf8_validate(value, -1, nullptr)) {
-      return value;
+      return InternedText(value);
     }
   }
-  return std::nullopt;
+  return {};
 }
 
-std::string luciole::fileTypeDescription(FileType type, bool symlink, const std::optional<std::string>& contentType) {
+std::string luciole::ChangeRevision::text() const { return std::format("{}:{}", seconds, nanoseconds); }
+
+std::optional<luciole::ChangeRevision> luciole::readChangeRevision(GFileInfo* info) {
+  const auto seconds = infoUint64(info, G_FILE_ATTRIBUTE_TIME_CHANGED);
+  if (!seconds) {
+    return std::nullopt;
+  }
+  auto nanos = infoUint32(info, "time::changed-nsec");
+  if (!nanos) {
+    nanos = infoUint32(info, G_FILE_ATTRIBUTE_TIME_CHANGED_USEC).value_or(0) * 1000U;
+  }
+  return ChangeRevision{.seconds = *seconds, .nanoseconds = *nanos};
+}
+
+std::string luciole::fileTypeDescription(FileType type, bool symlink, InternedText contentType) {
   if (symlink || type == FileType::Symlink) {
     return "Link";
   }
@@ -61,37 +65,31 @@ bool luciole::contentTypeIsText(const std::string& contentType) {
 
 luciole::FileAccess luciole::readFileAccess(GFileInfo* info) {
   return {
-      .read = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_READ),
-      .write = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE),
-      .execute = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE),
-      .rename = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME),
-      .trash = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH),
-      .remove = boolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE)
+      .read = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_READ),
+      .write = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE),
+      .execute = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE),
+      .rename = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME),
+      .trash = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH),
+      .remove = infoBoolean(info, G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE)
   };
 }
 
 luciole::FilesystemInfo luciole::readFilesystemInfo(GFileInfo* info) {
   FilesystemInfo result{
-      .readOnly = boolean(info, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY),
-      .remote = boolean(info, G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE),
+      .readOnly = infoBoolean(info, G_FILE_ATTRIBUTE_FILESYSTEM_READONLY),
+      .remote = infoBoolean(info, G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE),
       .type = std::nullopt
   };
-  if (g_file_info_get_attribute_type(info, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE) == G_FILE_ATTRIBUTE_TYPE_STRING) {
-    result.type = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+  if (const char* type = infoString(info, G_FILE_ATTRIBUTE_FILESYSTEM_TYPE)) {
+    result.type = type;
   }
-  if (g_file_info_get_attribute_type(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE) == G_FILE_ATTRIBUTE_TYPE_UINT64) {
-    result.freeBytes = g_file_info_get_attribute_uint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
-  }
+  result.freeBytes = infoUint64(info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
   return result;
 }
 
 std::optional<luciole::FileIdentity> luciole::readFileIdentity(GFileInfo* info) {
-  if (g_file_info_get_attribute_type(info, G_FILE_ATTRIBUTE_ID_FILESYSTEM) != G_FILE_ATTRIBUTE_TYPE_STRING
-      || g_file_info_get_attribute_type(info, G_FILE_ATTRIBUTE_ID_FILE) != G_FILE_ATTRIBUTE_TYPE_STRING) {
-    return std::nullopt;
-  }
-  const char* filesystem = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
-  const char* file = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_ID_FILE);
+  const char* filesystem = infoString(info, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
+  const char* file = infoString(info, G_FILE_ATTRIBUTE_ID_FILE);
   if (!filesystem || !*filesystem || !file || !*file) {
     return std::nullopt;
   }
@@ -100,27 +98,19 @@ std::optional<luciole::FileIdentity> luciole::readFileIdentity(GFileInfo* info) 
 
 luciole::EntryMetadata luciole::readEntryMetadata(GFileInfo* info) {
   EntryMetadata result;
-  const auto number = [&](const char* key) -> std::optional<std::uint64_t> {
-    return g_file_info_get_attribute_type(info, key) == G_FILE_ATTRIBUTE_TYPE_UINT64
-        ? std::optional(g_file_info_get_attribute_uint64(info, key))
-        : std::nullopt;
-  };
-  const auto text = [&](const char* key) -> std::optional<std::string> {
-    if (g_file_info_get_attribute_type(info, key) != G_FILE_ATTRIBUTE_TYPE_STRING) {
-      return {};
-    }
-    const char* value = g_file_info_get_attribute_string(info, key);
+  const auto text = [&](const char* key) -> InternedText {
+    const char* value = infoString(info, key);
     if (!value || !*value || !g_utf8_validate(value, -1, nullptr)) {
       return {};
     }
-    return value;
+    return InternedText(value);
   };
-  result.accessedSeconds = number(G_FILE_ATTRIBUTE_TIME_ACCESS);
-  result.createdSeconds = number(G_FILE_ATTRIBUTE_TIME_CREATED);
+  result.accessedSeconds = infoUint64(info, G_FILE_ATTRIBUTE_TIME_ACCESS);
+  result.createdSeconds = infoUint64(info, G_FILE_ATTRIBUTE_TIME_CREATED);
   result.owner = text(G_FILE_ATTRIBUTE_OWNER_USER);
   result.group = text(G_FILE_ATTRIBUTE_OWNER_GROUP);
-  if (g_file_info_get_attribute_type(info, G_FILE_ATTRIBUTE_UNIX_MODE) == G_FILE_ATTRIBUTE_TYPE_UINT32) {
-    result.mode = g_file_info_get_attribute_uint32(info, G_FILE_ATTRIBUTE_UNIX_MODE) & 07777U;
+  if (const auto mode = infoUint32(info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
+    result.mode = *mode & 07777U;
   }
   return result;
 }

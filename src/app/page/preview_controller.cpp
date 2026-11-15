@@ -45,7 +45,7 @@ void PreviewController::sync() {
   const auto image = entry
           && current.entry
           && entry->id == current.entry->id
-          && entry->location == current.entry->location
+          && entry->location() == current.entry->location()
           && current.image
           && current.image->pixels
       ? current.image

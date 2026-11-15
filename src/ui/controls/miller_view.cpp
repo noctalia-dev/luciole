@@ -304,7 +304,7 @@ void MillerView::synchronize() {
     std::optional<luciole::EntryId> path;
     if (i + 1 < m_columns.columns().size() && model.selection().selected.size() == 1) {
       const auto id = *model.selection().selected.begin();
-      if (model.entry(id) && model.entry(id)->location == m_columns.columns()[i + 1]->location) {
+      if (model.entry(id) && model.entry(id)->location() == m_columns.columns()[i + 1]->location) {
         path = id;
       }
     }

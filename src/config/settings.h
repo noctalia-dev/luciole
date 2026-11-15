@@ -20,9 +20,12 @@ namespace luciole {
     ActivationMode activationMode = ActivationMode::DoubleClick;
     TypingMode typingMode = TypingMode::Search;
     bool switchToNewTab = true;
+    bool restoreLastWindow = false;
     ViewMode viewMode = ViewMode::List;
     bool showHidden = false;
     bool showBackups = true;
+    bool alwaysShowTabBar = true;
+    bool alwaysShowStatusBar = false;
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
     int sidebarWidth = kDefaultSidebarWidth;
@@ -59,8 +62,11 @@ namespace luciole {
     ActivationMode,
     TypingMode,
     SwitchToNewTab,
+    RestoreLastWindow,
     ShowHidden,
     ShowBackups,
+    AlwaysShowTabBar,
+    AlwaysShowStatusBar,
     SortBy,
     SortDescending,
     DirectoriesFirst,
@@ -130,8 +136,11 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::ActivationMode> ActivationMode{Id::ActivationMode};
     static constexpr PreferenceKey<luciole::TypingMode> TypingMode{Id::TypingMode};
     static constexpr PreferenceKey<bool> SwitchToNewTab{Id::SwitchToNewTab};
+    static constexpr PreferenceKey<bool> RestoreLastWindow{Id::RestoreLastWindow};
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};
     static constexpr PreferenceKey<bool> ShowBackups{Id::ShowBackups};
+    static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
+    static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};
     static constexpr PreferenceKey<bool> SortDescending{Id::SortDescending};
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
@@ -210,6 +219,7 @@ namespace luciole {
   // Bounded, read-only local file loading. Call outside Render and traversal jobs.
   // Validation reads exactly one required file, without adjacent override files.
   ConfigIssues validateConfigFile(const std::filesystem::path& file);
+  // Runtime loads warn about unknown keys and retain recognized settings; known-value errors still fail.
   SettingsResult loadSettings(const ConfigPaths& paths);
   SettingsResult loadInheritedSettings(const ConfigPaths& paths);
 
