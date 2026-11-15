@@ -553,8 +553,6 @@ void MenuController::showContextMenu(
   auto* control = menu.get();
   const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F);
   const float height = std::min(contentHeight, m_page.popupMaxHeight());
-  const float below = static_cast<float>(m_page.surface().height()) - (anchor.y + anchor.height);
-  const bool openAbove = height > below && anchor.y > below;
   control->setMaxVisible(entries.size());
   const float width = std::min(preferredWidth, static_cast<float>(m_page.surface().width()) - 32.0F);
   control->setEntries(std::move(entries));
@@ -590,7 +588,7 @@ void MenuController::showContextMenu(
        .radius = Style::radiusLg},
       std::move(scrolling)
   );
-  m_page.showPopup(std::move(root), control, anchor, width, height, alignLeft, PopupMode::Transient, openAbove);
+  m_page.showPopup(std::move(root), control, anchor, width, height, alignLeft);
   m_scroll = scroll;
 }
 
