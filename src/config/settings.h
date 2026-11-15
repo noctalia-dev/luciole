@@ -24,6 +24,7 @@ namespace luciole {
     bool showHidden = false;
     bool showBackups = true;
     bool alwaysShowTabBar = true;
+    bool alwaysShowStatusBar = false;
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
     int sidebarWidth = kDefaultSidebarWidth;
@@ -40,7 +41,6 @@ namespace luciole {
     DetailsColumnWidths columnWidths = kDefaultDetailsColumnWidths;
     ThumbnailOptions thumbnails;
     std::string terminalCommand;
-    bool alwaysShowStatusBar = false;
     bool operator==(const BrowserSettings&) const = default;
   };
 
@@ -64,6 +64,7 @@ namespace luciole {
     ShowHidden,
     ShowBackups,
     AlwaysShowTabBar,
+    AlwaysShowStatusBar,
     SortBy,
     SortDescending,
     DirectoriesFirst,
@@ -108,7 +109,6 @@ namespace luciole {
     ThumbnailMaxMegapixels,
     ThumbnailCacheMib,
     TerminalCommand,
-    AlwaysShowStatusBar,
     Count
   };
 
@@ -137,6 +137,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};
     static constexpr PreferenceKey<bool> ShowBackups{Id::ShowBackups};
     static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
+    static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};
     static constexpr PreferenceKey<bool> SortDescending{Id::SortDescending};
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
@@ -180,7 +181,6 @@ namespace luciole {
     static constexpr PreferenceKey<int> ThumbnailMaxFileMib{Id::ThumbnailMaxFileMib};
     static constexpr PreferenceKey<int> ThumbnailMaxMegapixels{Id::ThumbnailMaxMegapixels};
     static constexpr PreferenceKey<int> ThumbnailCacheMib{Id::ThumbnailCacheMib};
-    static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
   };
 
   // The BrowserSettings field a preference reads and writes.

@@ -212,6 +212,7 @@ namespace {
       describe(P::ShowHidden, "show_hidden", [](S& s) -> auto& { return s.showHidden; }),
       describe(P::ShowBackups, "show_backups", [](S& s) -> auto& { return s.showBackups; }),
       describe(P::AlwaysShowTabBar, "always_show_tab_bar", [](S& s) -> auto& { return s.alwaysShowTabBar; }),
+      describe(P::AlwaysShowStatusBar, "always_show_status_bar", [](S& s) -> auto& { return s.alwaysShowStatusBar; }),
       describe(P::SortBy, "sort_by", [](S& s) -> auto& { return s.sort.field; }, {kSortFields}),
       describe(P::SortDescending, "sort_descending", [](S& s) -> auto& { return s.sort.descending; }),
       describe(P::DirectoriesFirst, "directories_first", [](S& s) -> auto& { return s.sort.directoriesFirst; }),
@@ -317,7 +318,6 @@ namespace {
           {between<16, 1024>, "expected an integer from 16 to 1024"}
       ),
       describe(P::TerminalCommand, "terminal_command", [](S& s) -> auto& { return s.terminalCommand; }),
-      describe(P::AlwaysShowStatusBar, "always_show_status_bar", [](S& s) -> auto& { return s.alwaysShowStatusBar; }),
   };
   constexpr std::size_t kPreferenceCount = std::tuple_size_v<decltype(kPreferences)>;
   static_assert(kPreferenceCount == std::to_underlying(luciole::BrowserPreferenceId::Count));
