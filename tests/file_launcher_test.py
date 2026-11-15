@@ -18,7 +18,8 @@ def run_case(binary, mode, names):
         (root / "runtime").chmod(0o700)
         for data_dir in os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":"):
             mime = Path(data_dir) / "mime"
-            if (mime / "mime.cache").is_file():
+            # Flatpak exports ship a stub mime.cache; grouped-open needs real PNG detection.
+            if (mime / "mime.cache").is_file() and (mime / "image/png.xml").is_file():
                 (root / "data/mime").symlink_to(mime)
                 break
         else:
