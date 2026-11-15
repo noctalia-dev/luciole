@@ -216,7 +216,7 @@ void luciole::PinService::reload() {
   }
 }
 bool luciole::PinService::editable() const { return m_state->ready && !m_state->pinBusy; }
-bool luciole::PinService::busy() const { return m_state->busy || !m_state->queue.empty(); }
+bool luciole::PinService::busy() const { return m_state->busy; }
 const std::vector<luciole::Bookmark>& luciole::PinService::bookmarks() const { return m_state->bookmarks; }
 const std::vector<luciole::UserPlace>& luciole::PinService::userPlaces() const { return m_state->places; }
 const std::string& luciole::PinService::error() const { return m_state->error; }
