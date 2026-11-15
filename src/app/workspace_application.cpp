@@ -1190,7 +1190,7 @@ bool WorkspaceApplication::restoreWindow(luciole::WindowId window, const luciole
     }
     tabs.push_back(tab);
     if (savedTab.secondary) {
-      if (const auto pane = newPane(window, savedTab.secondary, tab)) {
+      if (const auto pane = newPane(window, savedTab.secondary)) {
         (void)m_model.focus(window, savedTab.activePane == luciole::ActivePane::Secondary ? pane : tab);
       }
     }
