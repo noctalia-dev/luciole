@@ -57,6 +57,7 @@ class WorkspaceApplication {
   };
 
 public:
+  static constexpr std::size_t pageLimit = 64;
   WorkspaceApplication(
       WaylandConnection& connection, RenderContext& renderer, TextInputService& input,
       luciole::WaylandTextClipboard& clipboard, luciole::BrowserSettings settings

@@ -846,7 +846,7 @@ luciole::WindowId WorkspaceApplication::newWindow() {
 luciole::TabId WorkspaceApplication::newTab(
     luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate, bool activate
 ) {
-  if (m_pages.size() >= 64) {
+  if (m_pages.size() >= pageLimit) {
     return 0;
   }
   const auto previous = m_model.windows().at(window).active;
@@ -860,7 +860,7 @@ luciole::TabId WorkspaceApplication::newTab(
 luciole::TabId WorkspaceApplication::newPane(
     luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate
 ) {
-  if (m_pages.size() >= 64) {
+  if (m_pages.size() >= pageLimit) {
     return 0;
   }
   const auto previous = m_model.windows().at(window).active;
@@ -1192,7 +1192,7 @@ bool WorkspaceApplication::restoreWindow(luciole::WindowId window, const luciole
   }
   const auto requiredPages =
       std::ranges::count_if(saved.tabs, [](const auto& tab) { return tab.secondary.has_value(); });
-  if (saved.tabs.size() > 32 - openTabs || saved.tabs.size() + requiredPages > 64 - m_pages.size()) {
+  if (saved.tabs.size() > luciole::TabWorkspace::tabLimit - openTabs || saved.tabs.size() + requiredPages > pageLimit - m_pages.size()) {
     return false;
   }
   std::vector<luciole::TabId> tabs;
