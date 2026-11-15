@@ -2499,8 +2499,9 @@ void BrowserPage::showPopup(
        .height = static_cast<std::uint32_t>(height),
        .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
        .gravity = alignLeft ? XDG_POSITIONER_GRAVITY_BOTTOM_LEFT : XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
-       .constraintAdjustment =
-           XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
+       .constraintAdjustment = XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X
+           | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y
+           | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y},
       PopupMode::Transient
   );
 }
@@ -2674,9 +2675,6 @@ void BrowserPage::openPopup(
   });
   config.serial = m_popupSerial != 0 ? m_popupSerial : m_connection.lastInputSerial();
   config.grab = mode == PopupMode::Transient;
-  if (mode == PopupMode::Transient) {
-    config.constraintAdjustment |= static_cast<std::uint32_t>(XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y);
-  }
   if (!m_menuSurface->initializeAsChild(
           m_surface->xdgSurface(), m_connection.outputForSurface(m_surface->wlSurface()), config
       )) {
