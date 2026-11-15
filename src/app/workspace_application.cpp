@@ -1086,12 +1086,16 @@ void WorkspaceApplication::execute(
         m_pages.at(pageId)->unmount();
         std::erase(host.mounted, pageId);
       }
-      m_model.move(tab, destinationWindow, m_model.windows().at(destinationWindow).tabs.size());
-      auto& target = *m_hosts.at(destinationWindow);
-      for (auto pageId : pages) {
-        m_pages.at(pageId)->rebind(target.surface, target.dispatcher);
+      if (m_model.move(tab, destinationWindow, m_model.windows().at(destinationWindow).tabs.size())) {
+        if (m_model.windows().at(window).tabs.empty()) {
+          saveWindows({});
+        }
+        auto& target = *m_hosts.at(destinationWindow);
+        for (auto pageId : pages) {
+          m_pages.at(pageId)->rebind(target.surface, target.dispatcher);
+        }
+        target.surface.requestLayout();
       }
-      target.surface.requestLayout();
     }
     break;
   }
