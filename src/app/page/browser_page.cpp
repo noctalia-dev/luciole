@@ -1251,10 +1251,10 @@ void BrowserPage::runAction(
       {Action::Forward, [](BrowserPage& page, const Call&) { (void)page.browser().forward(); }},
       {Action::Up,
       [](BrowserPage& page, const Call&) {
-        if (const auto current = page.browser().model().snapshot().location; current && current->parent()) {
-          page.revealOnReload({*current});
+        // Selects the folder just left once the parent loads.
+        if (auto current = page.browser().model().snapshot().location; page.browser().up()) {
+          page.revealOnReload({std::move(*current)});
         }
-        (void)page.browser().up();
       }},
       {Action::Home, [](BrowserPage& page, const Call&) { page.browser().home(); }},
       {Action::Root, [](BrowserPage& page, const Call&) { page.browser().open(luciole::Location::fromPath("/")); }},
