@@ -434,9 +434,6 @@ void luciole::DirectoryModel::selectAll() {
   }
   m_selection.selected.clear();
   m_selection.selected.insert(m_rows.begin(), m_rows.end());
-  if (!m_rows.empty() && !m_selection.focused) {
-    m_selection.focused = m_rows.front();
-  }
   notify();
 }
 
@@ -451,12 +448,6 @@ bool luciole::DirectoryModel::invertSelection() {
     }
   }
   m_selection.selected = std::move(selected);
-  if (!m_selection.selected.empty() && (!m_selection.focused || !m_selection.selected.contains(*m_selection.focused))) {
-    const auto first = std::ranges::find_if(m_rows, [this](EntryId id) { return m_selection.selected.contains(id); });
-    if (first != m_rows.end()) {
-      m_selection.focused = *first;
-    }
-  }
   notify();
   return true;
 }
@@ -479,12 +470,6 @@ std::optional<std::string> luciole::DirectoryModel::selectPattern(const std::str
     }
   }
   m_selection.selected = std::move(selected);
-  if (!m_selection.selected.empty() && (!m_selection.focused || !m_selection.selected.contains(*m_selection.focused))) {
-    const auto first = std::ranges::find_if(m_rows, [this](EntryId id) { return m_selection.selected.contains(id); });
-    if (first != m_rows.end()) {
-      m_selection.focused = *first;
-    }
-  }
   notify();
   return std::nullopt;
 }

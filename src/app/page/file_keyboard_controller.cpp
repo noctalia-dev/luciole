@@ -264,12 +264,13 @@ bool FileKeyboardController::listKey(const KeyboardEvent& event) {
     return true;
   }
   if (event.modifiers == 0 && KeySymbol::isEnter(event.sym)) {
-    if (!event.repeat
-        && model.selection().focused
-        && (m_fileKeyboardFocus || model.selection().selected.contains(*model.selection().focused))) {
+    const auto& selection = model.selection();
+    const bool hasOpenTarget = !selection.selected.empty()
+        || (selection.focused && (m_fileKeyboardFocus || selection.selected.contains(*selection.focused)));
+    if (!event.repeat && hasOpenTarget) {
       auto request = m_page.actionRequest(true);
-      if (request.targets.empty()) {
-        const auto* entry = model.entry(*model.selection().focused);
+      if (request.targets.empty() && selection.focused) {
+        const auto* entry = model.entry(*selection.focused);
         if (entry) {
           request.targets.push_back({entry->id, entry->location()});
         }

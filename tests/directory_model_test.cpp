@@ -452,7 +452,7 @@ namespace {
     });
     model.applySnapshot(data);
     model.selectAll();
-    TEST_CHECK(model.selection().focused == model.rows().front());
+    TEST_CHECK(!model.selection().focused);
     const luciole::SelectionSummary expected{.files = 3, .folders = 1, .others = 2, .bytes = 5, .unknownSizes = 1};
     TEST_CHECK(model.selectionSummary() == expected);
     model.setFilter({.showHidden = true, .text = {}});
