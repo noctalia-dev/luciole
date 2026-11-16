@@ -17,9 +17,6 @@ namespace {
   constexpr float kItemHeight = Style::controlHeightSm;
   constexpr float kSeparatorHeight = 10.0F;
   constexpr float kItemGap = 0.0F;
-  constexpr float kCompactMenuPadding = 4.0F;
-  constexpr float kCompactItemHeight = 28.0F;
-  constexpr float kCompactSeparatorHeight = 6.0F;
   constexpr float kMenuFontSize = Style::fontSizeCaption;
   constexpr float kMenuGlyphSize = Style::fontSizeCaption - 1.0F;
   // Leading check/radio column: the glyph plus a small gap before the label (or leading visual).
@@ -125,15 +122,6 @@ void ContextMenuControl::setContentScale(float scale) {
     return;
   }
   m_contentScale = clamped;
-  m_needsRebuild = true;
-  markLayoutDirty();
-}
-
-void ContextMenuControl::setCompact(bool compact) {
-  if (m_compact == compact) {
-    return;
-  }
-  m_compact = compact;
   m_needsRebuild = true;
   markLayoutDirty();
 }
@@ -260,7 +248,7 @@ float ContextMenuControl::rowBottom(std::size_t index) const noexcept {
   return m_rows[index].y + m_rows[index].height;
 }
 
-float ContextMenuControl::preferredHeight() const { return preferredHeight(m_entries, m_maxVisible, m_contentScale, m_compact); }
+float ContextMenuControl::preferredHeight() const { return preferredHeight(m_entries, m_maxVisible, m_contentScale); }
 
 float ContextMenuControl::preferredWidth(
     Renderer& renderer, const std::vector<ContextMenuControlEntry>& entries, float scale, bool reserveToggleSpace
@@ -292,22 +280,19 @@ float ContextMenuControl::preferredWidth(
 }
 
 float ContextMenuControl::preferredHeight(
-    const std::vector<ContextMenuControlEntry>& entries, std::size_t maxVisible, float scale, bool compact
+    const std::vector<ContextMenuControlEntry>& entries, std::size_t maxVisible, float scale
 ) {
   scale = safeScale(scale);
-  const float menuPadding = (compact ? kCompactMenuPadding : kMenuPadding) * scale;
-  const float itemHeight = (compact ? kCompactItemHeight : kItemHeight) * scale;
-  const float separatorHeight = (compact ? kCompactSeparatorHeight : kSeparatorHeight) * scale;
   const std::size_t visibleEntries = std::min(entries.size(), std::max<std::size_t>(1, maxVisible));
   if (visibleEntries == 0) {
-    return menuPadding * 2.0F;
+    return kMenuPadding * scale * 2.0F;
   }
 
   float contentHeight = 0.0F;
   for (std::size_t i = 0; i < visibleEntries; ++i) {
-    contentHeight += entries[i].separator ? separatorHeight : itemHeight;
+    contentHeight += (entries[i].separator ? kSeparatorHeight : kItemHeight) * scale;
   }
-  return menuPadding * 2.0F + contentHeight + kItemGap * scale * static_cast<float>(visibleEntries - 1);
+  return kMenuPadding * scale * 2.0F + contentHeight + kItemGap * scale * static_cast<float>(visibleEntries - 1);
 }
 
 void ContextMenuControl::doLayout(Renderer& renderer) {
@@ -334,9 +319,9 @@ void ContextMenuControl::rebuild(Renderer& renderer) {
 
 void ContextMenuControl::rebuildRows(Renderer& renderer) {
   const float scale = m_contentScale;
-  const float menuPadding = (m_compact ? kCompactMenuPadding : kMenuPadding) * scale;
-  const float itemHeight = (m_compact ? kCompactItemHeight : kItemHeight) * scale;
-  const float separatorHeight = (m_compact ? kCompactSeparatorHeight : kSeparatorHeight) * scale;
+  const float menuPadding = kMenuPadding * scale;
+  const float itemHeight = kItemHeight * scale;
+  const float separatorHeight = kSeparatorHeight * scale;
   const float itemGap = kItemGap * scale;
   const std::size_t visibleItems = std::min(m_entries.size(), m_maxVisible);
   const float rowWidth = width() - menuPadding * 2.0F;
