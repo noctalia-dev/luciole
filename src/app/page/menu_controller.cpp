@@ -16,6 +16,7 @@
 #include "browser/path_completion.h"
 #include "browser/places.h"
 #include "clipboard/text_clipboard.h"
+#include "config/settings.h"
 #include "core/deferred_call.h"
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
@@ -574,8 +575,10 @@ void MenuController::showContextMenu(
   m_page.cancelDrag();
   auto menu = std::make_unique<ContextMenuControl>();
   auto* control = menu.get();
-  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F);
+  const bool compact = m_page.settings().compactMenus;
+  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F, compact);
   const float height = std::min(contentHeight, m_page.popupMaxHeight());
+  control->setCompact(compact);
   control->setMaxVisible(entries.size());
   const float width = std::min(preferredWidth, static_cast<float>(m_page.surface().width()) - 32.0F);
   control->setEntries(std::move(entries));

@@ -1,6 +1,7 @@
 #include "app/page/submenu_controller.h"
 
 #include "app/page/page_context.h"
+#include "config/settings.h"
 #include "core/deferred_call.h"
 #include "core/input/key_symbols.h"
 #include "core/ui_phase.h"
@@ -76,7 +77,8 @@ void SubmenuController::show(
   if (!m_open) {
     return;
   }
-  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size());
+  const bool compact = m_page.settings().compactMenus;
+  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F, compact);
   const float height = std::min(contentHeight, m_page.popupMaxHeight());
   if (!m_surface && !create(width, height)) {
     return;
@@ -119,6 +121,7 @@ bool SubmenuController::create(float width, float height) {
   m_surface->setDismissedCallback([this] { dismiss(); });
   auto menu = std::make_unique<ContextMenuControl>();
   m_menu = menu.get();
+  m_menu->setCompact(m_page.settings().compactMenus);
   auto scroll =
       ui::scrollView({.out = &m_scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .flexGrow = 1.0F});
   scroll->content()->addChild(std::move(menu));

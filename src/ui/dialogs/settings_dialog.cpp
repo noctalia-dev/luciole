@@ -123,6 +123,9 @@ SettingsDialog::SettingsDialog(
   addBool(P::DirectoriesFirst, "Folders first");
   card("Terminal");
   addTerminal();
+  section("Appearance", "paint");
+  card("Menus");
+  addBool(P::CompactMenus, "Compact context menus");
   section("Views", "layout-grid");
   card("View");
   addChoice(
