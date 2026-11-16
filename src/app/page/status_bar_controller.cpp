@@ -88,8 +88,7 @@ void StatusBarController::sync(bool miller) {
   const auto& model = browser.model();
   const auto& snapshot = model.snapshot();
   const auto context = browser.contextSerial();
-  if (m_statusBrowser != &browser || m_statusContext != context) {
-    m_statusBrowser = &browser;
+  if (m_statusContext != context) {
     m_statusContext = context;
     m_contextLoaded = false;
     m_freeBytes.reset();
@@ -129,7 +128,7 @@ void StatusBarController::sync(bool miller) {
       }
     } else if (loading) {
       status = "Loading folder…";
-    } else if (snapshot.status == luciole::DirectoryStatus::Cancelled && !m_contextLoaded) {
+    } else if (snapshot.status == luciole::DirectoryStatus::Cancelled) {
       status = "Loading stopped.";
     } else {
       needed = alwaysShow;
@@ -199,7 +198,7 @@ void StatusBarController::sync(bool miller) {
     if (loading) {
       return {"hourglass-empty", status, {}};
     }
-    if ((snapshot.status == luciole::DirectoryStatus::Cancelled && !m_contextLoaded)
+    if (snapshot.status == luciole::DirectoryStatus::Cancelled
         || !m_page.browser().message().empty()
         || !m_settings.error().empty()) {
       return {"alert-triangle", status, {}};
