@@ -26,7 +26,7 @@ namespace luciole {
     bool showBackups = true;
     bool alwaysShowTabBar = true;
     bool alwaysShowStatusBar = false;
-    bool compactMenus = false;
+    bool compactMenus = true;
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
     int sidebarWidth = kDefaultSidebarWidth;
