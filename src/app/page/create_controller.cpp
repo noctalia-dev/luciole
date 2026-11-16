@@ -4,6 +4,7 @@
 #include "app/page/active_popup.h"
 #include "app/page/page_context.h"
 #include "app/page/submenu_controller.h"
+#include "browser/action_registry.h"
 #include "browser/browser_controller.h"
 #include "browser/location_presentation.h"
 #include "core/ui_phase.h"
@@ -45,7 +46,11 @@ void CreateController::showDocumentMenu(
     return;
   }
   auto items = std::make_shared<std::vector<luciole::DocumentTemplate>>(std::move(listing.items));
-  std::vector<ContextMenuControlEntry> entries{{.id = -1, .label = "Empty File…"}, {.label = "", .separator = true}};
+  const auto& emptyFile = luciole::ActionRegistry::definition(luciole::BrowserAction::CreateFile);
+  std::vector<ContextMenuControlEntry> entries{
+      {.id = -1, .label = std::string(emptyFile.label), .shortcut = std::string(emptyFile.shortcut)},
+      {.label = "", .separator = true}
+  };
   for (std::size_t index = 0; index < items->size(); ++index) {
     entries.push_back({.id = static_cast<int>(index), .label = (*items)[index].label});
   }
