@@ -11,6 +11,42 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+  constexpr float kUsageBarHeight = 3.0F;
+  constexpr float kUsageWarningFraction = 0.9F;
+  // Gap between a usage bar and the bottom of its row.
+  constexpr float kUsageBarInset = 4.0F;
+
+  // Colors a drive row's usage bar for its selection, and shows the bar only for a known usage.
+  void applyDriveState(ProgressBar& bar, const std::optional<luciole::DriveUsage>& usage, bool selected) {
+    bar.setVisible(usage.has_value());
+    if (!usage) {
+      return;
+    }
+    const auto fraction = static_cast<float>(static_cast<double>(usage->used) / static_cast<double>(usage->size));
+    bar.setProgress(fraction);
+    const auto fill = fraction >= kUsageWarningFraction ? ColorRole::Error
+        : selected                                      ? ColorRole::OnPrimary
+                                                        : ColorRole::Primary;
+    bar.setFillColor(colorSpecFromRole(fill));
+    bar.setTrackColor(colorSpecFromRole(selected ? ColorRole::PrimaryContainer : ColorRole::SurfaceContainerHighest));
+  }
+} // namespace
+
+std::string_view luciole::driveRemovalLabel(DriveRemoval removal) {
+  switch (removal) {
+  case DriveRemoval::PowerOff:
+    return "Safely Remove";
+  case DriveRemoval::Eject:
+    return "Eject";
+  case DriveRemoval::Unmount:
+    return "Unmount";
+  case DriveRemoval::None:
+    break;
+  }
+  return {};
+}
+
 luciole::PlacesSidebar::PlacesSidebar(PinService& pins, DriveMonitor& drives) : m_pins(pins), m_drives(drives) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
@@ -73,6 +109,17 @@ InputArea* luciole::PlacesSidebar::focusArea(const Location& location) const {
 }
 void luciole::PlacesSidebar::invalidate() {
   m_dirty = true;
+  markLayoutDirty();
+}
+void luciole::PlacesSidebar::updateDriveUsage() {
+  if (m_tree) {
+    return;
+  }
+  for (const auto& row : m_driveRows) {
+    if (const auto* drive = m_drives.find(row.key); drive != nullptr && drive->root == row.root) {
+      applyDriveState(*row.usage, drive->usage, row.selected);
+    }
+  }
   markLayoutDirty();
 }
 std::optional<luciole::Bookmark> luciole::PlacesSidebar::folderAt(float x, float y) const {
@@ -150,29 +197,30 @@ void luciole::PlacesSidebar::sync(std::optional<Location> current) {
   for (auto& row : m_driveRows) {
     const bool selected = !highlighted && row.root && m_current == row.root;
     row.button->setSelected(selected);
+    row.selected = selected;
+    if (const auto* drive = m_drives.find(row.key); drive != nullptr && drive->root == row.root) {
+      applyDriveState(*row.usage, drive->usage, selected);
+    }
     highlighted = highlighted || selected;
   }
   markLayoutDirty();
 }
 void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   auto button = ui::button(
-      {.text = drive.label,
-       .glyph = drive.glyph,
+      {.glyph = drive.glyph,
        .controlHeight = luciole::kSideListRowHeight,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
        .paddingH = luciole::kSideListRowPaddingH,
-       .gap = luciole::kSideListRowGap,
-       .flexGrow = 1.0F,
-       .onClick = [this, key = drive.key] {
-         if (m_driveOpen) {
-           m_driveOpen(key);
-         }
-       }}
+       .gap = luciole::kSideListRowGap}
   );
   auto* raw = button.get();
   raw->setDirection(FlexDirection::Horizontal);
-  raw->label()->setUseMarkup(false);
+  // The row's own label, so long names lose their middle as in GNOME Files; Button ellipsizes its label's end.
+  auto* name = static_cast<Label*>(raw->addChild(
+      ui::label({.text = drive.label, .maxLines = 1, .ellipsize = TextEllipsize::Middle, .flexGrow = 1.0F})
+  ));
+  name->setUseMarkup(false);
   raw->setTooltip(drive.root ? locationEditText(*drive.root) : drive.label + " (not mounted)");
   raw->inputArea()->setTabFocusKey("drive:" + drive.key);
   raw->inputArea()->setOnKeyDown([this, key = drive.key, raw](const InputArea::KeyData& event) {
@@ -201,26 +249,58 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
     m_scroll->requestScrollIntoView(raw);
   });
   raw->inputArea()->setOnFocusLoss([raw] { raw->setKeyboardFocusHint(false); });
-  auto row = ui::row({.align = FlexAlign::Center, .gap = Style::spaceXs}, std::move(button));
-  if (drive.removable) {
-    row->addChild(
-        ui::button(
-            {.glyph = "player-eject",
-             .controlHeight = Style::controlHeightSm,
-             .variant = ButtonVariant::Ghost,
-             .tooltip = drive.ejectable ? "Eject" : "Unmount",
-             .minWidth = Style::controlHeightSm,
-             .maxWidth = Style::controlHeightSm,
-             .onClick = [this, key = drive.key] {
-               if (m_driveRemove) {
-                 m_driveRemove(key);
-               }
-             }}
-        )
-    );
+  // The eject glyph is part of the row: one input area keeps hover steady, and a press over the glyph's end of
+  // the row removes the drive instead of opening it.
+  Glyph* eject = nullptr;
+  if (drive.removal != DriveRemoval::None) {
+    eject = static_cast<Glyph*>(raw->addChild(ui::glyph({.glyph = "player-eject", .glyphSize = Style::fontSizeBody})));
   }
-  m_driveRows.push_back({drive.key, drive.root, drive.label, raw});
-  m_scroll->content()->addChild(std::move(row));
+  struct EjectPointer {
+    bool over = false;
+    bool pressed = false;
+  };
+  const auto pointer = std::make_shared<EjectPointer>();
+  const auto overEject = [raw, eject](float x) { return eject != nullptr && x >= eject->x() - raw->gap() * 0.5F; };
+  const auto pathTooltip = drive.root ? locationEditText(*drive.root) : drive.label + " (not mounted)";
+  raw->setOnPointerMotion([raw, pointer, overEject, pathTooltip,
+                           ejectTooltip = std::string(driveRemovalLabel(drive.removal))](float x, float) {
+    if (const bool over = overEject(x); over != pointer->over) {
+      pointer->over = over;
+      raw->setTooltip(over ? ejectTooltip : pathTooltip);
+    }
+  });
+  raw->setOnLeave([raw, pointer, pathTooltip] {
+    *pointer = {};
+    raw->setTooltip(pathTooltip);
+  });
+  raw->setOnPress([pointer, overEject](float x, float, bool pressed) {
+    if (pressed) {
+      pointer->pressed = overEject(x);
+    }
+  });
+  raw->setOnClick([this, key = drive.key, pointer] {
+    const bool remove = std::exchange(pointer->pressed, false) && pointer->over;
+    const auto& callback = remove ? m_driveRemove : m_driveOpen;
+    if (callback) {
+      callback(key);
+    }
+  });
+  // Laid out by hand in doArrange(): under the name, from its start to the eject glyph.
+  auto* usage = static_cast<ProgressBar*>(raw->addChild(
+      ui::progressBar({.track = colorSpecFromRole(ColorRole::SurfaceContainerHighest), .height = kUsageBarHeight})
+  ));
+  usage->setParticipatesInLayout(false);
+  applyDriveState(*usage, drive.usage, false);
+  m_driveRows.push_back(
+      {.key = drive.key,
+       .root = drive.root,
+       .label = drive.label,
+       .button = raw,
+       .name = name,
+       .eject = eject,
+       .usage = usage}
+  );
+  m_scroll->content()->addChild(std::move(button));
 }
 void luciole::PlacesSidebar::addRow(const Bookmark& bookmark, const std::string& glyph, std::size_t index) {
   auto button = ui::button(
@@ -409,6 +489,7 @@ void luciole::PlacesSidebar::rebuild() {
     for (const auto& drive : m_drives.drives()) {
       addDriveRow(drive);
     }
+    m_drives.refreshUsage();
   }
   sync(m_current);
 }
@@ -431,6 +512,29 @@ void luciole::PlacesSidebar::doArrange(Renderer& renderer, const LayoutRect& rec
     m_tree->prepare();
   }
   Flex::doArrange(renderer, rect);
+  if (layoutDriveRows()) {
+    Flex::doArrange(renderer, rect);
+    layoutDriveRows();
+  }
+}
+bool luciole::PlacesSidebar::layoutDriveRows() {
+  bool changed = false;
+  for (const auto& row : m_driveRows) {
+    auto* button = row.button;
+    float end = button->width() - button->paddingRight();
+    if (row.eject != nullptr) {
+      end -= row.eject->width() + button->gap();
+    }
+    const float start = row.name->x();
+    const float budget = std::ceil(std::max(1.0F, end - start));
+    if (row.name->maxWidth() != budget) {
+      row.name->setMaxWidth(budget);
+      changed = true;
+    }
+    row.usage->setPosition(start, button->height() - kUsageBarHeight - kUsageBarInset);
+    row.usage->setSize(std::max(0.0F, end - start), kUsageBarHeight);
+  }
+  return changed;
 }
 std::optional<std::size_t> luciole::PlacesSidebar::dropSlot(float x, float y) const {
   if (m_tree) {

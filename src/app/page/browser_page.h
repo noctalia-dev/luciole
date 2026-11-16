@@ -19,6 +19,7 @@
 #include "app/page/properties_controller.h"
 #include "app/page/rename_controller.h"
 #include "app/page/settings_controller.h"
+#include "app/page/shortcuts_controller.h"
 #include "app/page/sidebar_controller.h"
 #include "app/page/status_bar_controller.h"
 #include "app/page/submenu_controller.h"
@@ -127,6 +128,7 @@ public:
   std::optional<luciole::FileTooltipTarget> fileTooltipAt(float x, float y) const;
   void preferencesChanged(const std::string& error);
   void placesChanged();
+  void driveUsageChanged();
   void clipboardChanged();
   void clearExternalDrop();
   const std::vector<luciole::Bookmark>* draggedFolders() const;
@@ -190,6 +192,9 @@ public:
   void keyboard(const KeyboardEvent& event);
 
 private:
+  // The preview preference of this window kind: file picker windows remember theirs separately.
+  bool previewEnabled() const;
+  void togglePreview();
   // Shared popup setup after closePopup(): `scene` goes on a new child surface configured by `config`;
   // `content` is what ActivePopup::root() returns. Menus pass their root as both.
   void openPopup(
@@ -228,6 +233,7 @@ private:
   bool targetsCurrent(const std::vector<luciole::DirectoryEntry>& targets) override;
   bool requestCurrent(const luciole::ActionRequest& request, luciole::ActionScope scope) const override;
   bool operationsBusy() const override;
+  std::vector<std::string> runningJobTitles() const override;
   PageJobs& jobs() override;
   bool visible() const override;
   bool active() const override;
@@ -287,6 +293,9 @@ private:
   bool windowKey(const KeyboardEvent& event);
   bool navigationKey(const KeyboardEvent& event, bool editing);
   bool millerKey(const KeyboardEvent& event);
+  // Parent folder: the parent Miller column when there is one, otherwise the parent folder, selecting the folder
+  // just left once it loads.
+  void leaveFolder();
 
   // Frame: prepareFrame() syncs the page and its controllers, then layoutFrame() lays them out.
   void syncBrowser();
@@ -397,6 +406,7 @@ private:
                                           m_connection, m_renderer,    [this] {
         m_thumbnails.clearCache(); }};
   AboutController m_aboutController{*this, m_launcher};
+  ShortcutsController m_shortcutsController{*this};
   ApplicationChooserController m_applicationChooser{*this, m_launcher, m_icons};
   PreviewController m_previewController{*this, m_preview, m_thumbnails, m_icons, m_renderer, m_applicationChooser};
   DetailsHeaderController m_detailsHeader{*this, m_preferences, m_listAdapter, m_gridAdapter, m_menuController};

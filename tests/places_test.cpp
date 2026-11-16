@@ -185,9 +185,9 @@ namespace {
     TEST_CHECK(!service.contains(stale.location) && !fs::exists(sharedPath));
     const auto& places = service.userPlaces();
     TEST_CHECK(
-        places.size() == 8
+        places.size() == 7
         && places.front().bookmark.label == "Home"
-        && places.back().bookmark.location == luciole::Location::fromPath("/")
+        && places.back().bookmark.location == luciole::Location::trash()
     );
     const auto documents = std::ranges::find_if(places, [](const auto& p) { return p.bookmark.label == "Documents"; });
     TEST_CHECK(documents != places.end() && documents->bookmark.location == fixture.location("home/My Documents"));
@@ -196,7 +196,8 @@ namespace {
     }));
     TEST_CHECK(service.bookmarks().size() == places.size());
     const auto home = places.front().bookmark;
-    const auto filesystem = places.back().bookmark;
+    const auto downloads =
+        std::ranges::find(places, std::string("Downloads"), [](const auto& p) { return p.bookmark.label; })->bookmark;
     const luciole::Bookmark trash{"Trash", luciole::Location::trash()};
     const auto a = fixture.pin("a");
     const auto b = fixture.pin("b");
@@ -228,7 +229,7 @@ namespace {
     TEST_CHECK(observed.load() && observed.bookmarks().front() == b);
     TEST_CHECK(service.remove(home.location));
     pump.ready(service);
-    TEST_CHECK(service.rename(filesystem, "Root <files> & storage"));
+    TEST_CHECK(service.rename(downloads, "Root <files> & storage"));
     pump.ready(service);
     TEST_CHECK(service.move(trash.location, 0));
     pump.ready(service);
@@ -238,7 +239,7 @@ namespace {
     pump.ready(restarted);
     TEST_CHECK(!restarted.contains(home.location) && restarted.bookmarks().front() == trash);
     TEST_CHECK(std::ranges::any_of(restarted.bookmarks(), [&](const auto& pin) {
-      return pin.location == filesystem.location && pin.label == "Root <files> & storage";
+      return pin.location == downloads.location && pin.label == "Root <files> & storage";
     }));
     // External reorder, relabel and deletion override the private layout cache.
     replace(

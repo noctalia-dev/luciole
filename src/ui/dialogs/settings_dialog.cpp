@@ -192,6 +192,7 @@ SettingsDialog::SettingsDialog(
   addNumber(P::SidebarWidth, "Sidebar width", widths(luciole::kMinSidebarWidth, luciole::kMaxSidebarWidth));
   card("Preview");
   addBool(P::ShowPreview, "Show preview");
+  addBool(P::ChooserShowPreview, "Show preview in file picker");
   addNumber(P::PreviewWidth, "Preview width", widths(208, 800));
   section("Thumbnails", "photo");
   card("Generation");
@@ -203,7 +204,6 @@ SettingsDialog::SettingsDialog(
       "All locations can generate thumbnails on mounted shares. Unmounted locations use cached thumbnails."
   );
   addNumber(P::ThumbnailMaxFileMib, "Image/PDF size limit", {1, 1024}, "MiB");
-  addNumber(P::ThumbnailMaxMegapixels, "Image pixel limit", {1, 64}, "MP");
   card("Cache");
   addNumber(P::ThumbnailCacheMib, "Disk cache limit", {16, 1024}, "MiB");
   m_section->addChild(

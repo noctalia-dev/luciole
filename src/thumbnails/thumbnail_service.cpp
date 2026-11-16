@@ -444,8 +444,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
                   nlohmann::json::array({"pixbuf-media-v1", source.etag().value_or(""),
                                          source.modifiedSeconds.value_or(0), source.size.value_or(0),
                                          revisionText(source.contentRevision), identity ? identity->filesystem : "",
-                                         identity ? identity->file : "", request->side, request->options.maxFileMiB,
-                                         request->options.maxMegapixels})
+                                         identity ? identity->file : "", request->side, request->options.maxFileMiB})
                       .dump();
               *item.image = std::move(loaded->loaded.image);
               item.failed = !item.image->pixels;

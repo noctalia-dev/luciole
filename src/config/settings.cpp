@@ -249,6 +249,7 @@ namespace {
       describe(P::ShowDrives, "show_drives", [](S& s) -> auto& { return s.showDrives; }),
       describe(P::ExpandableFolders, "expandable_folders", [](S& s) -> auto& { return s.expandableFolders; }),
       describe(P::ShowPreview, "show_preview", [](S& s) -> auto& { return s.showPreview; }),
+      describe(P::ChooserShowPreview, "chooser_show_preview", [](S& s) -> auto& { return s.chooserShowPreview; }),
       describe(
           P::PreviewWidth, "preview_width", [](S& s) -> auto& { return s.previewWidth; },
           {between<208, 800>, "expected integer preview width from 208 to 800"}
@@ -317,10 +318,6 @@ namespace {
       describe(
           P::ThumbnailMaxFileMib, "thumbnail_max_file_mib", [](S& s) -> auto& { return s.thumbnails.maxFileMiB; },
           {between<1, 1024>, "expected an integer from 1 to 1024"}
-      ),
-      describe(
-          P::ThumbnailMaxMegapixels, "thumbnail_max_megapixels",
-          [](S& s) -> auto& { return s.thumbnails.maxMegapixels; }, {between<1, 64>, "expected an integer from 1 to 64"}
       ),
       describe(
           P::ThumbnailCacheMib, "thumbnail_cache_mib", [](S& s) -> auto& { return s.thumbnails.cacheMiB; },

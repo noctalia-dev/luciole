@@ -20,8 +20,10 @@
 #include "wayland/toplevel_surface.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <string>
+#include <unistd.h>
 
 SidebarController::SidebarController(
     PageContext& page, luciole::PinService& pins, luciole::DriveMonitor& drives,
@@ -189,12 +191,43 @@ void SidebarController::removeDrive(const std::string& key) {
       m_page.browser().open(luciole::Location::fromPath(home));
     }
   }
-  const bool eject = drive->ejectable;
-  m_drives.remove(key, [this, eject, lifetime = std::weak_ptr(m_lifetime)](std::string error) {
-    if (!lifetime.expired() && !error.empty()) {
-      m_page.actionError(std::format("Could not {} the drive: {}", eject ? "eject" : "unmount", error));
-    }
-  });
+  auto verb = std::string(luciole::driveRemovalLabel(drive->removal));
+  std::ranges::transform(verb, verb.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  m_drives.remove(
+      key, [this, verb = std::move(verb), lifetime = std::weak_ptr(m_lifetime)](luciole::DriveRemoveResult result) {
+        if (lifetime.expired() || result.error.empty()) {
+          return;
+        }
+        if (!result.busy) {
+          m_page.actionError(std::format("Could not {} the drive: {}", verb, result.error));
+          return;
+        }
+        // Name who keeps it busy; for this process, its running file jobs say more than its name.
+        std::vector<std::string> users;
+        for (const auto& blocker : result.blockers) {
+          if (blocker.pid == getpid()) {
+            const auto jobs = m_page.runningJobTitles();
+            users.insert(users.end(), jobs.begin(), jobs.end());
+            if (jobs.empty()) {
+              users.emplace_back("Luciole");
+            }
+          } else {
+            users.push_back(blocker.name);
+          }
+        }
+        std::ranges::sort(users);
+        users.erase(std::ranges::unique(users).begin(), users.end());
+        std::string names;
+        for (std::size_t i = 0; i < users.size(); ++i) {
+          names += i == 0 ? "" : (i + 1 == users.size() ? " and " : ", ");
+          names += users[i];
+        }
+        m_page.actionError(
+            names.empty() ? std::format("Could not {} the drive: files on it are still open.", verb)
+                          : std::format("Could not {} the drive: it is in use by {}.", verb, names)
+        );
+      }
+  );
 }
 
 void SidebarController::openDriveMenu(const std::string& key, float x, float y) {
@@ -203,8 +236,8 @@ void SidebarController::openDriveMenu(const std::string& key, float x, float y) 
     return;
   }
   std::vector<ContextMenuControlEntry> entries{{.id = 1, .label = drive->root ? "Open" : "Mount and open"}};
-  if (drive->removable) {
-    entries.push_back({.id = 2, .label = drive->ejectable ? "Eject" : "Unmount"});
+  if (drive->removal != luciole::DriveRemoval::None) {
+    entries.push_back({.id = 2, .label = std::string(luciole::driveRemovalLabel(drive->removal))});
   }
   m_menus.showContextMenu(
       std::move(entries),
@@ -342,6 +375,8 @@ void SidebarController::onFrame() {
   ));
   m_sidebarResizeLine->setVisible(m_resizingSidebar || m_sidebarResize->focused() || m_sidebarResize->hovered());
 }
+
+void SidebarController::updateDriveUsage() { m_places->updateDriveUsage(); }
 
 std::optional<InputDispatcher::TabFocusSnapshot> SidebarController::invalidate() {
   std::optional<InputDispatcher::TabFocusSnapshot> placesFocus;

@@ -76,10 +76,7 @@ void luciole::PreviewMetadataService::clear() {
 }
 void luciole::PreviewMetadataService::show(const DirectoryEntry& entry, ThumbnailOptions options) {
   auto& state = *m_state;
-  if (state.entry
-      && sameSource(*state.entry, entry)
-      && state.options.maxFileMiB == options.maxFileMiB
-      && state.options.maxMegapixels == options.maxMegapixels) {
+  if (state.entry && sameSource(*state.entry, entry) && state.options.maxFileMiB == options.maxFileMiB) {
     return;
   }
   state.reset();

@@ -54,7 +54,7 @@ std::expected<LoadedImageFile, std::string> luciole::decodeRasterImage(
     std::span<const std::uint8_t> bytes, int target, std::uint64_t maxPixels, GCancellable* cancellable,
     std::string_view contentType
 ) {
-  if (bytes.empty() || target < 1 || target > kMaxImageSide || !maxPixels || maxPixels > kMaxImagePixelBudget) {
+  if (bytes.empty() || target < 1 || target > kMaxImageSide || !maxPixels) {
     return std::unexpected("invalid image decode input");
   }
   if (g_cancellable_is_cancelled(cancellable)) {

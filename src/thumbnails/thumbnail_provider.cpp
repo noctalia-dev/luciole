@@ -105,8 +105,7 @@ namespace {
     return pixels != 0 && dark * 100 >= pixels * 98;
   }
   std::expected<LoadedImageFile, std::string> videoThumbnail(
-      int source, int side, const luciole::ThumbnailOptions& options, GCancellable* cancel,
-      const std::filesystem::path& output, luciole::ThumbnailPurpose purpose
+      int source, int side, GCancellable* cancel, const std::filesystem::path& output, luciole::ThumbnailPurpose purpose
   ) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     const auto duration = videoDuration(source, output.parent_path(), cancel);
@@ -123,21 +122,12 @@ namespace {
       if (remaining <= std::chrono::milliseconds::zero()) {
         break;
       }
-      std::vector<std::string> arguments{
-          "ffmpeg",
-          "-nostdin",
-          "-v",
-          "error",
-          "-xerror",
-          "-threads",
-          "1",
-          "-max_pixels",
-          std::to_string(static_cast<std::uint64_t>(options.maxMegapixels) * 1'000'000U),
-          "-filter_threads",
-          "1",
-          "-protocol_whitelist",
-          "file,pipe"
-      };
+      std::vector<std::string> arguments{"ffmpeg",   "-nostdin",
+                                         "-v",       "error",
+                                         "-xerror",  "-threads",
+                                         "1",        "-filter_threads",
+                                         "1",        "-protocol_whitelist",
+                                         "file,pipe"};
       if (position > 0) {
         arguments.insert(arguments.end(), {"-ss", std::to_string(position)});
       } else {
@@ -209,15 +199,15 @@ std::expected<LoadedImageFile, std::string> luciole::renderThumbnailProvider(
   const auto output = directory / (mime.starts_with("image/") ? "result.rgba" : "result.png");
   std::expected<void, std::string> success = std::unexpected("no supported thumbnail provider");
   if (mime.starts_with("image/")) {
-    // Glycin transfers source pixels through a memfd before scaling. RLIMIT_FSIZE applies there too.
-    // The private result remains separately validated against outputLimit and the requested dimensions.
+    // Glycin transfers source pixels through a memfd before scaling. RLIMIT_FSIZE applies there too, so it allows
+    // any frame that fits the helper memory limit. The private result remains separately validated against
+    // outputLimit and the requested dimensions.
     const auto fileLimit = std::max(
         {static_cast<std::uint64_t>(outputLimit), static_cast<std::uint64_t>(options.maxFileMiB) * 1024U * 1024U,
-         static_cast<std::uint64_t>(options.maxMegapixels) * 1'000'000U * 4U}
+         kProviderMemoryBytes}
     );
     success = runProviderProcess(
         {"/proc/self/exe", "--thumbnail-worker", std::to_string(side),
-         std::to_string(static_cast<std::uint64_t>(options.maxMegapixels) * 1'000'000U),
          std::to_string(static_cast<std::uint64_t>(options.maxFileMiB) * 1024U * 1024U), mime, output.native()},
         sourceFd, cancellable, fileLimit, 2
     );
@@ -228,23 +218,14 @@ std::expected<LoadedImageFile, std::string> luciole::renderThumbnailProvider(
         sourceFd, cancellable
     );
   } else if (mime.starts_with("video/")) {
-    return videoThumbnail(sourceFd, side, options, cancellable, output, purpose);
+    return videoThumbnail(sourceFd, side, cancellable, output, purpose);
   } else if (mime.starts_with("audio/")) {
-    std::vector<std::string> arguments{
-        "ffmpeg",
-        "-nostdin",
-        "-v",
-        "error",
-        "-xerror",
-        "-threads",
-        "1",
-        "-max_pixels",
-        std::to_string(static_cast<std::uint64_t>(options.maxMegapixels) * 1'000'000U),
-        "-filter_threads",
-        "1",
-        "-protocol_whitelist",
-        "file,pipe"
-    };
+    std::vector<std::string> arguments{"ffmpeg",   "-nostdin",
+                                       "-v",       "error",
+                                       "-xerror",  "-threads",
+                                       "1",        "-filter_threads",
+                                       "1",        "-protocol_whitelist",
+                                       "file,pipe"};
     arguments.insert(
         arguments.end(),
         {"-i", "/proc/self/fd/3", "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-threads", "1", "-vf",

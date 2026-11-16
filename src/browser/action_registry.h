@@ -90,10 +90,12 @@ namespace luciole {
     Undo,
     Redo,
     Operations,
-    TargetTerminal
+    TargetTerminal,
+    KeyboardShortcuts
   };
-  // TargetTerminal stays the last enumerator.
-  inline constexpr std::size_t kBrowserActionCount = std::size_t{std::to_underlying(BrowserAction::TargetTerminal)} + 1;
+  // KeyboardShortcuts stays the last enumerator.
+  inline constexpr std::size_t kBrowserActionCount =
+      std::size_t{std::to_underlying(BrowserAction::KeyboardShortcuts)} + 1;
   enum class ActionScope : std::uint8_t { Global, Location, Targets, Selection };
   struct ActionTarget {
     EntryId id;

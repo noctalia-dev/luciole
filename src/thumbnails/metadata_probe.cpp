@@ -256,9 +256,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
       return fields;
     }
     args = {"/proc/self/exe", "--preview-metadata-worker", mime, std::to_string(maximum)};
-    fileLimit = std::max<std::uint64_t>(
-        maximum, static_cast<std::uint64_t>(std::clamp(options.maxMegapixels, 1, 64)) * 1'000'000 * 4
-    );
+    fileLimit = std::max<std::uint64_t>(maximum, kProviderMemoryBytes);
   } else if (media) {
     args = {
         "ffprobe",

@@ -490,7 +490,11 @@ namespace {
        .shortcut = "Ctrl+Shift+N",
        .scope = S::Location,
        .rule = createItem},
-      {.action = A::CreateFile, .label = "Empty File…", .shortcut = "", .scope = S::Location, .rule = createItem},
+      {.action = A::CreateFile,
+       .label = "Empty File…",
+       .shortcut = "Ctrl+Alt+N",
+       .scope = S::Location,
+       .rule = createItem},
       {.action = A::NewDocument, .label = "New Document", .shortcut = "", .scope = S::Location, .rule = createItem},
       {.action = A::PinCurrent,
        .label = "Pin this folder to sidebar",
@@ -568,6 +572,7 @@ namespace {
        .shortcut = "",
        .scope = S::Targets,
        .rule = targetTerminal},
+      {.action = A::KeyboardShortcuts, .label = "Keyboard shortcuts", .shortcut = "F1"},
   });
   static_assert(luciole::actionTableInOrder(kActions));
 } // namespace
@@ -643,6 +648,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::SelectionMenu:
   case A::CopyPath:
   case A::CopyUri:
+  case A::KeyboardShortcuts:
     return true;
   case A::Miller:
   case A::OpenWith:

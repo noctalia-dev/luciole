@@ -5,8 +5,13 @@
 #include "ui/controls/button.h"
 #include "ui/controls/scroll_view.h"
 
+class ProgressBar;
+
 namespace luciole {
   class SidebarTreeView;
+  // The action name for removing a drive this way: "Safely Remove", "Eject" or "Unmount"; empty for None.
+  std::string_view driveRemovalLabel(DriveRemoval removal);
+
   class PlacesSidebar final : public Flex {
   public:
     PlacesSidebar(PinService& pins, DriveMonitor& drives);
@@ -15,6 +20,8 @@ namespace luciole {
     void setShowDrives(bool showDrives);
     void setChangedCallback(std::function<void()> callback) { m_changed = std::move(callback); }
     void invalidate();
+    // Updates drive usage bars from the monitor without rebuilding the list.
+    void updateDriveUsage();
     void sync(std::optional<Location> current);
     void cancelDragCandidate();
     std::optional<std::size_t> dropSlot(float x, float y) const;
@@ -48,10 +55,17 @@ namespace luciole {
       std::optional<Location> root;
       std::string label;
       Button* button = nullptr;
+      Label* name = nullptr;
+      Glyph* eject = nullptr;
+      ProgressBar* usage = nullptr;
+      bool selected = false;
     };
     void rebuild();
     void addRow(const Bookmark& bookmark, const std::string& glyph, std::size_t index);
     void addDriveRow(const Drive& drive);
+    // Fits drive names between the glyph and the eject button and places usage bars under them; true when a
+    // name's width budget changed and the rows need another arrange.
+    bool layoutDriveRows();
     const Drive* driveAt(const Location& root) const;
     PinService& m_pins;
     DriveMonitor& m_drives;

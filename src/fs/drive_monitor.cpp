@@ -3,14 +3,19 @@
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
 
+#include <algorithm>
+#include <format>
+#include <fstream>
 #include <gio/gio.h>
 #include <map>
+#include <set>
 
 namespace {
-  // Owned reference to the GVolume or GMount behind one Drive.
+  // Owned references to the GVolume or GMount behind one Drive, and the device holding it.
   struct Handle {
     luciole::GioPtr<GVolume> volume;
     luciole::GioPtr<GMount> mount;
+    luciole::GioPtr<GDrive> device;
   };
 
   std::string identifier(GVolume* volume) {
@@ -27,6 +32,13 @@ namespace {
     const luciole::GErrorPtr owned(error);
     return owned ? owned->message : "";
   }
+
+  std::string processName(int pid) {
+    std::ifstream file(std::format("/proc/{}/comm", pid));
+    std::string name;
+    std::getline(file, name);
+    return name.empty() ? std::format("process {}", pid) : name;
+  }
 } // namespace
 
 struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
@@ -35,6 +47,20 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
   std::vector<Drive> drives;
   std::map<std::string, Handle> handles;
   std::function<void()> changed;
+  std::function<void()> usageChanged;
+  std::set<std::string> usagePending;
+
+  // "/" leads the list as File System; GIO's volume monitor never reports it.
+  void addRoot() {
+    drives.push_back(
+        {.key = "root",
+         .label = "File System",
+         .glyph = "database",
+         .root = Location::fromPath("/"),
+         .removal = luciole::DriveRemoval::None,
+         .usage = std::nullopt}
+    );
+  }
 
   void add(Handle handle) {
     Drive drive;
@@ -51,19 +77,27 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
       const GString name(g_mount_get_name(mount));
       drive.label = name ? name.get() : "Mount";
     }
+    if (handle.volume) {
+      handle.device.reset(g_volume_get_drive(handle.volume.get()));
+    }
+    GDrive* device = handle.device.get();
     if (mount) {
       const GioPtr<GFile> root(g_mount_get_root(mount));
       drive.root = locationFromFile(root.get());
-      drive.ejectable = g_mount_can_eject(mount) != FALSE;
-      drive.removable = drive.ejectable || g_mount_can_unmount(mount) != FALSE;
+      if (device && g_drive_can_stop(device) != FALSE) {
+        drive.removal = DriveRemoval::PowerOff;
+      } else if (g_mount_can_eject(mount) != FALSE) {
+        drive.removal = DriveRemoval::Eject;
+      } else if (g_mount_can_unmount(mount) != FALSE) {
+        drive.removal = DriveRemoval::Unmount;
+      }
       if (!handle.volume) {
         drive.key = "mount:" + drive.root->uri();
       }
     }
-    const GioPtr<GDrive> device(handle.volume ? g_volume_get_drive(handle.volume.get()) : nullptr);
     if (drive.root && !drive.root->isNative()) {
       drive.glyph = "server";
-    } else if (device && g_drive_is_removable(device.get())) {
+    } else if (device && g_drive_is_removable(device)) {
       drive.glyph = "device-usb";
     } else {
       drive.glyph = "database";
@@ -73,11 +107,13 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
   }
 
   void refresh() {
+    auto previous = std::move(drives);
     drives.clear();
     handles.clear();
+    addRoot();
     GList* volumes = g_volume_monitor_get_volumes(monitor.get());
     for (GList* item = volumes; item != nullptr; item = item->next) {
-      add({.volume = GioPtr<GVolume>(G_VOLUME(item->data)), .mount = nullptr});
+      add({.volume = GioPtr<GVolume>(G_VOLUME(item->data)), .mount = nullptr, .device = nullptr});
     }
     g_list_free(volumes);
     GList* mounts = g_volume_monitor_get_mounts(monitor.get());
@@ -85,10 +121,19 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
       GioPtr<GMount> mount(G_MOUNT(item->data));
       const GioPtr<GVolume> volume(g_mount_get_volume(mount.get()));
       if (!volume && g_mount_is_shadowed(mount.get()) == FALSE) {
-        add({.volume = nullptr, .mount = std::move(mount)});
+        add({.volume = nullptr, .mount = std::move(mount), .device = nullptr});
       }
     }
     g_list_free(mounts);
+    // Mounted drives first, keeping GIO's order within each group; the root entry stays at the top.
+    std::ranges::stable_partition(drives, [](const Drive& drive) { return drive.root.has_value(); });
+    // Keep the last known usage until the next query answers, so bars do not flicker on rebuilds.
+    for (auto& drive : drives) {
+      const auto old = std::ranges::find(previous, drive.key, &Drive::key);
+      if (drive.root && old != previous.end() && old->root == drive.root) {
+        drive.usage = old->usage;
+      }
+    }
     if (changed) {
       changed();
     }
@@ -102,6 +147,7 @@ luciole::DriveMonitor::DriveMonitor() : m_state(std::make_shared<State>()) {
   const GioPtr<GFileInfo> info(
       g_file_query_filesystem_info(root.get(), G_FILE_ATTRIBUTE_FILESYSTEM_READONLY, nullptr, nullptr)
   );
+  m_state->addRoot();
 }
 
 luciole::DriveMonitor::~DriveMonitor() {
@@ -109,6 +155,7 @@ luciole::DriveMonitor::~DriveMonitor() {
     g_signal_handlers_disconnect_by_data(m_state->monitor.get(), m_state.get());
   }
   m_state->changed = {};
+  m_state->usageChanged = {};
 }
 
 void luciole::DriveMonitor::start() {
@@ -141,17 +188,72 @@ void luciole::DriveMonitor::setChangedCallback(std::function<void()> callback) {
   m_state->changed = std::move(callback);
 }
 
+void luciole::DriveMonitor::setUsageChangedCallback(std::function<void()> callback) {
+  m_state->usageChanged = std::move(callback);
+}
+
+void luciole::DriveMonitor::refreshUsage() {
+  struct Request {
+    std::weak_ptr<State> state;
+    std::string key;
+    Location root;
+  };
+  const auto finished = [](GObject* source, GAsyncResult* result, gpointer data) {
+    const std::unique_ptr<Request> request(static_cast<Request*>(data));
+    GError* error = nullptr;
+    const GioPtr<GFileInfo> info(g_file_query_filesystem_info_finish(G_FILE(source), result, &error));
+    (void)errorText(error);
+    const auto state = request->state.lock();
+    if (!state) {
+      return;
+    }
+    state->usagePending.erase(request->key);
+    std::optional<DriveUsage> usage;
+    if (info) {
+      const auto size = infoUint64(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+      auto used = infoUint64(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_USED);
+      if (const auto free = infoUint64(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+          !used && size && free && *free <= *size) {
+        used = *size - *free;
+      }
+      if (size && *size > 0 && used) {
+        usage = DriveUsage{.used = std::min(*used, *size), .size = *size};
+      }
+    }
+    const auto drive = std::ranges::find_if(state->drives, [&](const Drive& candidate) {
+      return candidate.key == request->key && candidate.root == request->root;
+    });
+    if (drive == state->drives.end() || drive->usage == usage) {
+      return;
+    }
+    drive->usage = usage;
+    if (state->usageChanged) {
+      state->usageChanged();
+    }
+  };
+  for (const auto& drive : m_state->drives) {
+    if (!drive.root || !m_state->usagePending.insert(drive.key).second) {
+      continue;
+    }
+    g_file_query_filesystem_info_async(
+        gioFile(*drive.root).get(),
+        G_FILE_ATTRIBUTE_FILESYSTEM_SIZE "," G_FILE_ATTRIBUTE_FILESYSTEM_USED "," G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+        G_PRIORITY_DEFAULT, nullptr, finished, new Request{m_state, drive.key, *drive.root}
+    );
+  }
+}
+
 void luciole::DriveMonitor::mount(
     const std::string& key, std::function<void(std::optional<Location>, std::string)> done
 ) {
   const auto* drive = find(key);
+  if (drive != nullptr && drive->root) {
+    done(drive->root, {});
+    return;
+  }
   const auto handle = m_state->handles.find(key);
   if (drive == nullptr || handle == m_state->handles.end()) {
     done(std::nullopt, "This drive is no longer available.");
-    return;
-  }
-  if (drive->root) {
-    done(drive->root, {});
     return;
   }
   struct Request {
@@ -182,40 +284,87 @@ void luciole::DriveMonitor::mount(
   );
 }
 
-void luciole::DriveMonitor::remove(const std::string& key, std::function<void(std::string)> done) {
+void luciole::DriveMonitor::remove(const std::string& key, std::function<void(DriveRemoveResult)> done) {
   const auto* drive = find(key);
   const auto handle = m_state->handles.find(key);
-  if (drive == nullptr || handle == m_state->handles.end() || !handle->second.mount || !drive->removable) {
-    done("This drive can no longer be removed.");
+  if (drive == nullptr
+      || handle == m_state->handles.end()
+      || !handle->second.mount
+      || drive->removal == DriveRemoval::None
+      || (drive->removal == DriveRemoval::PowerOff && !handle->second.device)) {
+    done({.error = "This drive can no longer be removed.", .busy = false, .blockers = {}});
     return;
   }
   struct Request {
     std::weak_ptr<State> state;
-    std::function<void(std::string)> done;
-    bool eject = false;
+    std::function<void(DriveRemoveResult)> done;
+    DriveRemoval removal = DriveRemoval::None;
+    GioPtr<GMountOperation> operation;
+    DriveRemoveResult result;
   };
-  const GioPtr<GMountOperation> operation(g_mount_operation_new());
+  auto* request = new Request{
+      .state = m_state,
+      .done = std::move(done),
+      .removal = drive->removal,
+      .operation = GioPtr<GMountOperation>(g_mount_operation_new()),
+      .result = {}
+  };
+  // Files are open on the drive: record who holds them and give up rather than wait or force.
+  const auto busy = +[](GMountOperation* operation, const char*, GArray* processes, const char**, gpointer data) {
+    auto& result = static_cast<Request*>(data)->result;
+    result.busy = true;
+    result.blockers.clear();
+    for (guint i = 0; i < processes->len; ++i) {
+      const int pid = g_array_index(processes, GPid, i);
+      result.blockers.push_back({.pid = pid, .name = processName(pid)});
+    }
+    g_mount_operation_reply(operation, G_MOUNT_OPERATION_ABORTED);
+  };
+  g_signal_connect(request->operation.get(), "show-processes", G_CALLBACK(busy), request);
   const auto finished = [](GObject* source, GAsyncResult* result, gpointer data) {
     const std::unique_ptr<Request> request(static_cast<Request*>(data));
+    g_signal_handlers_disconnect_by_data(request->operation.get(), request.get());
     GError* error = nullptr;
-    if (request->eject) {
+    switch (request->removal) {
+    case DriveRemoval::PowerOff:
+      (void)g_drive_stop_finish(G_DRIVE(source), result, &error);
+      break;
+    case DriveRemoval::Eject:
       (void)g_mount_eject_with_operation_finish(G_MOUNT(source), result, &error);
-    } else {
+      break;
+    case DriveRemoval::Unmount:
+    case DriveRemoval::None:
       (void)g_mount_unmount_with_operation_finish(G_MOUNT(source), result, &error);
+      break;
+    }
+    if (error != nullptr && error->domain == G_IO_ERROR && error->code == G_IO_ERROR_BUSY) {
+      request->result.busy = true;
     }
     auto message = errorText(error);
+    if (!message.empty() && !request->result.busy) {
+      request->result.error = std::move(message);
+    } else if (request->result.busy) {
+      request->result.error = "The drive is in use.";
+    }
     if (!request->state.expired()) {
-      request->done(std::move(message));
+      request->done(std::move(request->result));
     }
   };
-  auto* request = new Request{m_state, std::move(done), drive->ejectable};
-  if (drive->ejectable) {
+  auto* operation = request->operation.get();
+  switch (drive->removal) {
+  case DriveRemoval::PowerOff:
+    g_drive_stop(handle->second.device.get(), G_MOUNT_UNMOUNT_NONE, operation, nullptr, finished, request);
+    break;
+  case DriveRemoval::Eject:
     g_mount_eject_with_operation(
-        handle->second.mount.get(), G_MOUNT_UNMOUNT_NONE, operation.get(), nullptr, finished, request
+        handle->second.mount.get(), G_MOUNT_UNMOUNT_NONE, operation, nullptr, finished, request
     );
-  } else {
+    break;
+  case DriveRemoval::Unmount:
+  case DriveRemoval::None:
     g_mount_unmount_with_operation(
-        handle->second.mount.get(), G_MOUNT_UNMOUNT_NONE, operation.get(), nullptr, finished, request
+        handle->second.mount.get(), G_MOUNT_UNMOUNT_NONE, operation, nullptr, finished, request
     );
+    break;
   }
 }

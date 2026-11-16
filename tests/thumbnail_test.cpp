@@ -634,19 +634,6 @@ namespace {
          "1",
          coveredVideo.native()}
     );
-    const auto largeVideo = fixture.root / "large.mp4";
-    command(
-        {"ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=red:s=2048x1024:d=0.1", "-threads", "1",
-         "-c:v", "mpeg4", largeVideo.native()}
-    );
-    const int largeInput = ::open(largeVideo.c_str(), O_RDONLY | O_CLOEXEC);
-    TEST_CHECK(largeInput >= 0);
-    const GioPtr<GCancellable> limitCancel(g_cancellable_new());
-    auto limited = luciole::ThumbnailOptions{};
-    limited.maxMegapixels = 1;
-    const auto tooLarge = luciole::renderThumbnailProvider(largeInput, "video/mp4", 128, limited, limitCancel.get());
-    ::close(largeInput);
-    TEST_CHECK(!tooLarge);
     const auto audio = fixture.root / "artwork.mp3";
     command(
         {"ffmpeg",
@@ -1043,11 +1030,10 @@ namespace {
          g_memory_output_stream_get_data_size(G_MEMORY_OUTPUT_STREAM(buffer.get()))}
     );
     const GioPtr<GCancellable> cancel(g_cancellable_new());
-    const auto render = [&](const fs::path& file, const std::string& mime, int side,
-                            luciole::ThumbnailOptions options = {}) {
+    const auto render = [&](const fs::path& file, const std::string& mime, int side) {
       const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
       TEST_CHECK(fd >= 0);
-      auto result = luciole::renderThumbnailProvider(fd, mime, side, options, cancel.get());
+      auto result = luciole::renderThumbnailProvider(fd, mime, side, {}, cancel.get());
       ::close(fd);
       return result;
     };
@@ -1059,11 +1045,6 @@ namespace {
     const auto broken = fixture.root / "broken.svg";
     std::ofstream(broken) << "<svg not valid";
     TEST_CHECK(!render(broken, "image/svg+xml", 128));
-    const auto oversized = fixture.root / "oversized.svg";
-    std::ofstream(oversized) << "<svg xmlns='http://www.w3.org/2000/svg' width='2000' height='1000'/>";
-    auto limited = luciole::ThumbnailOptions{};
-    limited.maxMegapixels = 1;
-    TEST_CHECK(!render(oversized, "image/svg+xml", 128, limited));
     g_cancellable_cancel(cancel.get());
     TEST_CHECK(!render(path, "image/svg+xml", 128));
     g_cancellable_reset(cancel.get());

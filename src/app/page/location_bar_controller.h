@@ -78,6 +78,8 @@ public:
   bool completionKey(const KeyboardEvent& event);
   // Escape ends location editing or closes the search filter.
   bool escapeKey(const KeyboardEvent& event);
+  // Down in the search field moves to the results.
+  bool filterKey(const KeyboardEvent& event);
 
   // BrowserPage::syncBrowser(): resets the bar for a new location; true when `location` changed.
   bool syncLocation(const std::optional<luciole::Location>& location);
@@ -112,6 +114,7 @@ private:
   void rebuildBreadcrumbs();
   void changeNameFilter(const std::string& text);
   void closeFilter();
+  void focusResults();
 
   PageContext& m_page;
   WaylandConnection& m_connection;

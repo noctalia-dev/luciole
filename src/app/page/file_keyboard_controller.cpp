@@ -7,6 +7,7 @@
 #include "browser/action_registry.h"
 #include "browser/browser_controller.h"
 #include "browser/miller_columns.h"
+#include "config/settings.h"
 #include "core/input/key_symbols.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/browser/action_shortcuts.h"
@@ -43,6 +44,78 @@ void FileKeyboardController::notifyStateChanged() {
   if (listFocused()) {
     m_textInput.notifyClientStateChanged(this, TextInputChangeCause::Other);
   }
+}
+
+void FileKeyboardController::setKeyboardFocus(bool focus) {
+  m_fileKeyboardFocus = focus;
+  if (!focus) {
+    m_pendingCursor.reset();
+  }
+}
+
+void FileKeyboardController::selectFirstOnLoad() {
+  if (m_page.choosing()) {
+    return;
+  }
+  m_pendingCursor = PendingCursor{.browser = &m_page.browser(), .visit = m_page.browser().visitSerial()};
+}
+
+void FileKeyboardController::applyPendingCursor() {
+  if (!m_pendingCursor) {
+    return;
+  }
+  auto& browser = m_page.browser();
+  if (&browser == m_pendingCursor->browser && browser.visitSerial() == m_pendingCursor->visit) {
+    return;
+  }
+  const auto status = browser.model().snapshot().status;
+  if (status == luciole::DirectoryStatus::Loading || status == luciole::DirectoryStatus::Idle) {
+    return;
+  }
+  m_pendingCursor.reset();
+  selectFirstIfNone();
+}
+
+void FileKeyboardController::selectFirstIfNone() {
+  auto& model = m_page.browser().model();
+  const auto& selection = model.selection();
+  if (model.rows().empty() || selection.focused || !selection.selected.empty()) {
+    return;
+  }
+  const auto first = model.rows().front();
+  if (model.select(first)) {
+    m_keyboardReveal = first;
+    m_fileKeyboardFocus = true;
+    m_page.requestSync();
+  }
+}
+
+void FileKeyboardController::focusEntered() {
+  m_fileKeyboardFocus = true;
+  auto& model = m_page.browser().model();
+  if (!model.selection().focused && !model.rows().empty() && model.setFocus(model.rows().front())) {
+    m_keyboardReveal = model.rows().front();
+  }
+  m_page.requestSync();
+}
+
+void FileKeyboardController::goUp() {
+  if (m_page.actionState(Action::Up, m_page.actionRequest(false)).enabled) {
+    m_page.dispatchAction(Action::Up);
+  }
+}
+
+void FileKeyboardController::enterCursorFolder() {
+  const auto& model = m_page.browser().model();
+  const auto focused = model.selection().focused;
+  const auto* entry = focused ? model.entry(*focused) : nullptr;
+  if (entry == nullptr || entry->type != luciole::FileType::Directory) {
+    return;
+  }
+  auto request = m_page.actionRequest(false);
+  request.targets.push_back({entry->id, entry->location()});
+  selectFirstOnLoad();
+  m_page.dispatchAction(Action::Open, request);
 }
 
 bool FileKeyboardController::escapeKey(const KeyboardEvent& event) {
@@ -240,6 +313,55 @@ void FileKeyboardController::textInputActivated(TextInputService&) {}
 
 void FileKeyboardController::textInputDeactivated(TextInputService&) { clearTypeahead(); }
 
+bool FileKeyboardController::folderKey(const KeyboardEvent& event) {
+  auto& model = m_page.browser().model();
+  const auto focused = model.selection().focused;
+  if (event.modifiers == 0
+      && m_page.viewMode() == luciole::ViewMode::List
+      && (KeySymbol::isLeft(event.sym) || KeySymbol::isRight(event.sym))) {
+    if (KeySymbol::isRight(event.sym) != Style::rtl()) {
+      if (!event.repeat) {
+        enterCursorFolder();
+      }
+    } else if (m_page.browser().searchQuery().empty()) {
+      goUp();
+    }
+    return true;
+  }
+  if (event.modifiers == 0
+      && KeySymbol::isBackspace(event.sym)
+      && m_typeahead.text().empty()
+      && m_typeaheadPreedit.empty()
+      && !m_locationBar.filterOpen()
+      && m_page.browser().searchQuery().empty()) {
+    goUp();
+    return true;
+  }
+  if (event.sym == XKB_KEY_space && event.modifiers == KeyMod::Ctrl) {
+    if (focused) {
+      if (m_miller.enabled()) {
+        m_miller.interact(m_miller.focused());
+      }
+      (void)model.select(*focused, luciole::SelectionMode::Toggle);
+      m_keyboardReveal = focused;
+      m_pendingCursor.reset();
+    }
+    return true;
+  }
+  const bool shift = (event.modifiers & KeyMod::Shift) != 0;
+  if (KeySymbol::isEnter(event.sym) && (event.modifiers & ~KeyMod::Shift) == KeyMod::Ctrl) {
+    const auto* entry = focused ? model.entry(*focused) : nullptr;
+    if (!event.repeat && !m_page.choosing() && entry != nullptr && entry->type == luciole::FileType::Directory) {
+      const auto command = shift
+          ? (m_page.settings().switchToNewTab ? WorkspaceCommand::NewBackgroundTab : WorkspaceCommand::NewTab)
+          : WorkspaceCommand::OpenTab;
+      m_page.requestWorkspace(command, entry->location(), std::nullopt);
+    }
+    return true;
+  }
+  return false;
+}
+
 bool FileKeyboardController::listKey(const KeyboardEvent& event) {
   if (listFocused()
       && event.pressed
@@ -248,6 +370,9 @@ bool FileKeyboardController::listKey(const KeyboardEvent& event) {
       && m_page.browser().treeKey(KeySymbol::isRight(event.sym) != Style::rtl())) {
     m_keyboardReveal = m_page.browser().model().selection().focused;
     m_page.requestSync();
+    return true;
+  }
+  if (event.pressed && folderKey(event)) {
     return true;
   }
   auto& model = m_page.browser().model();
@@ -273,6 +398,12 @@ bool FileKeyboardController::listKey(const KeyboardEvent& event) {
         const auto* entry = model.entry(*selection.focused);
         if (entry) {
           request.targets.push_back({entry->id, entry->location()});
+        }
+      }
+      if (request.targets.size() == 1) {
+        const auto* entry = model.entry(request.targets.front().id);
+        if (entry != nullptr && entry->type == luciole::FileType::Directory) {
+          selectFirstOnLoad();
         }
       }
       m_page.dispatchAction(Action::Open, request);
@@ -327,6 +458,7 @@ bool FileKeyboardController::listKey(const KeyboardEvent& event) {
               : luciole::SelectionMode::Replace
     );
   }
+  m_pendingCursor.reset();
   m_keyboardReveal = id;
   return true;
 }

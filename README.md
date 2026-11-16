@@ -1,8 +1,11 @@
 # Luciole
 
-Luciole is a native Wayland file manager with grid, list and Miller column views, tabs, split view and file previews.
+A native Wayland file manager built to stay smooth: quick to start, fluid when scrolling through large folders, and previews that never block the window.
 
-It is built in C++23 on Wayland and OpenGL ES.
+It offers grid, list and Miller column views, tabs, split view and rich file previews, and runs on any Wayland compositor. It also serves as the Open and Save file picker for other applications through xdg-desktop-portal. It pairs naturally with [Noctalia](https://github.com/noctalia-dev/noctalia) and [Umbriel](https://github.com/noctalia-dev/umbriel). Under the hood: C++23, direct Wayland and OpenGL ES, with no Qt or GTK.
+
+> [!IMPORTANT]
+> Luciole is young and actively evolving. It is usable today, but settings, shortcuts and behavior may change between releases, and rough edges remain.
 
 <p align="center">
   <img src="assets/icons/dev.noctalia.luciole.svg" alt="Luciole Logo" width="192" />
@@ -23,50 +26,49 @@ It is built in C++23 on Wayland and OpenGL ES.
   </a>
 </p>
 
+## Why Luciole?
+
+We wanted a file manager that responds as fast as we can move. Folders with thousands of files should open and scroll without a stutter, thumbnails should fill in as you go instead of freezing the view, and a second window should not cost a second application.
+
+That shaped how Luciole is built:
+
+- **GPU rendering:** the interface draws directly through OpenGL ES, so scrolling, zooming and resizing stay fluid even with many thumbnails on screen.
+- **Nothing blocks the window:** folder listing, file operations and thumbnail decoding run in the background, and image decoding happens in sandboxed helper processes.
+- **One process, many windows:** every window shares a single process, so extra windows and tabs stay light on memory.
+- **Shared caches:** thumbnails are reused from the standard freedesktop cache, so folders you have already browsed in other file managers appear instantly.
+
+It also aims to be complete enough for everyday work with archives, network shares and large photo folders, while staying consistent with the rest of the Noctalia family.
+
+To understand the values and philosophy guiding the project, read our [ethos](https://noctalia.dev/ethos).
+
 ## Features
 
-- **Browsing:** grid, list and optional Miller columns, with tabs, separate windows, split view, adjustable zoom and sortable detail columns.
-- **Navigation and search:** clickable breadcrumbs, path completion, recursive filename search and instant filtering of the current folder.
-- **Thumbnails and previews:** image and video thumbnails, previews for images, text, PDF pages and video stills, plus file and media metadata.
-- **File operations:** copy, move, links, batch rename, folder merging, conflict choices, Trash and restoration, with [Undo/Redo for supported operations](docs/user/file-operations.md#undo-and-redo).
-- **Archives:** browse, create and extract archives, with password prompts for [supported encrypted formats](docs/user/file-operations.md#archives).
-- **Places:** a customizable sidebar with shared desktop bookmarks, mounted drives and optional folder trees.
-- **Desktop integration:** mounted SFTP, SMB and WebDAV locations, Open With, terminal actions, custom scripts and an optional [file-picker portal backend](PACKAGING.md#filechooser-portal-backend) for Open and Save dialogs.
-- **Configuration:** built-in settings, automatically reloaded TOML preferences, desktop icon themes and configurable colors.
-
-Luciole is under active development. The [user guide](docs/user/index.md) describes current behavior.
+- **Browsing:** grid, list and optional Miller columns, with tabs, separate windows, split view, adjustable zoom and sortable detail columns
+- **Navigation and search:** clickable breadcrumbs, path completion, recursive filename search and instant filtering of the current folder
+- **Thumbnails and previews:** images, video, text and PDF pages, plus file and media metadata
+- **File operations:** copy, move, links, batch rename, folder merging, conflict choices, Trash and restoration, with [Undo and Redo](docs/user/file-operations.md#undo-and-redo)
+- **Archives:** browse, create and extract, with password prompts for [encrypted formats](docs/user/file-operations.md#archives)
+- **Places:** a customizable sidebar with shared bookmarks, mounted drives and optional folder trees
+- **File picker:** a [portal backend](PACKAGING.md#filechooser-portal-backend) that gives every application Luciole's Open and Save dialogs; [xdg-desktop-portal-umbriel](https://github.com/noctalia-dev/xdg-desktop-portal-umbriel) selects it automatically when installed, and other desktops can enable it in `portals.conf`
+- **Desktop integration:** SFTP, SMB and WebDAV locations, Open With, terminal actions and [custom scripts](docs/user/scripts.md)
+- **Configuration:** built-in settings, live-reloaded TOML, icon themes and configurable colors
 
 ## Install and run
 
-See the [installation guide](docs/user/installation.md) for setup and startup, and [PACKAGING.md](PACKAGING.md) for build dependencies and distribution integration. Luciole needs a Wayland session with EGL/OpenGL ES support. Trash and network locations use GIO/GVfs and a session D-Bus connection; media and archive helpers are listed in the packaging guide.
-
-Launch Luciole from your application menu, or open a folder from the terminal:
+See the [installation guide](docs/user/installation.md) for Arch Linux dependencies, source builds and Nix. Then launch Luciole from your application menu, or from a terminal:
 
 ```sh
 luciole
 luciole ~/Downloads
 ```
 
-For source builds, follow the [Meson build instructions](PACKAGING.md#build). Development commands and checks are covered in [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Configuration
 
-Open Settings with Ctrl+, or from the main menu. Changes save automatically and apply without restarting.
-
-For manual configuration, use `~/.config/luciole/config.toml`. Preferences changed in the UI are stored separately in `settings.toml`. The [configuration guide](docs/user/configuration.md) explains paths, precedence and available preferences.
-
-## Documentation
-
-- [User guide](docs/user/index.md): browsing, selection, views, settings and file actions.
-- [Design notes](docs/design/README.md): architecture and implementation contracts.
-- [Packaging](PACKAGING.md): dependencies, runtime providers, installed files and distribution integration.
-- [Contributing](CONTRIBUTING.md): development builds, code style and checks.
+Open Settings with Ctrl+, or from the main menu; changes apply immediately. For manual configuration, use `~/.config/luciole/config.toml`. The [configuration guide](docs/user/configuration.md) covers every preference.
 
 ## Contributing
 
-Bug reports, fixes and documentation improvements are welcome. Use the [issue tracker](https://github.com/noctalia-dev/luciole/issues) for bugs and feature requests, and [Discord](https://discord.noctalia.dev) for help and discussion. For bug reports, include your Luciole version, distribution and steps to reproduce the issue.
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development builds, code style and checks, and the [design notes](docs/design/README.md) for architecture. Bug reports are always welcome on the [issue tracker](https://github.com/noctalia-dev/luciole/issues); help and discussion happen on [Discord](https://discord.noctalia.dev).
 
 ## License
 

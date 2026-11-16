@@ -112,9 +112,7 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
                    return;
                  }
                  m_page.browser().submitSearchQuery();
-                 if (!m_page.browser().model().rows().empty()) {
-                   m_page.dispatcher().setFocus(m_page.fileList()->focusArea());
-                 }
+                 focusResults();
                },
            .configure =
                [this](Input& input) {
@@ -281,6 +279,28 @@ bool LocationBarController::escapeKey(const KeyboardEvent& event) {
     return true;
   }
   return false;
+}
+
+bool LocationBarController::filterKey(const KeyboardEvent& event) {
+  if (!event.pressed
+      || event.preedit
+      || event.modifiers != 0
+      || !KeySymbol::isDown(event.sym)
+      || m_filterInput == nullptr
+      || m_page.dispatcher().focusedArea() != m_filterInput->inputArea()
+      || m_filterInput->composing()
+      || m_page.browser().model().rows().empty()) {
+    return false;
+  }
+  focusResults();
+  return true;
+}
+
+void LocationBarController::focusResults() {
+  if (!m_page.browser().model().rows().empty()) {
+    m_page.dispatcher().setFocus(m_page.fileList()->focusArea());
+    m_keys.selectFirstIfNone();
+  }
 }
 
 bool LocationBarController::syncLocation(const std::optional<luciole::Location>& location) {

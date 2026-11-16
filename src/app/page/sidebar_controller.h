@@ -66,6 +66,8 @@ public:
   void configureCallbacks();
   // Pins or devices changed: rebuild the list on the next layout.
   void markDirty() { m_placesDirty = true; }
+  // Drive usage changed: updates the usage bars in place.
+  void updateDriveUsage();
   // Focuses the entry for `location` once no popup or overlay is open.
   void focusPlace(luciole::Location location) { m_restorePlaceFocus = std::move(location); }
   // Pins `bookmarks` before the pin at `before`, or reports why pins cannot change.

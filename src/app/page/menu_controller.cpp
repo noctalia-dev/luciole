@@ -779,6 +779,7 @@ void MenuController::openMenu() {
   entries.push_back({.label = "", .separator = true});
   entries.push_back(actionEntry(Action::Operations, request));
   entries.push_back(actionEntry(Action::Settings, request));
+  entries.push_back(actionEntry(Action::KeyboardShortcuts, request));
   entries.push_back(actionEntry(Action::About, request));
   showContextMenu(
       std::move(entries),

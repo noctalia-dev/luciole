@@ -100,7 +100,7 @@ namespace {
     }
 
     void bind(
-        const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool focused, bool hovered,
+        const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool ring, bool hovered,
         luciole::DetailsColumns columns, luciole::DetailsColumnOrder order, bool cut, bool path,
         luciole::BrowsePresentation presentation, bool readOnly, const luciole::TreeRowInfo& tree
     ) {
@@ -143,7 +143,7 @@ namespace {
       m_background->setFill(
           !selected && (hovered || path) ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec()
       );
-      if (!selected && focused) {
+      if (ring) {
         m_background->setBorder(colorSpecFromRole(ColorRole::Primary), Style::focusRingWidth);
       } else {
         m_background->clearBorder();
@@ -246,7 +246,7 @@ namespace {
     }
 
     void bind(
-        const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool focused, bool hovered,
+        const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool ring, bool hovered,
         float iconSize, bool cut, luciole::BrowsePresentation presentation, bool readOnly
     ) {
       m_icon->setOpacity(cut ? 0.4F : entry.hidden ? kHiddenIconOpacity : 1.0F);
@@ -280,7 +280,7 @@ namespace {
       m_background->setFill(
           !selected && hovered ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec()
       );
-      if (!selected && focused) {
+      if (ring) {
         m_background->setBorder(colorSpecFromRole(ColorRole::Primary), Style::focusRingWidth);
       } else {
         m_background->clearBorder();
@@ -402,15 +402,17 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
   if (entry != nullptr) {
     const bool readOnly = luciole::entryAccess(*entry).write == false || m_readOnly == true;
     const bool selected = m_columnActive && model.selection().selected.contains(id);
-    const bool focused = selected || (m_focused() && model.selection().focused == id);
+    // The keyboard cursor stays visible inside a multi-selection; a lone selected item shows only its fill.
+    const auto& selection = model.selection();
+    const bool ring = m_focused() && selection.focused == id && (!selected || selection.selected.size() != 1);
     if (m_mode == ViewMode::Grid) {
       static_cast<FileTile&>(tile).bind(
-          *entry, model.typeLabel(id), selected, focused, hovered, m_gridIconSize, m_cut && m_cut(entry->location()),
+          *entry, model.typeLabel(id), selected, ring, hovered, m_gridIconSize, m_cut && m_cut(entry->location()),
           m_presentation, readOnly
       );
     } else {
       static_cast<FileRow&>(tile).bind(
-          *entry, model.typeLabel(id), selected, focused, hovered, m_columns, m_columnOrder,
+          *entry, model.typeLabel(id), selected, ring, hovered, m_columns, m_columnOrder,
           m_cut && m_cut(entry->location()), m_pathEntry == id && !m_columnActive, m_presentation, readOnly,
           m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}
       );

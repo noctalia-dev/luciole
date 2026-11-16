@@ -8,7 +8,7 @@ namespace luciole {
   inline constexpr std::size_t kMaxEncodedImageBytes = 64U * 1024U * 1024U;
   // Default decoded pixel budget for images shown in the UI.
   inline constexpr std::uint64_t kMaxImagePixels = 16U * 1024U * 1024U;
-  // Upper bound for any caller-supplied decoded pixel budget.
+  // Upper bound for a caller-supplied PNG pixel budget.
   inline constexpr std::uint64_t kMaxImagePixelBudget = 64'000'000;
   inline constexpr int kMaxImageSide = 8192;
   inline constexpr double kMaxSvgSourceSide = 32768.0;

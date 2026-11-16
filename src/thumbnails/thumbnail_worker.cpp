@@ -1,9 +1,11 @@
 #include "thumbnails/thumbnail_worker.h"
 
 #include "fs/gio_ptr.h"
+#include "imaging/image_limits.h"
 #include "imaging/raster_decoder.h"
 #include "imaging/svg_rasterizer.h"
 #include "model/thumbnail_options.h"
+#include "thumbnails/provider_process.h"
 
 #include <algorithm>
 #include <array>
@@ -35,7 +37,7 @@ namespace {
 } // namespace
 
 int luciole::runThumbnailWorker(std::span<const std::string_view> arguments) {
-  if (arguments.size() != 5) {
+  if (arguments.size() != 4) {
     return 2;
   }
   const auto number = [](std::string_view input) -> std::optional<std::uint64_t> {
@@ -43,15 +45,8 @@ int luciole::runThumbnailWorker(std::span<const std::string_view> arguments) {
     const auto parsed = std::from_chars(input.data(), input.data() + input.size(), value);
     return parsed.ec == std::errc{} && parsed.ptr == input.data() + input.size() ? std::optional(value) : std::nullopt;
   };
-  const auto side = number(arguments[0]), pixels = number(arguments[1]), maximum = number(arguments[2]);
-  if (!side
-      || *side < 1
-      || *side > kMaxPreviewImageSide
-      || !pixels
-      || *pixels < 1
-      || *pixels > 64'000'000
-      || !maximum
-      || *maximum > 1024U * 1024U * 1024U) {
+  const auto side = number(arguments[0]), maximum = number(arguments[1]);
+  if (!side || *side < 1 || *side > kMaxPreviewImageSide || !maximum || *maximum > 1024U * 1024U * 1024U) {
     return 2;
   }
   struct stat info{};
@@ -72,15 +67,18 @@ int luciole::runThumbnailWorker(std::span<const std::string_view> arguments) {
       offset += static_cast<std::size_t>(count);
     }
     const GioPtr<GCancellable> cancel(g_cancellable_new());
-    auto image = arguments[3] == "image/svg+xml" || arguments[3] == "image/svg+xml-compressed"
-        ? rasterizeSvg(bytes, static_cast<int>(*side), false, *pixels)
-        : decodeRasterImage(bytes, static_cast<int>(*side), *pixels, cancel.get(), arguments[3]);
+    // No source pixel policy: a decode whose RGBA frame cannot fit the helper memory limit fails there anyway.
+    auto image = arguments[2] == "image/svg+xml" || arguments[2] == "image/svg+xml-compressed"
+        ? rasterizeSvg(
+              bytes, static_cast<int>(*side), false, static_cast<std::uint64_t>(kMaxSvgSourceSide * kMaxSvgSourceSide)
+          )
+        : decodeRasterImage(bytes, static_cast<int>(*side), kProviderMemoryBytes / 4, cancel.get(), arguments[2]);
     if (!image) {
       // Keep backend diagnostics bounded and on one line; never send the source filename.
       auto message = image.error().substr(0, 768);
       std::ranges::replace_if(message, [](unsigned char c) { return c < 32 || c > 126; }, '?');
       constexpr std::array<std::uint8_t, 4> header{'N', 'F', 'E', '1'};
-      (void)writeResult(arguments[4], header, {reinterpret_cast<const std::uint8_t*>(message.data()), message.size()});
+      (void)writeResult(arguments[3], header, {reinterpret_cast<const std::uint8_t*>(message.data()), message.size()});
       return 1;
     }
     // Private parent/child transport avoids PNG compression followed immediately by decoding.
@@ -89,7 +87,7 @@ int luciole::runThumbnailWorker(std::span<const std::string_view> arguments) {
       header[4 + i] = static_cast<std::uint8_t>(static_cast<std::uint32_t>(image->width) >> (24 - i * 8));
       header[8 + i] = static_cast<std::uint8_t>(static_cast<std::uint32_t>(image->height) >> (24 - i * 8));
     }
-    return writeResult(arguments[4], header, image->rgba) ? 0 : 1;
+    return writeResult(arguments[3], header, image->rgba) ? 0 : 1;
   } catch (const std::exception&) {
     return 1;
   }

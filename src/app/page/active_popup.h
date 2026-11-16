@@ -23,6 +23,7 @@ public:
     PlaceRename,
     Properties,
     About,
+    KeyboardShortcuts,
     QuickPreview,
     Applications,
     TransferConflict,

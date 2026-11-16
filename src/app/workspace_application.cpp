@@ -138,6 +138,12 @@ WorkspaceApplication::WorkspaceApplication(
       page->placesChanged();
     }
   });
+  m_drives.setUsageChangedCallback([this] {
+    for (auto& [id, page] : m_pages) {
+      (void)id;
+      page->driveUsageChanged();
+    }
+  });
   m_icons.setChangedCallback([this] {
     for (auto& [id, page] : m_pages) {
       (void)id;
@@ -167,6 +173,7 @@ WorkspaceApplication::~WorkspaceApplication() {
   m_preferences.setChangedCallback({});
   m_pins.setChangedCallback({});
   m_drives.setChangedCallback({});
+  m_drives.setUsageChangedCallback({});
   m_icons.setChangedCallback({});
   m_thumbnails.setChangedCallback({});
   for (auto& [id, host] : m_hosts) {

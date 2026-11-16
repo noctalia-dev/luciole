@@ -65,7 +65,6 @@ std::vector<luciole::UserPlace> luciole::configuredUserPlaces() {
     }
   }
   result.push_back({{.label = "Trash", .location = Location::trash()}, "trash"});
-  result.push_back({{.label = "File System", .location = Location::fromPath("/")}, "database"});
   return result;
 }
 

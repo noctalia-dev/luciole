@@ -550,6 +550,13 @@ namespace {
             == luciole::AtomicWriteState::Durable
         && config.settings().browser.showPreview
     );
+    // File picker windows keep their own preview visibility, hidden by default.
+    TEST_CHECK(!config.settings().browser.chooserShowPreview);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{P::ChooserShowPreview, true}})
+        == luciole::AtomicWriteState::Durable
+    );
+    TEST_CHECK(config.settings().browser.chooserShowPreview && config.settings().browser.showPreview);
     fixture.write("config.toml", "[browser]\nshow_preview = 'true'\n");
     TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
     fixture.write("config.toml", "[browser]\npreview_width = 444\nshow_preview = true\n");
@@ -952,46 +959,40 @@ namespace {
     using P = luciole::BrowserPreference;
     Fixture fixture;
     fixture.write(
-        "config.toml",
-        "[browser]\nthumbnail_policy = 'all'\nthumbnail_max_file_mib = 128\nthumbnail_max_megapixels = "
-        "24\nthumbnail_cache_mib = 256\n"
+        "config.toml", "[browser]\nthumbnail_policy = 'all'\nthumbnail_max_file_mib = 128\nthumbnail_cache_mib = 256\n"
     );
     luciole::ConfigService config(fixture.paths());
     TEST_CHECK(
         (config.reload()
-         && config.settings().browser.thumbnails
-             == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::All, 128, 24, 256})
+         && config.settings().browser.thumbnails == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::All, 128, 256})
     );
     const std::array edits{
         luciole::OverrideEdit{P::ThumbnailPolicy, luciole::ThumbnailPolicy::Never},
-        luciole::OverrideEdit{P::ThumbnailMaxFileMib, 512}, luciole::OverrideEdit{P::ThumbnailMaxMegapixels, 48},
-        luciole::OverrideEdit{P::ThumbnailCacheMib, 512}
+        luciole::OverrideEdit{P::ThumbnailMaxFileMib, 512}, luciole::OverrideEdit{P::ThumbnailCacheMib, 512}
     };
     TEST_CHECK(config.saveOverrides(edits) == luciole::AtomicWriteState::Durable);
     const auto loaded = luciole::loadSettings(fixture.paths());
-    TEST_CHECK((
-        loaded && loaded->browser.thumbnails == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::Never, 512, 48, 512}
-    ));
+    TEST_CHECK(
+        (loaded && loaded->browser.thumbnails == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::Never, 512, 512})
+    );
     const std::array reset{
         luciole::OverrideEdit{P::ThumbnailPolicy, std::nullopt},
         luciole::OverrideEdit{P::ThumbnailMaxFileMib, std::nullopt},
-        luciole::OverrideEdit{P::ThumbnailMaxMegapixels, std::nullopt},
         luciole::OverrideEdit{P::ThumbnailCacheMib, std::nullopt}
     };
     TEST_CHECK(
         (config.saveOverrides(reset) == luciole::AtomicWriteState::Durable
-         && config.settings().browser.thumbnails
-             == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::All, 128, 24, 256})
+         && config.settings().browser.thumbnails == luciole::ThumbnailOptions{luciole::ThumbnailPolicy::All, 128, 256})
     );
     for (const auto* invalid :
          {"thumbnail_policy = true", "thumbnail_policy = 'remote'", "thumbnail_max_file_mib = 0",
-          "thumbnail_max_file_mib = 1025", "thumbnail_max_megapixels = 0", "thumbnail_max_megapixels = 65",
-          "thumbnail_cache_mib = 15", "thumbnail_cache_mib = 1025", "thumbnail_max_file_mib = 1.5"}) {
+          "thumbnail_max_file_mib = 1025", "thumbnail_cache_mib = 15", "thumbnail_cache_mib = 1025",
+          "thumbnail_max_file_mib = 1.5"}) {
       fixture.write("config.toml", std::string("[browser]\n") + invalid + "\n");
       TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
     }
     fixture.write("config.toml", "");
-    for (const auto preference : {P::ThumbnailMaxFileMib, P::ThumbnailMaxMegapixels, P::ThumbnailCacheMib}) {
+    for (const auto preference : {P::ThumbnailMaxFileMib, P::ThumbnailCacheMib}) {
       const std::array invalid{luciole::OverrideEdit{preference, -1}};
       TEST_CHECK(config.saveOverrides(invalid) == luciole::AtomicWriteState::NotCommitted);
     }

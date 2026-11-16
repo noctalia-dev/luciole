@@ -63,7 +63,7 @@ namespace {
         ::_exit(1);
       }
     }
-    const rlimit cpu{5, 5}, memory{768U * 1024U * 1024U, 768U * 1024U * 1024U},
+    const rlimit cpu{5, 5}, memory{luciole::kProviderMemoryBytes, luciole::kProviderMemoryBytes},
         file{limits.fileBytes, limits.fileBytes};
     if (::setrlimit(RLIMIT_CPU, &cpu) < 0) {
       ::_exit(1);

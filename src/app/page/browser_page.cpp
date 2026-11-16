@@ -368,6 +368,11 @@ void BrowserPage::placesChanged() {
   m_surface->requestUpdate();
 }
 
+void BrowserPage::driveUsageChanged() {
+  m_sidebar.updateDriveUsage();
+  m_surface->requestUpdate();
+}
+
 void BrowserPage::clipboardChanged() {
   m_browserDirty = true;
   m_surface->requestUpdate();
@@ -379,7 +384,8 @@ const std::vector<luciole::Bookmark>* BrowserPage::draggedFolders() const { retu
 
 luciole::FileDropTarget BrowserPage::externalDrop(float x, float y, const std::vector<luciole::Bookmark>* pins) {
   m_dragDrop.clearExternalDrop();
-  if (!m_visible || overlay() || popup() || actionContext().operationsBusy) {
+  // A file picker returns files to its caller; it never receives transfers.
+  if (!m_visible || choosing() || overlay() || popup() || actionContext().operationsBusy) {
     return {};
   }
   m_pointerX = x;
@@ -490,7 +496,20 @@ bool BrowserPage::popup() const { return m_popupSurface != nullptr; }
 
 bool BrowserPage::overlay() const { return m_archiveController.open(); }
 
-bool BrowserPage::previewVisible() const { return m_savedSettings.showPreview && !overlay(); }
+bool BrowserPage::previewEnabled() const {
+  return choosing() ? m_savedSettings.chooserShowPreview : m_savedSettings.showPreview;
+}
+
+bool BrowserPage::previewVisible() const { return previewEnabled() && !overlay(); }
+
+void BrowserPage::togglePreview() {
+  const bool shown = !previewEnabled();
+  (choosing() ? m_savedSettings.chooserShowPreview : m_savedSettings.showPreview) = shown;
+  m_preferences.submit(
+      {{choosing() ? luciole::BrowserPreference::ChooserShowPreview : luciole::BrowserPreference::ShowPreview, shown}}
+  );
+  m_surface->requestLayout();
+}
 
 int BrowserPage::previewWidth() const { return m_savedSettings.previewWidth; }
 
@@ -1007,6 +1026,9 @@ void BrowserPage::keyboard(const KeyboardEvent& event) {
     if (m_settingsController.key(event)) {
       return;
     }
+    if (m_shortcutsController.key(event)) {
+      return;
+    }
     m_menuController.key(event);
     return;
   }
@@ -1090,10 +1112,22 @@ bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
   if (m_fileKeys.preeditKey(event)) {
     return true;
   }
-  if (m_locationBar.menuKey(event) || m_locationBar.completionKey(event)) {
+  if (m_locationBar.menuKey(event) || m_locationBar.completionKey(event) || m_locationBar.filterKey(event)) {
     return true;
   }
   if (windowKey(event) || m_locationBar.escapeKey(event)) {
+    return true;
+  }
+  // Escape anywhere else in the page returns to the file list.
+  if (!editing
+      && event.modifiers == 0
+      && KeySymbol::isEscape(event.sym)
+      && m_list != nullptr
+      && dispatcher().focusedArea() != m_list->focusArea()) {
+    focusFileList();
+    m_fileKeys.focusEntered();
+    m_browserDirty = true;
+    m_surface->requestUpdate();
     return true;
   }
   if (navigationKey(event, editing)) {
@@ -1108,7 +1142,7 @@ bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
   if (m_list != nullptr
       && dispatcher().focusedArea() == m_list->focusArea()
       && (millerKey(event) || m_fileKeys.listKey(event))) {
-    m_fileKeys.setKeyboardFocus(!KeySymbol::isEscape(event.sym));
+    m_fileKeys.setKeyboardFocus(true);
     m_browserDirty = true;
     m_surface->requestUpdate();
     return true;
@@ -1119,6 +1153,10 @@ bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
 bool BrowserPage::windowKey(const KeyboardEvent& event) {
   if (KeySymbol::isTab(event.sym)) {
     (void)dispatcher().cycleTabFocus((event.modifiers & KeyMod::Shift) != 0);
+    if (m_list != nullptr && dispatcher().focusedArea() == m_list->focusArea()) {
+      m_fileKeys.focusEntered();
+      m_browserDirty = true;
+    }
     m_surface->requestRedraw();
     return true;
   }
@@ -1130,7 +1168,7 @@ bool BrowserPage::windowKey(const KeyboardEvent& event) {
     m_surface->close();
     return true;
   }
-  if (dispatchShortcut(event, {Action::Settings})) {
+  if (dispatchShortcut(event, {Action::Settings, Action::KeyboardShortcuts})) {
     return true;
   }
   if (luciole::shortcutMatches(Action::EditLocation, event.sym, event.modifiers) && m_locationBar.hasLocationInput()) {
@@ -1157,7 +1195,9 @@ bool BrowserPage::navigationKey(const KeyboardEvent& event, bool editing) {
   if (!editing && zoomFromKey(event)) {
     return true;
   }
-  if (!editing && !event.repeat && dispatchShortcut(event, {Action::ShowSidebar, Action::CreateFolder})) {
+  if (!editing
+      && !event.repeat
+      && dispatchShortcut(event, {Action::ShowSidebar, Action::CreateFolder, Action::CreateFile})) {
     return true;
   }
   return false;
@@ -1167,13 +1207,15 @@ bool BrowserPage::millerKey(const KeyboardEvent& event) {
   if (m_miller.enabled() && event.modifiers == 0 && (event.sym == XKB_KEY_Left || event.sym == XKB_KEY_Right)) {
     const bool next = (event.sym == XKB_KEY_Right) != Style::rtl();
     if (next) {
+      m_fileKeys.selectFirstOnLoad();
       if (m_miller.enter()) {
         focusMiller(m_miller.focused());
         m_millerFocusPending = true;
+      } else {
+        m_fileKeys.cancelPendingCursor();
       }
-    } else if (m_miller.focused() > 0) {
-      focusMiller(m_miller.focused() - 1);
-      dispatcher().setFocus(m_list->focusArea());
+    } else if (actionState(Action::Up, actionRequest(false)).enabled) {
+      dispatchAction(Action::Up);
     }
     return true;
   }
@@ -1196,7 +1238,7 @@ luciole::ActionContext BrowserPage::actionContext() const {
       .pinned = [this](const auto& location) { return m_pins.contains(location); },
       .viewMode = m_viewMode,
       .showSidebar = m_sidebar.visible(),
-      .showPreview = m_savedSettings.showPreview,
+      .showPreview = previewEnabled(),
       .clipboardAvailable = m_clipboard.available(),
       .clipboardHasFiles = m_clipboard.hasFiles(),
       .terminalAvailable = m_terminal.available(),
@@ -1311,13 +1353,7 @@ void BrowserPage::runAction(
   static constexpr auto kHandlers = std::to_array<Handler>({
       {Action::Back, [](BrowserPage& page, const Call&) { (void)page.browser().back(); }},
       {Action::Forward, [](BrowserPage& page, const Call&) { (void)page.browser().forward(); }},
-      {Action::Up,
-      [](BrowserPage& page, const Call&) {
-        // Selects the folder just left once the parent loads.
-        if (auto current = page.browser().model().snapshot().location; page.browser().up()) {
-          page.revealOnReload({std::move(*current)});
-        }
-      }},
+      {Action::Up, [](BrowserPage& page, const Call&) { page.leaveFolder(); }},
       {Action::Home, [](BrowserPage& page, const Call&) { page.browser().home(); }},
       {Action::Root, [](BrowserPage& page, const Call&) { page.browser().open(luciole::Location::fromPath("/")); }},
       {Action::Refresh, [](BrowserPage& page, const Call&) { page.browser().refresh(); }},
@@ -1329,12 +1365,7 @@ void BrowserPage::runAction(
       {Action::Miller, [](BrowserPage& page, const Call&) { page.setViewMode(luciole::ViewMode::Miller); }},
       {Action::ShowHidden, [](BrowserPage& page, const Call&) { page.toggleHidden(); }},
       {Action::ShowSidebar, [](BrowserPage& page, const Call&) { page.m_sidebar.setVisible(!page.m_sidebar.visible()); }},
-      {Action::ShowPreview,
-       [](BrowserPage& page, const Call&) {
-         page.m_savedSettings.showPreview = !page.m_savedSettings.showPreview;
-         page.m_preferences.submit({{luciole::BrowserPreference::ShowPreview, page.m_savedSettings.showPreview}});
-         page.m_surface->requestLayout();
-       }},
+      {Action::ShowPreview, [](BrowserPage& page, const Call&) { page.togglePreview(); }},
       {Action::QuickPreview, [](BrowserPage& page, const Call&) { page.m_previewController.showQuickPreview(); }},
       {Action::OpenWith,
        [](BrowserPage& page, const Call& call) { page.m_applicationChooser.show(call.targets); }},
@@ -1432,6 +1463,7 @@ void BrowserPage::runAction(
       {Action::Operations, [](BrowserPage& page, const Call&) { page.m_operations.open(); }},
       {Action::TargetTerminal,
        [](BrowserPage& page, const Call& call) { page.openTerminal(call.targets.front().location()); }},
+      {Action::KeyboardShortcuts, [](BrowserPage& page, const Call&) { page.m_shortcutsController.open(); }},
   });
   static_assert(luciole::actionTableInOrder(kHandlers));
   kHandlers[std::to_underlying(action)].run(*this, {.action = action, .request = request, .targets = targets});
@@ -1600,6 +1632,17 @@ void BrowserPage::setActionMessage(std::string message) { m_statusBar.setMessage
 
 void BrowserPage::revealOnReload(std::vector<luciole::Location> targets) { m_revealTargets = std::move(targets); }
 
+void BrowserPage::leaveFolder() {
+  if (m_miller.enabled() && m_miller.focused() > 0) {
+    focusMiller(m_miller.focused() - 1);
+    dispatcher().setFocus(m_list->focusArea());
+    return;
+  }
+  if (auto current = browser().model().snapshot().location; browser().up()) {
+    revealOnReload({std::move(*current)});
+  }
+}
+
 void BrowserPage::restorePlaceFocus(luciole::Location location) { m_sidebar.focusPlace(std::move(location)); }
 
 PageJobs& BrowserPage::jobs() { return m_jobs; }
@@ -1648,6 +1691,16 @@ bool BrowserPage::requestCurrent(const luciole::ActionRequest& request, luciole:
 }
 
 bool BrowserPage::operationsBusy() const { return actionContext().operationsBusy; }
+
+std::vector<std::string> BrowserPage::runningJobTitles() const {
+  std::vector<std::string> titles;
+  for (const auto& activity : m_hub.activities()) {
+    if (!activity.finished) {
+      titles.push_back(activity.title);
+    }
+  }
+  return titles;
+}
 
 bool BrowserPage::visible() const { return m_visible; }
 
@@ -1909,6 +1962,7 @@ void BrowserPage::syncBrowser() {
     m_detailsHeader.setOffset(0);
     m_fileKeys.resetReveal();
   }
+  m_fileKeys.applyPendingCursor();
   m_browser.setExpandableFolders(
       m_savedSettings.expandableFolders && m_viewMode == luciole::ViewMode::List && !m_miller.enabled()
   );
@@ -2350,11 +2404,17 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::segmented(
               {.out = &m_viewSwitch,
                .options =
-                   std::vector<ui::SegmentedOption>{
-                       {.label = "", .glyph = "layout-grid", .tooltip = "Grid view (Ctrl+1)"},
-                       {.label = "", .glyph = "list", .tooltip = "List view (Ctrl+2)"},
-                       {.label = "", .glyph = "columns-3", .tooltip = "Column view (Ctrl+3)"}
-                   },
+                   [this] {
+                     std::vector<ui::SegmentedOption> views{
+                         {.label = "", .glyph = "layout-grid", .tooltip = "Grid view (Ctrl+1)"},
+                         {.label = "", .glyph = "list", .tooltip = "List view (Ctrl+2)"}
+                     };
+                     // Column view is unavailable while choosing files.
+                     if (!choosing()) {
+                       views.push_back({.label = "", .glyph = "columns-3", .tooltip = "Column view (Ctrl+3)"});
+                     }
+                     return views;
+                   }(),
                .selectedIndex = m_viewMode == luciole::ViewMode::Grid ? 0U
                    : m_viewMode == luciole::ViewMode::List            ? 1U
                                                                       : 2U,

@@ -12,6 +12,7 @@
 #include <utility>
 
 namespace luciole {
+  class BrowserController;
   class MillerColumns;
 } // namespace luciole
 
@@ -31,12 +32,21 @@ public:
   );
 
   void setTypingMode(luciole::TypingMode mode) { m_typingMode = mode; }
-  // True while the list shows the keyboard focus ring.
+  // True while the list shows the keyboard focus ring; clearing it drops a pending keyboard cursor.
   bool keyboardFocus() const { return m_fileKeyboardFocus; }
-  void setKeyboardFocus(bool focus) { m_fileKeyboardFocus = focus; }
+  void setKeyboardFocus(bool focus);
   // The item a key moved to, which the next sync scrolls into view.
   std::optional<luciole::EntryId> takeReveal() { return std::exchange(m_keyboardReveal, std::nullopt); }
   void resetReveal() { m_keyboardReveal.reset(); }
+  // Keyboard entry into a folder: selects the first row of the next visit once it loaded.
+  void selectFirstOnLoad();
+  void cancelPendingCursor() { m_pendingCursor.reset(); }
+  // BrowserPage::syncBrowser(): applies a pending keyboard cursor once the entered folder loaded.
+  void applyPendingCursor();
+  // Selects the first row when nothing is selected or focused.
+  void selectFirstIfNone();
+  // Focus moved into the list without navigating: shows the cursor ring, on the first row if there is no cursor.
+  void focusEntered();
 
   // Typed text, including the input method's preedit; empty while typeahead is idle.
   std::string typeaheadText() const { return m_typeahead.text() + m_typeaheadPreedit; }
@@ -53,7 +63,8 @@ public:
   bool preeditKey(const KeyboardEvent& event);
   // Menu, Delete, F2 and Alt+Return on the focused list.
   bool commandKey(const KeyboardEvent& event);
-  // Selection and focus movement on the focused list.
+  // Selection, cursor and folder navigation keys on the focused list (arrows, Enter, Backspace, Ctrl+Space,
+  // Ctrl+Enter).
   bool listKey(const KeyboardEvent& event);
   // Printable keys: typeahead, or opening the search field.
   bool typeKey(const KeyboardEvent& event);
@@ -66,6 +77,10 @@ public:
 
 private:
   bool listFocused() const;
+  void goUp();
+  // Folder entry and parent keys, Ctrl+Space and Ctrl+Enter.
+  bool folderKey(const KeyboardEvent& event);
+  void enterCursorFolder();
   void
   typeaheadChanged(std::optional<luciole::EntryId> match, TextInputChangeCause cause = TextInputChangeCause::Other);
   void applyTypeahead(
@@ -85,4 +100,10 @@ private:
   std::uint64_t m_typeaheadContext = 0;
   bool m_fileKeyboardFocus = false;
   std::optional<luciole::EntryId> m_keyboardReveal;
+  // The browser and visit a keyboard entry started from; the first row of the next visit is selected once loaded.
+  struct PendingCursor {
+    const luciole::BrowserController* browser;
+    std::uint64_t visit;
+  };
+  std::optional<PendingCursor> m_pendingCursor;
 };

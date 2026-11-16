@@ -1,6 +1,90 @@
 # Installation and startup
 
-Luciole needs a Wayland session with EGL/OpenGL ES support. Neither the Noctalia shell nor a particular compositor is required. Distribution dependencies and package-building details are maintained in [PACKAGING.md](../../PACKAGING.md).
+Luciole needs a Wayland session with EGL/OpenGL ES support. Neither the Noctalia shell nor a particular compositor is required.
+
+Prefer a distribution package when one is available; it provides the simplest installation and upgrade path. Otherwise, build from source as described below. Package maintainers will find dependencies and install layout in [PACKAGING.md](../../PACKAGING.md).
+
+## Arch Linux
+
+An AUR package is planned. Until it is published, follow the source build below.
+
+## Build from source
+
+Luciole builds with `just`, Meson and a C++23 compiler (GCC 13+ or Clang 16+).
+
+### Arch Linux dependencies
+
+Build and library dependencies:
+
+```sh
+sudo pacman -S --needed base-devel meson just \
+  wayland wayland-protocols libglvnd \
+  glib2 freetype2 fontconfig cairo pango harfbuzz libxkbcommon \
+  gdk-pixbuf2 glycin librsvg libpng libarchive xz acl \
+  tomlplusplus nlohmann-json stb
+```
+
+Runtime services and optional helpers:
+
+```sh
+sudo pacman -S --needed shared-mime-info gsettings-desktop-schemas dconf \
+  adwaita-icon-theme gvfs gvfs-smb gvfs-dnssd glib-networking \
+  ffmpeg ffmpegthumbnailer poppler 7zip xdg-terminal-exec
+```
+
+GVfs provides Trash and network locations; the remaining helpers enable media and PDF thumbnails, encrypted 7z archives and terminal actions. See [optional features](#optional-features).
+
+### Fedora dependencies
+
+Build and library dependencies:
+
+```sh
+sudo dnf install gcc-c++ meson just \
+  wayland-devel wayland-protocols-devel libglvnd-devel \
+  glib2-devel freetype-devel fontconfig-devel cairo-devel pango-devel harfbuzz-devel libxkbcommon-devel \
+  gdk-pixbuf2-devel glycin-devel librsvg2-devel libpng-devel libarchive-devel xz-devel libacl-devel \
+  tomlplusplus-devel json-devel stb_image_resize2-devel
+```
+
+Runtime services and optional helpers:
+
+```sh
+sudo dnf install shared-mime-info gsettings-desktop-schemas dconf \
+  adwaita-icon-theme gvfs gvfs-smb glib-networking \
+  ffmpeg-free ffmpegthumbnailer poppler-utils 7zip xdg-terminal-exec
+```
+
+Fedora's `ffmpeg-free` omits some patent-encumbered codecs; the `ffmpeg` package from [RPM Fusion](https://rpmfusion.org/) gives thumbnails for more video formats.
+
+### Other distributions
+
+Install the development packages listed in [PACKAGING.md](../../PACKAGING.md#dependencies).
+
+### Build and install
+
+```sh
+git clone https://github.com/noctalia-dev/luciole.git
+cd luciole
+just build release
+sudo just install release
+```
+
+This installs under `/usr/local`; use `just configure release /usr` before building to choose another prefix. To uninstall, run `sudo ninja -C build-release uninstall` from the same checkout.
+
+### Nix
+
+The flake provides a package and a pinned development environment:
+
+```sh
+nix build github:noctalia-dev/luciole
+./result/bin/luciole
+```
+
+It also exports NixOS, Home Manager and hjem modules. Home Manager and hjem can supply `programs.luciole.settings` as a declarative base; GUI preferences remain separate. See [configuration](configuration.md) and [Nix packaging](../../PACKAGING.md#nix-integration).
+
+### Development builds
+
+Inside the source directory, `just run release` builds and starts Luciole using the source tree's assets, without installing. Do not reuse that asset override in an installed launcher. `just` lists every recipe, and [CONTRIBUTING.md](../../CONTRIBUTING.md) covers checks and code style.
 
 ## Start Luciole
 
@@ -10,31 +94,13 @@ luciole /path/to/folder
 luciole 'file:///path/to/folder'
 ```
 
-Without an argument, Luciole opens Home. Supply one directory path or URI to start elsewhere. Remote locations require the corresponding installed GIO/GVfs backend and an already mounted/authenticated location. Luciole' own connect-to-server and credential dialogs are not implemented yet.
+Without an argument, Luciole opens Home. Supply one directory path or URI to start elsewhere. Remote locations require the corresponding installed GIO/GVfs backend and an already mounted/authenticated location. Luciole's own connect-to-server and credential dialogs are not implemented yet.
 
 Every window runs in one Luciole process. Starting `luciole` while it is already running opens a new window in that process, so additional windows cost far less memory than separate instances. A relative path names a folder under the directory where the command ran. The process exits when its last window closes.
 
-Use `luciole --help` for command syntax and `luciole --version` for the version and build revision. These commands do not open a window. Bash, Zsh and Fish completions are installed by the package; `luciole completions bash` also prints the Bash completion script.
+Use `luciole --help` for command syntax and `luciole --version` for the version and build revision. These commands do not open a window. Bash, Zsh and Fish completions are installed with Luciole; `luciole completions bash` also prints the Bash completion script.
 
-## Build from the source directory
-
-Use the pinned Nix development environment:
-
-```sh
-nix develop path:. -c just build release
-nix develop path:. -c just run release
-```
-
-The run recipe selects the source tree's assets. Do not put that development asset override in an installed launcher.
-
-To build the Nix package instead:
-
-```sh
-nix build path:.#default
-./result/bin/luciole
-```
-
-The flake exports NixOS, Home Manager and hjem modules. Home Manager and hjem can supply `programs.luciole.settings` as a declarative base; GUI preferences remain separate. See [configuration](configuration.md) and [Nix packaging](../../PACKAGING.md#nix-integration). Installing Luciole does not automatically make it the default file manager.
+Installing Luciole does not automatically make it the default file manager.
 
 ## Optional features
 

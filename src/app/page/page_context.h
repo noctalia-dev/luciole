@@ -75,6 +75,8 @@ public:
   // True while a job the page owns runs or waits (see PageJobs::busy()), or a paste waits for the clipboard;
   // actions that start a job are disabled meanwhile.
   virtual bool operationsBusy() const = 0;
+  // Titles of the file jobs running anywhere in the application.
+  virtual std::vector<std::string> runningJobTitles() const = 0;
   // True while the page is shown in its window.
   virtual bool visible() const = 0;
   // Shows `message` in the status bar.
