@@ -2,10 +2,13 @@
 
 #include "render/scene/node.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace luciole {
+  class BrowserController;
   class PinService;
 } // namespace luciole
 
@@ -52,6 +55,10 @@ private:
   SettingsController& m_settings;
   FileKeyboardController& m_keys;
   std::string m_actionError;
+  const luciole::BrowserController* m_statusBrowser = nullptr;
+  std::uint64_t m_statusContext = 0;
+  bool m_contextLoaded = false;
+  std::optional<std::uint64_t> m_freeBytes;
   Flex* m_pill = nullptr;
   Label* m_status = nullptr;
   Label* m_freeSpace = nullptr;
