@@ -97,7 +97,7 @@ void StatusBarController::sync(bool miller) {
     m_contextLoaded = true;
   }
   const bool refreshing = snapshot.status == luciole::DirectoryStatus::Loading;
-  const bool loading = refreshing && !m_contextLoaded;
+  const bool loading = refreshing && (!m_contextLoaded || snapshot.incrementalResults);
   const bool alwaysShow = m_page.settings().alwaysShowStatusBar;
   std::string status;
   // The idle folder count stays hidden unless the setting keeps the pill visible.
