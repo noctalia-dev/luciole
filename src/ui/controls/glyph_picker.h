@@ -39,7 +39,7 @@ public:
   void setOnReset(std::function<void()> callback) { m_onReset = std::move(callback); }
 
   void setEnabled(bool enabled);
-  void showError(std::string message);
+  void showError(std::string_view message);
   void tooltipPointer(float x, float y, bool arm);
   void syncTooltip(Renderer& renderer);
 

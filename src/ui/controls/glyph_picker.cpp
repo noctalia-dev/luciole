@@ -56,7 +56,7 @@ public:
         .align = FlexAlign::Center,
         .justify = FlexJustify::Center,
         .padding = 0.0F,
-        .configure = [this](Flex& flex) {
+        .configure = [](Flex& flex) {
           flex.setRadius(Style::radiusMd);
           flex.clearBorder();
         },
@@ -281,9 +281,9 @@ void GlyphPicker::setEnabled(bool enabled) {
   setOpacity(enabled ? 1.0F : 0.55F);
 }
 
-void GlyphPicker::showError(std::string message) {
+void GlyphPicker::showError(std::string_view message) {
   if (m_selectedName != nullptr) {
-    m_selectedName->setText(std::move(message));
+    m_selectedName->setText(message);
     m_selectedName->setColor(colorSpecFromRole(ColorRole::Error));
   }
 }
