@@ -2016,7 +2016,8 @@ void BrowserPage::syncBrowser() {
   m_viewSwitch->setSelectedIndex(grid ? 0 : m_viewMode == luciole::ViewMode::List ? 1 : 2);
   const auto request = actionRequest(false);
   for (const auto& [button, action] : std::array{
-           std::pair{m_back, Action::Back}, std::pair{m_forward, Action::Forward}, std::pair{m_up, Action::Up}
+           std::pair{m_back, Action::Back}, std::pair{m_forward, Action::Forward}, std::pair{m_up, Action::Up},
+           std::pair{m_newFolderButton, Action::CreateFolder}
        }) {
     const auto state = actionState(action, request);
     button->setEnabled(state.enabled);
@@ -2029,16 +2030,6 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
-  const auto createFolderState = actionState(Action::CreateFolder, request);
-  m_newFolderButton->setEnabled(createFolderState.enabled);
-  const auto& createFolder = luciole::ActionRegistry::definition(Action::CreateFolder);
-  m_newFolderButton->setTooltip(
-      std::string(createFolder.label)
-      + " ("
-      + std::string(createFolder.shortcut)
-      + ")"
-      + (createFolderState.enabled ? "" : "\n" + std::string(createFolderState.reason))
-  );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
   const bool empty = model.rows().empty();
@@ -2422,7 +2413,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
               {.out = &m_newFolderButton,
                .glyph = "folder-plus",
                .variant = ButtonVariant::Ghost,
-               .tooltip = "New Folder (Ctrl+Shift+N)",
+               .tooltip = "New Folder… (Ctrl+Shift+N)",
                .visible = choosing(),
                .participatesInLayout = choosing(),
                .onClick = [this] { dispatchAction(Action::CreateFolder); }}
