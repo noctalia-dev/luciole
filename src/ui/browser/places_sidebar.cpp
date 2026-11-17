@@ -99,7 +99,10 @@ const luciole::Drive* luciole::PlacesSidebar::driveAt(const Location& root) cons
     return nullptr;
   }
   const auto& drives = m_drives.drives();
-  const auto found = std::ranges::find(drives, std::optional(root), &Drive::root);
+  const auto found = std::ranges::find_if(drives, [&](const Drive& drive) {
+    const auto& target = drive.activation ? drive.activation : drive.root;
+    return target == root;
+  });
   return found == drives.end() ? nullptr : &*found;
 }
 InputArea* luciole::PlacesSidebar::focusArea(const Location& location) const {
@@ -467,11 +470,12 @@ void luciole::PlacesSidebar::rebuild() {
       };
       addChild(std::move(tree));
     }
-    // The tree can only expand mounted drives; unmounted ones appear once mounted.
+    // Explicit expansion can activate an idle system automount through DirectorySession.
     std::vector<Drive> drives;
     if (m_showDrives) {
       std::ranges::copy_if(m_drives.drives(), std::back_inserter(drives), [this](const Drive& drive) {
-        return drive.root && !m_pins.contains(*drive.root);
+        const auto& target = drive.activation ? drive.activation : drive.root;
+        return target && !m_pins.contains(*target);
       });
     }
     m_tree->setRoots(m_pins, drives, m_showNetwork, m_trashFull);

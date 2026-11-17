@@ -72,6 +72,12 @@ When the server requests login, use the username, domain and password fields, or
 
 Network protocols require their installed GVfs backends and a session D-Bus connection. See [packaging requirements](../../PACKAGING.md#gvfs-and-trash). A separate connect-to-server form and process-blocked mount questions are still planned.
 
+### NFS automounts
+
+Open the share from the sidebar or enter its local mount path. Systemd mounts it using your fstab entry or native automount unit, even without `user` in fstab. The share stays in the sidebar while idle. If the automount is stopped or the NAS is unreachable, Luciole shows an error.
+
+Use **Refresh** to see folder changes.
+
 ## Views and selection
 
 [Undo/redo](file-operations.md#undo-and-redo) affects the most recent supported creation, rename or native copy/link/move in the running application, independently of the current folder or selection. When a text input is focused, its text-editing undo takes precedence.

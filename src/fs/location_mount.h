@@ -19,6 +19,8 @@ namespace luciole {
     );
     // Unlocks and mounts a device through its GIO provider, with the same prompt/cancellation lifecycle.
     void startVolume(GVolume* volume, std::function<void(std::expected<Location, FileError>)> done);
+    // Mounts a user-mountable fstab entry at its configured local path.
+    void startFstabMount(const Location& target, std::function<void(std::expected<Location, FileError>)> done);
     void cancel();
     void setChangedCallback(std::function<void()> callback);
     MountInteraction& interaction();
