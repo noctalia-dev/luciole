@@ -118,7 +118,7 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
        .paddingV = 2.0F,
        .paddingH = Style::spaceSm,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainer),
-       .radius = Style::scaledRadiusMd()},
+       .styleRadius = Style::radiusMd},
       ui::label(
           {.out = &m_mode,
            .fontSize = Style::fontSizeCaption,

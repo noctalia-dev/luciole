@@ -57,7 +57,7 @@ namespace {
     FileRow(luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails, bool miller = false)
         : m_miller(miller) {
       setHitTestVisible(false);
-      addChild(ui::box({.out = &m_background, .radius = SelectionContour::cornerRadius()}));
+      addChild(ui::box({.out = &m_background, .styleRadius = SelectionContour::kBaseCornerRadius}));
       auto icon = std::make_unique<luciole::FileIcon>(icons, 24.0F, &thumbnails);
       m_icon = icon.get();
       auto row = ui::row(
@@ -210,7 +210,7 @@ namespace {
   public:
     FileTile(luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails) {
       setHitTestVisible(false);
-      addChild(ui::box({.out = &m_background, .radius = SelectionContour::cornerRadius()}));
+      addChild(ui::box({.out = &m_background, .styleRadius = SelectionContour::kBaseCornerRadius}));
       m_icon =
           static_cast<luciole::FileIcon*>(addChild(std::make_unique<luciole::FileIcon>(icons, 48.0F, &thumbnails)));
       addChild(

@@ -64,7 +64,7 @@ namespace {
                        .align = FlexAlign::Center,
                        .paddingV = 1.0F,
                        .paddingH = Style::spaceSm,
-                       .radius = Style::scaledRadiusMd()},
+                       .styleRadius = Style::radiusMd},
                       ui::label(
                           {.out = &m_outcome, .fontSize = Style::fontSizeMini, .fontWeight = FontWeight::SemiBold}
                       )
