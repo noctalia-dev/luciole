@@ -12,6 +12,7 @@
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/browser/file_error_text.h"
+#include "ui/controls/glyph_picker.h"
 #include "ui/controls/input.h"
 #include "ui/dialogs/name_dialog.h"
 #include "wayland/popup_surface.h"
@@ -198,6 +199,79 @@ void RenameController::openPlaceRename(const luciole::Bookmark& bookmark) {
   }
 }
 
+void RenameController::openPlaceIconPicker(const luciole::Bookmark& bookmark) {
+  if (bookmark.location.isTrash() || !m_pins.editable()) {
+    return;
+  }
+  const auto found = std::ranges::find(m_pins.bookmarks(), bookmark.location, &luciole::Bookmark::location);
+  if (found == m_pins.bookmarks().end()) {
+    return;
+  }
+  const auto knownPlace = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
+    return place.bookmark.location == found->location;
+  });
+  const std::string initialGlyph = !found->iconName.empty() ? found->iconName
+      : knownPlace != m_pins.userPlaces().end()             ? knownPlace->glyphName
+                                                            : "folder";
+  auto picker = std::make_unique<GlyphPicker>([this] {
+    if (auto* popup = m_page.popupSurface()) {
+      popup->requestUpdate();
+    }
+  });
+  picker->setTitle("Choose bookmark icon");
+  picker->setInitialGlyph(initialGlyph);
+  auto* control = picker.get();
+  picker->setOnCancel([this] { m_page.dismissPopup(); });
+  picker->setOnApply([this](const GlyphPickerResult& result) { submitPlaceIcon(result.name); });
+  picker->setOnReset([this] { submitPlaceIcon({}); });
+  m_page.showDialog(std::move(picker), DialogWidth::Large);
+  if (m_page.popupSurface() != nullptr) {
+    m_page.activePopup().bind(ActivePopup::Kind::PlaceIcon, [this, location = found->location] {
+      m_placeIconPicker = nullptr;
+      m_placeIconTarget.reset();
+      m_pendingPlaceIcon.reset();
+      if (m_page.visible()) {
+        m_page.restorePlaceFocus(location);
+      }
+    });
+    m_placeIconPicker = control;
+    m_placeIconTarget = *found;
+    m_page.popupDispatcher().setFocus(control->initialFocusArea());
+  }
+}
+
+void RenameController::submitPlaceIcon(std::string iconName) {
+  if (m_placeIconPicker == nullptr || !m_placeIconTarget) {
+    return;
+  }
+  if (m_placeIconTarget->iconName == iconName) {
+    m_page.dismissPopup();
+    return;
+  }
+  m_pendingPlaceIcon = std::move(iconName);
+  m_placeIconPicker->setEnabled(false);
+  if (!m_pins.setIcon(*m_placeIconTarget, *m_pendingPlaceIcon)) {
+    m_pendingPlaceIcon.reset();
+    m_placeIconPicker->setEnabled(true);
+    const std::string error =
+        m_pins.busy() ? "Places are being saved. Try again shortly." : "This place changed. Choose an icon again.";
+    m_placeIconPicker->showError(error);
+    m_page.actionError(error);
+  }
+}
+
+void RenameController::placeIconPointer(float x, float y, bool hover) {
+  if (m_placeIconPicker != nullptr) {
+    m_placeIconPicker->tooltipPointer(x, y, hover);
+  }
+}
+
+void RenameController::syncPlaceIconTooltip(Renderer& renderer) {
+  if (m_placeIconPicker != nullptr) {
+    m_placeIconPicker->syncTooltip(renderer);
+  }
+}
+
 void RenameController::submitPlaceRename(std::string label) {
   if (m_placeEditor == nullptr || !m_placeRenameTarget) {
     return;
@@ -213,22 +287,38 @@ void RenameController::submitPlaceRename(std::string label) {
     );
     return;
   }
-  syncPlaceRename();
+  syncPlaceEditors();
 }
 
-void RenameController::syncPlaceRename() {
-  if (m_placeEditor == nullptr || !m_pendingPlaceLabel || m_pins.busy()) {
-    return;
+void RenameController::syncPlaceEditors() {
+  if (!m_pins.busy()) {
+    if (m_placeEditor != nullptr && m_pendingPlaceLabel && m_placeRenameTarget) {
+      const auto found =
+          std::ranges::find(m_pins.bookmarks(), m_placeRenameTarget->location, &luciole::Bookmark::location);
+      if (found != m_pins.bookmarks().end() && found->label == *m_pendingPlaceLabel) {
+        m_page.dismissPopup();
+      } else {
+        m_placeEditor->setSaving(false);
+        m_placeEditor->showError(
+            m_pins.error().empty() ? "This place changed. Close this dialog and try again."
+                                   : "Could not save the label. Close this dialog and try again."
+        );
+      }
+      m_pendingPlaceLabel.reset();
+    }
+    if (m_placeIconPicker != nullptr && m_pendingPlaceIcon && m_placeIconTarget) {
+      const auto found =
+          std::ranges::find(m_pins.bookmarks(), m_placeIconTarget->location, &luciole::Bookmark::location);
+      if (found != m_pins.bookmarks().end() && found->iconName == *m_pendingPlaceIcon) {
+        m_page.dismissPopup();
+      } else {
+        m_placeIconPicker->setEnabled(true);
+        const std::string error = m_pins.error().empty() ? "This place changed. Try choosing an icon again."
+                                                         : "Could not save the bookmark icon. Try again.";
+        m_placeIconPicker->showError(error);
+        m_page.actionError(error);
+      }
+      m_pendingPlaceIcon.reset();
+    }
   }
-  const auto found = std::ranges::find(m_pins.bookmarks(), m_placeRenameTarget->location, &luciole::Bookmark::location);
-  if (found != m_pins.bookmarks().end() && found->label == *m_pendingPlaceLabel) {
-    m_page.dismissPopup();
-  } else {
-    m_placeEditor->setSaving(false);
-    m_placeEditor->showError(
-        m_pins.error().empty() ? "This place changed. Close this dialog and try again."
-                               : "Could not save the label. Close this dialog and try again."
-    );
-  }
-  m_pendingPlaceLabel.reset();
 }

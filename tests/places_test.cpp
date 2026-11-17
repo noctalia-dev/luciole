@@ -34,7 +34,7 @@ namespace {
     luciole::Location location(const std::string& name) const {
       return luciole::Location::fromPath((root / name).native());
     }
-    luciole::Bookmark pin(const std::string& name) const { return {name, location(name)}; }
+    luciole::Bookmark pin(const std::string& name) const { return {name, location(name), {}}; }
   };
   class Pump {
   public:
@@ -73,7 +73,7 @@ namespace {
     const auto path = fixture.root / "document/bookmarks";
     const auto legacy = fixture.root / "document/.gtk-bookmarks";
     const auto a = fixture.pin("with space/资料");
-    const luciole::Bookmark remote{"Server work", luciole::Location::fromUri("sftp://user@example.org/missing")};
+    const luciole::Bookmark remote{"Server work", luciole::Location::fromUri("sftp://user@example.org/missing"), {}};
     const auto raw = fixture.location(std::string("raw-\xff"));
     const std::string foreign = "not-an-absolute-uri keep this\nsftp://u:secret@example.org/private hidden\n";
     const std::string initial = a.location.uri()
@@ -114,7 +114,7 @@ namespace {
     );
     TEST_CHECK(store.load() && store.bookmarks() == changed);
     const auto unchanged = read(path);
-    changed.push_back({"Unsafe", luciole::Location::fromUri("sftp://u:secret@example.org/private")});
+    changed.push_back({"Unsafe", luciole::Location::fromUri("sftp://u:secret@example.org/private"), {}});
     const auto refused = store.save(changed);
     TEST_CHECK(
         refused.state == luciole::AtomicWriteState::NotCommitted
@@ -198,7 +198,7 @@ namespace {
     const auto home = places.front().bookmark;
     const auto downloads =
         std::ranges::find(places, std::string("Downloads"), [](const auto& p) { return p.bookmark.label; })->bookmark;
-    const luciole::Bookmark trash{"Trash", luciole::Location::trash()};
+    const luciole::Bookmark trash{"Trash", luciole::Location::trash(), {}};
     const auto a = fixture.pin("a");
     const auto b = fixture.pin("b");
     TEST_CHECK(service.add({a, b, a}, service.bookmarks().size()));
@@ -280,7 +280,7 @@ namespace {
     pump.ready(service);
     TEST_CHECK(state.load() && state.state().windows == windows);
     const auto beforeUnsafe = service.bookmarks();
-    TEST_CHECK(service.add({{"private", luciole::Location::fromUri("sftp://u:secret@example.org/private")}}, 0));
+    TEST_CHECK(service.add({{"private", luciole::Location::fromUri("sftp://u:secret@example.org/private"), {}}}, 0));
     pump.ready(service);
     TEST_CHECK(!service.error().empty() && !service.error().contains("secret") && service.bookmarks() == beforeUnsafe);
     write(path, "schema_version = 999\n");

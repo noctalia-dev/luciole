@@ -744,6 +744,10 @@ void BrowserPage::pointer(const PointerEvent& event) {
         x - content->x(), y - content->y(),
         event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
     );
+    m_renameController.placeIconPointer(
+        x - content->x(), y - content->y(),
+        event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
+    );
   }
   const bool page = input == &dispatcher();
   if (page
@@ -1429,7 +1433,7 @@ void BrowserPage::runAction(
        [](BrowserPage& page, const Call& call) {
          const auto& folder = *call.request.folder;
          page.m_sidebar.pinFolders(
-             {{luciole::locationBreadcrumbs(folder).back().label, folder}}, page.m_pins.bookmarks().size()
+             {{luciole::locationBreadcrumbs(folder).back().label, folder, {}}}, page.m_pins.bookmarks().size()
          );
        }},
       {Action::UnpinCurrent, [](BrowserPage& page, const Call& call) { page.m_pins.remove(*call.request.folder); }},
@@ -1575,7 +1579,7 @@ void BrowserPage::pinTargets(const std::vector<luciole::DirectoryEntry>& targets
   std::vector<luciole::Bookmark> pins;
   for (const auto& target : targets) {
     if (auto location = target.location(); !m_pins.contains(location)) {
-      pins.push_back({target.displayName(), std::move(location)});
+      pins.push_back({target.displayName(), std::move(location), {}});
     }
   }
   m_sidebar.pinFolders(std::move(pins), m_pins.bookmarks().size());
@@ -2163,7 +2167,7 @@ void BrowserPage::prepareFrame(bool, bool layout) {
   m_renameController.onFrame();
   if (m_browserDirty) {
     m_browserDirty = false;
-    m_renameController.syncPlaceRename();
+    m_renameController.syncPlaceEditors();
     syncBrowser();
     layout = true;
   }
@@ -2789,6 +2793,7 @@ void BrowserPage::openPopup(
         {0, 0, static_cast<float>(m_popupSurface->width()), static_cast<float>(m_popupSurface->height())}
     );
     m_batchRename.syncTooltip(m_popupSurface->renderTarget().renderer());
+    m_renameController.syncPlaceIconTooltip(m_popupSurface->renderTarget().renderer());
   });
   m_popupSurface->setConfigureCallback([this](std::uint32_t, std::uint32_t) {
     if (std::exchange(m_dialogResizePending, false)

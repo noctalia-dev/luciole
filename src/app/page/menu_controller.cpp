@@ -360,6 +360,7 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     if (!bookmark.location.isTrash()) {
       entries.push_back({.id = 2, .label = "Unpin", .enabled = m_pins.editable()});
       entries.push_back({.id = 6, .label = "Rename place…", .enabled = m_pins.editable()});
+      entries.push_back({.id = 8, .label = "Change icon…", .enabled = m_pins.editable()});
     }
     entries.push_back({.id = 3, .label = "Move up", .enabled = m_pins.editable() && index > 0});
     entries.push_back({.id = 4, .label = "Move down", .enabled = m_pins.editable() && index + 1 < pins.size()});
@@ -385,6 +386,8 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
           m_page.dispatchAction(Action::EmptyTrash);
         } else if (action == 6) {
           m_renamer.openPlaceRename(bookmark);
+        } else if (action == 8) {
+          m_renamer.openPlaceIconPicker(bookmark);
         } else if (action == 3 || action == 4) {
           const auto& pins = m_pins.bookmarks();
           const auto found = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);

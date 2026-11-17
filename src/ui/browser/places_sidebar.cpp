@@ -125,7 +125,7 @@ std::optional<luciole::Bookmark> luciole::PlacesSidebar::folderAt(float x, float
   }
   for (const auto& row : m_driveRows) {
     if (row.root && hit(row.button)) {
-      return Bookmark{row.label, *row.root};
+      return Bookmark{row.label, *row.root, {}};
     }
   }
   return std::nullopt;
@@ -441,7 +441,13 @@ void luciole::PlacesSidebar::rebuild() {
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;
     });
-    addRow(pins[i], known == m_pins.userPlaces().end() ? "folder" : known->glyphName, i);
+    addRow(
+        pins[i],
+        !pins[i].iconName.empty()                ? pins[i].iconName
+            : known == m_pins.userPlaces().end() ? "folder"
+                                                 : known->glyphName,
+        i
+    );
   }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
