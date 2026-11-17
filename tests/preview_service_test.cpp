@@ -111,7 +111,7 @@ namespace {
       return result;
     };
     const auto tree = root / "totals-tree";
-    std::filesystem::create_directory(tree / "nested");
+    std::filesystem::create_directories(tree / "nested");
     write(tree / "one.txt", "abc");
     write(tree / "nested" / "two.txt", "de");
     preview.show(folder(tree), 512);

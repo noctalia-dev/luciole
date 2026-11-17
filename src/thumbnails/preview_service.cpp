@@ -309,10 +309,13 @@ void luciole::PreviewService::show(
   state.view.entry = *entry;
   state.metadata.show(*entry, options);
   state.view.metadata = state.metadata.fields();
-  // Folder contents are calculated on the shared totals service; a new selection supersedes the running walk.
+  // Folder contents are calculated once per selection: a new selection supersedes the running walk, while the same
+  // folder keeps its totals across preview size changes.
   if (entry->type == luciole::FileType::Directory && !entry->symlink) {
-    const std::array<DirectoryEntry, 1> root = {*entry};
-    (void)state.totals.start(root);
+    if (!unchanged) {
+      const std::array<DirectoryEntry, 1> root = {*entry};
+      (void)state.totals.start(root);
+    }
     state.view.totals = state.totals.snapshot();
   } else {
     state.totals.clear();
