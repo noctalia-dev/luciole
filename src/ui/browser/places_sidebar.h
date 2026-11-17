@@ -23,6 +23,7 @@ namespace luciole {
     // Updates drive usage bars from the monitor without rebuilding the list.
     void updateDriveUsage();
     void sync(std::optional<Location> current);
+    void setTrashFull(bool full);
     void cancelDragCandidate();
     std::optional<std::size_t> dropSlot(float x, float y) const;
     LayoutRect dropLine(std::size_t slot) const;
@@ -81,6 +82,7 @@ namespace luciole {
     float m_pressX = 0;
     float m_pressY = 0;
     bool m_dirty = true;
+    bool m_trashFull = false;
     bool m_dragged = false;
     std::function<void(const Location&)> m_open;
     std::function<void(const Bookmark&, float, float)> m_context;

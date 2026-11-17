@@ -211,7 +211,12 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
     const auto known = std::ranges::find_if(pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pin.location;
     });
-    m_glyphs.emplace(id, known == pins.userPlaces().end() ? "folder" : known->glyphName);
+    m_glyphs.emplace(
+        id,
+        pin.location.isTrash()                 ? (m_trashFull ? "trash-filled" : "trash")
+            : known == pins.userPlaces().end() ? "folder"
+                                               : known->glyphName
+    );
     DirectoryEntry entry{
         .id = id,
         .place = pin.location,
@@ -246,6 +251,13 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
   snapshot.entries = std::move(entries);
   m_rootIds = std::move(roots);
   m_tree.setRoot(std::move(snapshot));
+}
+void luciole::SidebarTreeView::setTrashFull(bool full) {
+  if (std::exchange(m_trashFull, full) == full) {
+    return;
+  }
+  m_dirty = true;
+  markLayoutDirty();
 }
 void luciole::SidebarTreeView::sync(std::optional<Location> current, bool showHidden) {
   if (m_current == current && m_model.filter().showHidden == showHidden) {

@@ -2,6 +2,7 @@
 
 #include "app/workspace_layout.h"
 #include "fs/location.h"
+#include "fs/trash_availability.h"
 #include "model/directory_options.h"
 #include "render/scene/input_dispatcher.h"
 
@@ -121,6 +122,7 @@ private:
   int m_sidebarStartVisibleWidth = luciole::kDefaultSidebarWidth;
   // Expires with this controller so drive callbacks that finish later do nothing.
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);
+  luciole::TrashAvailability m_trashAvailability;
   float m_sidebarPressX = 0;
   bool m_resizingSidebar = false;
   InputArea* m_sidebarResize = nullptr;

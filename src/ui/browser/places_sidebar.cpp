@@ -205,6 +205,15 @@ void luciole::PlacesSidebar::sync(std::optional<Location> current) {
   }
   markLayoutDirty();
 }
+void luciole::PlacesSidebar::setTrashFull(bool full) {
+  if (std::exchange(m_trashFull, full) == full) {
+    return;
+  }
+  if (m_tree) {
+    m_tree->setTrashFull(full);
+  }
+  invalidate();
+}
 void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   auto button = ui::button(
       {.glyph = drive.glyph,
@@ -494,7 +503,13 @@ void luciole::PlacesSidebar::rebuild() {
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;
     });
-    addRow(pins[i], known == m_pins.userPlaces().end() ? "folder" : known->glyphName, i);
+    addRow(
+        pins[i],
+        pins[i].location.isTrash()               ? (m_trashFull ? "trash-filled" : "trash")
+            : known == m_pins.userPlaces().end() ? "folder"
+                                                 : known->glyphName,
+        i
+    );
   }
   if (!m_pins.contains(Location::network())) {
     addRow({"Network", Location::network()}, "network", std::nullopt);

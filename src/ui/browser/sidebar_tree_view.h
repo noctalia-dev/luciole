@@ -15,6 +15,7 @@ namespace luciole {
     ~SidebarTreeView() override;
     // Pins first, then mounted drives; only pins take part in reordering.
     void setRoots(const PinService& pins, const std::vector<Drive>& drives);
+    void setTrashFull(bool full);
     void sync(std::optional<Location> current, bool showHidden);
     void prepare();
     InputArea* focusArea(const Location& location);
@@ -46,5 +47,6 @@ namespace luciole {
     EntryId m_nextRoot = 1;
     std::size_t m_pinCount = 0;
     bool m_dirty = true, m_reveal = false;
+    bool m_trashFull = false;
   };
 } // namespace luciole
