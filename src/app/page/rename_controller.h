@@ -40,6 +40,7 @@ private:
   void syncFileRename(const OperationJob& job);
   void submitPlaceRename(std::string label);
   void submitPlaceIcon(std::string iconName);
+  bool refreshPlaceIconTarget();
 
   PageContext& m_page;
   luciole::PinService& m_pins;

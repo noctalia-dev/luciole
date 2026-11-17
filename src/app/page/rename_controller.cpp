@@ -253,11 +253,25 @@ void RenameController::submitPlaceIcon(std::string iconName) {
   if (!m_pins.setIcon(*m_placeIconTarget, *m_pendingPlaceIcon)) {
     m_pendingPlaceIcon.reset();
     m_placeIconPicker->setEnabled(true);
-    const std::string error =
-        m_pins.busy() ? "Places are being saved. Try again shortly." : "This place changed. Choose an icon again.";
+    const bool targetExists = !m_pins.busy() && refreshPlaceIconTarget();
+    const std::string error = m_pins.busy() ? "Places are being saved. Try again shortly."
+        : targetExists                      ? "This place changed. Choose an icon again."
+                                            : "This place is no longer available. Close this dialog and try again.";
     m_placeIconPicker->showError(error);
     m_page.actionError(error);
   }
+}
+
+bool RenameController::refreshPlaceIconTarget() {
+  if (!m_placeIconTarget) {
+    return false;
+  }
+  const auto found = std::ranges::find(m_pins.bookmarks(), m_placeIconTarget->location, &luciole::Bookmark::location);
+  if (found == m_pins.bookmarks().end()) {
+    return false;
+  }
+  m_placeIconTarget = *found;
+  return true;
 }
 
 void RenameController::placeIconPointer(float x, float y, bool hover) {
@@ -312,9 +326,11 @@ void RenameController::syncPlaceEditors() {
       if (found != m_pins.bookmarks().end() && found->iconName == *m_pendingPlaceIcon) {
         m_page.dismissPopup();
       } else {
+        const bool targetExists = refreshPlaceIconTarget();
         m_placeIconPicker->setEnabled(true);
-        const std::string error = m_pins.error().empty() ? "This place changed. Try choosing an icon again."
-                                                         : "Could not save the bookmark icon. Try again.";
+        const std::string error = !targetExists ? "This place is no longer available. Close this dialog and try again."
+            : m_pins.error().empty()            ? "This place changed. Try choosing an icon again."
+                                                : "Could not save the bookmark icon. Try again.";
         m_placeIconPicker->showError(error);
         m_page.actionError(error);
       }

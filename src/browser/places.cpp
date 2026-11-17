@@ -204,6 +204,12 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
         custom.push_back(pin);
       }
     }
+    const auto carryIcon = [&](Bookmark& bookmark) {
+      const auto previous = std::ranges::find(local, bookmark.location, &Bookmark::location);
+      if (previous != local.end()) {
+        bookmark.iconName = previous->iconName;
+      }
+    };
     auto next = custom.begin();
     for (const auto& pin : local) {
       if (builtin(pin.location, places)) {
@@ -213,12 +219,12 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
         result.push_back(std::move(merged));
       } else if (next != custom.end()) {
         auto merged = *next++;
-        const auto previous = std::ranges::find(local, merged.location, &Bookmark::location);
-        if (previous != local.end()) {
-          merged.iconName = previous->iconName;
-        }
+        carryIcon(merged);
         result.push_back(std::move(merged));
       }
+    }
+    for (auto remaining = next; remaining != custom.end(); ++remaining) {
+      carryIcon(*remaining);
     }
     result.insert(result.end(), next, custom.end());
     for (const auto& pin : shared) {
