@@ -503,7 +503,7 @@ void luciole::PlacesSidebar::rebuild() {
     );
   }
   if (!m_pins.contains(Location::network())) {
-    addRow({"Network", Location::network()}, "network", std::nullopt);
+    addRow({"Network", Location::network(), {}}, "network", std::nullopt);
   }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
