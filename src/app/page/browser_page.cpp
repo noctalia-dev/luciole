@@ -2152,10 +2152,10 @@ void BrowserPage::syncBrowser() {
   m_trashBar->setVisible(showEmptyTrash);
   m_trashBar->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
+  const std::string emptyTrashLabel(luciole::ActionRegistry::definition(Action::EmptyTrash).label);
   m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
   m_emptyTrashButton->setTooltip(
-      emptyTrashState.enabled ? std::string("Empty Trash")
-                              : std::string("Empty Trash\n") + std::string(emptyTrashState.reason)
+      emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
   );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
@@ -2609,7 +2609,7 @@ std::unique_ptr<Flex> BrowserPage::buildTrashBar() {
        .participatesInLayout = false},
       ui::button(
           {.out = &m_emptyTrashButton,
-           .text = "Empty Trash…",
+           .text = std::string(luciole::ActionRegistry::definition(Action::EmptyTrash).label),
            .glyph = "trash",
            .controlHeight = Style::controlHeight,
            .variant = ButtonVariant::Destructive,
