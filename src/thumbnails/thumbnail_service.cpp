@@ -29,9 +29,11 @@ namespace {
   }
   // Purpose is part of the identity: previews accept no smaller foreign thumbnail and take clean video frames.
   std::string cacheKey(const luciole::DirectoryEntry& source, int side, luciole::ThumbnailPurpose purpose) {
+    const auto identity = source.identity();
     return std::format(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.id, source.etag().value_or(""),
-        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision), side,
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.etag().value_or(""),
+        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision),
+        identity ? identity->filesystem : "", identity ? identity->file : "", side,
         purpose == luciole::ThumbnailPurpose::Preview ? "preview" : "thumbnail"
     );
   }
