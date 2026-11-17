@@ -71,7 +71,11 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
+
+class DialogWindows;
+class Segmented;
 
 class BrowserPage final : public PageContext, public OperationHub::Owner {
 public:
@@ -85,7 +89,7 @@ public:
       luciole::WindowSurface& surface, InputDispatcher& dispatcher, AnimationManager& animations,
       luciole::PinService& pins, luciole::DriveMonitor& drives, luciole::FileIconCache& icons,
       luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences, OperationHub& hub,
-      luciole::TabId id
+      DialogWindows& dialogs, luciole::TabId id
   );
 
   luciole::BrowserController& browser() override;
@@ -170,6 +174,8 @@ public:
   void prepare(LayoutRect bounds, bool active, bool roundCorner);
   void deactivate();
   void hide();
+  // Closes the Properties and Settings windows, for a browser window that closed.
+  void closeDialogWindows();
   void mount(Node& host);
   void unmount();
   Node* root() const;
@@ -270,6 +276,10 @@ private:
   void
   showDialog(std::unique_ptr<Flex> root, DialogWidth width, PopupDismiss dismiss = PopupDismiss::Explicit) override;
   float dialogWidth(DialogWidth width) const override;
+  std::unique_ptr<DialogWindow> openDialogWindow(
+      std::unique_ptr<Flex> root, std::string_view title, DialogWidth width, float maxHeight,
+      std::string_view group = {}
+  ) override;
 
   void cancelDrag() override;
 
@@ -356,6 +366,7 @@ private:
   luciole::FileViewAdapter m_listAdapter;
   luciole::FileViewAdapter m_gridAdapter;
   luciole::ViewPreferenceWriter& m_preferences;
+  DialogWindows& m_dialogWindows;
   luciole::BrowserSettings m_savedSettings;
   // The open dialog's tier; unset while a menu or nothing is shown.
   std::optional<DialogWidth> m_dialogTier;

@@ -1,6 +1,6 @@
 #include "app/page/settings_controller.h"
 
-#include "app/page/active_popup.h"
+#include "app/dialog_window.h"
 #include "app/page/page_context.h"
 #include "config/view_preference_writer.h"
 #include "platform/desktop_integration.h"
@@ -10,11 +10,17 @@
 #include "ui/browser/action_shortcuts.h"
 #include "ui/controls/select_dropdown_popup.h"
 #include "ui/dialogs/settings_dialog.h"
-#include "wayland/popup_surface.h"
 #include "wayland/wayland_connection.h"
 #include "wayland/wayland_seat.h"
 
 #include <utility>
+
+namespace {
+  // The in-window dialog's height cap, which the layout was designed for.
+  constexpr float kMaxHeight = 640.0F;
+  // Narrower windows switch the navigation to its compact form.
+  constexpr float kCompactWidth = 720.0F;
+} // namespace
 
 SettingsController::SettingsController(
     PageContext& page, luciole::ViewPreferenceWriter& preferences, luciole::ThumbnailService& thumbnails,
@@ -29,19 +35,31 @@ void SettingsController::preferencesChanged(const std::string& error) {
   m_error = error;
   m_pending = m_preferences.settings();
   m_dirty = true;
+  markViewDirty();
+}
+
+void SettingsController::markDirty() {
+  m_dirty = true;
+  markViewDirty();
+}
+
+void SettingsController::markViewDirty() {
+  m_viewDirty = true;
+  if (m_window) {
+    m_window->requestLayout();
+  }
 }
 
 void SettingsController::onFrame() {
-  if (std::exchange(m_dirty, false)) {
-    if (m_pending) {
-      m_page.applySettings(m_pending->browser, !m_error.empty());
-    }
-    if (m_view) {
-      sync();
-      if (auto* surface = m_page.popupSurface()) {
-        surface->requestLayout();
-      }
-    }
+  if (std::exchange(m_dirty, false) && m_pending) {
+    m_page.applySettings(m_pending->browser, !m_error.empty());
+  }
+}
+
+void SettingsController::frame(float width) {
+  layoutDialog(width);
+  if (std::exchange(m_viewDirty, false)) {
+    sync();
   }
 }
 
@@ -53,61 +71,84 @@ void SettingsController::layoutDialog(float width) {
   if (width != m_view->width()) {
     closeSelectDropdown();
   }
-  m_view->setCompact(width < 720.0F);
+  m_view->setCompact(width < kCompactWidth);
 }
 
 void SettingsController::sync() {
   const auto& inherited = m_preferences.inheritedSettings();
+  // The saved preferences rather than the page's copy, which waits for the page's next frame while its tab is hidden.
   m_view->sync(
-      m_page.settings(), inherited ? inherited->browser : luciole::BrowserSettings{},
+      m_pending ? m_pending->browser : m_page.settings(), inherited ? inherited->browser : luciole::BrowserSettings{},
       m_preferences.busy() || m_thumbnails.clearing(), m_error.empty() ? m_thumbnails.error() : m_error,
       m_thumbnails.clearing()
   );
 }
 
-void SettingsController::teardown() {
+void SettingsController::close() {
+  if (!m_window) {
+    return;
+  }
   if (m_dropdown) {
     m_dropdown->closeSelectDropdown();
     m_dropdown.reset();
   }
   m_viewLifetime.reset();
   m_view = nullptr;
+  m_window.reset();
   m_page.focusFileList();
 }
 
+void SettingsController::setParent(luciole::WindowSurface& parent) {
+  if (m_window) {
+    m_window->setParent(parent);
+  }
+}
+
 void SettingsController::toggle() {
-  if (m_view) {
-    m_page.dismissPopup();
+  if (m_window) {
+    m_window->dismiss();
     return;
   }
   m_viewLifetime = std::make_shared<int>(0);
   auto root = std::make_unique<SettingsDialog>(
       [this](luciole::OverrideEdit edit) {
         m_preferences.submit({std::move(edit)});
-        if (auto* surface = m_page.popupSurface()) {
-          surface->requestLayout();
+        if (m_window) {
+          m_window->requestLayout();
         }
       },
-      [this] { m_preferences.resetAll(); }, [this] { m_page.dismissPopup(); }, [this] { m_clearThumbnails(); }
+      [this] { m_preferences.resetAll(); },
+      [this] {
+        if (m_window) {
+          m_window->dismiss();
+        }
+      },
+      [this] { m_clearThumbnails(); }
   );
   root->setPopupContext(this);
   m_view = root.get();
   sync();
-  m_view->setCompact(m_page.dialogWidth(DialogWidth::Large) < 720.0F);
-  m_page.showDialog(std::move(root), DialogWidth::Large);
-  if (!m_page.popupSurface()) {
+  m_view->setCompact(dialogTierWidth(DialogWidth::Large) < kCompactWidth);
+  // One Settings window for the whole application: preferences are shared by every page.
+  m_window = m_page.openDialogWindow(std::move(root), "Settings", DialogWidth::Large, kMaxHeight, "settings");
+  if (!m_window) {
     m_view = nullptr;
     m_viewLifetime.reset();
+    m_page.actionError("Settings could not open a window.");
     return;
   }
-  m_page.activePopup().bind(ActivePopup::Kind::Settings, [this] { teardown(); });
-  m_page.popupDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
+  m_window->setClosedCallback([this] { close(); });
+  m_window->setKeyHandler([this](const KeyboardEvent& event) { return key(event); });
+  m_window->setPointerHandler([this](const PointerEvent& event) { return dropdownPointer(event); });
+  m_window->setSurfaceOwner([this](const wl_surface* surface) { return dropdownOwns(surface); });
+  m_window->setLayoutCallback([this](float width) { frame(width); });
+  m_window->dispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
     if (m_view) {
       m_view->reveal(focused);
-      m_page.popupSurface()->requestLayout();
+      m_window->requestLayout();
     }
   });
-  m_page.popupDispatcher().setFocus(m_page.popupDispatcher().firstTabFocusUnder(m_view->navigation()));
+  m_window->dispatcher().setFocus(m_window->dispatcher().firstTabFocusUnder(m_view->navigation()));
 }
 
 bool SettingsController::key(const KeyboardEvent& event) {
@@ -119,7 +160,7 @@ bool SettingsController::key(const KeyboardEvent& event) {
     return true;
   }
   if (event.pressed && luciole::shortcutMatches(luciole::BrowserAction::Settings, event.sym, event.modifiers)) {
-    m_page.dismissPopup();
+    m_window->dismiss();
     return true;
   }
   return false;
@@ -146,8 +187,7 @@ bool SettingsController::dropdownPointer(const PointerEvent& event) {
 }
 
 void SettingsController::openSelectDropdown(const DropdownRequest& request, DropdownCallbacks callbacks) {
-  auto* dialog = m_page.popupSurface();
-  if (!m_view || !dialog) {
+  if (!m_view || !m_window) {
     if (callbacks.onDismiss) {
       callbacks.onDismiss();
     }
@@ -156,9 +196,8 @@ void SettingsController::openSelectDropdown(const DropdownRequest& request, Drop
   if (!m_dropdown) {
     m_dropdown = std::make_unique<SelectDropdownPopup>(m_connection, m_renderer);
   }
-  m_dropdown->setParent(
-      dialog->xdgSurface(), dialog->wlSurface(), m_connection.outputForSurface(m_page.surface().wlSurface())
-  );
+  auto& dialog = m_window->surface();
+  m_dropdown->setParent(dialog.xdgSurface(), dialog.wlSurface(), m_connection.outputForSurface(dialog.wlSurface()));
   const std::weak_ptr<int> lifetime = m_viewLifetime;
   m_dropdown->openSelectDropdown(
       request,

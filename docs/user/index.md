@@ -12,7 +12,7 @@ The application is in development. The guides below describe current features.
 4. Use [file operations, Trash, archives and Properties](file-operations.md).
 5. Add [custom scripts or explicitly run a program](scripts.md).
 
-Settings opens inside the existing window with Ctrl+,. Preferences save automatically. About is available from the main menu.
+Settings opens in its own window with Ctrl+,. Preferences save automatically. About is available from the main menu.
 
 ## Help and contributing
 

@@ -10,11 +10,11 @@ The worker serializes typed edits and reload requests, coalescing pending edits 
 
 File monitors follow canonical files, existing path components and resolved declarative targets. Coalesced events trigger worker reads; the read after watch installation closes the read/install gap. Callbacks publish during Update. Only relevant global changes should replace a live preference; an unrelated reload must not reset the current visit's view/zoom/history state. Ordinary close drains pending preference saves.
 
-Explicit sort changes from menus, list headings and the open Settings dialog share BrowserPage's sort application path. They preserve model selection IDs and request the beginning of the new order. Layout consumes that request after preference notifications and view switches, clearing any intervening captured scroll anchor or pending history viewport before arranging the virtualized cells. Ordinary reloads and unrelated preference changes retain their existing viewport behavior.
+Explicit sort changes from menus, list headings and the open Settings window share BrowserPage's sort application path. They preserve model selection IDs and request the beginning of the new order. Layout consumes that request after preference notifications and view switches, clearing any intervening captured scroll anchor or pending history viewport before arranging the virtualized cells. Ordinary reloads and unrelated preference changes retain their existing viewport behavior.
 
 ## Settings layout
 
-[SettingsController](../../src/app/page/settings_controller.cpp) retains the preferred 880-pixel dialog width independently of the opening window size. The common popup layout in [BrowserPage](../../src/app/page/browser_page.cpp) calls `layoutDialog()` before measuring Settings on each requested layout. It reapplies the parent-constrained height up to 640 pixels and the compact navigation breakpoint. Parent configuration already requests popup layout and recenters the dialog. Resize the existing view so its category, scroll state, focus and drafts survive; dismiss an open select dropdown when its anchor geometry changes. Do not persist the temporarily constrained popup dimensions as its preferred size.
+[SettingsController](../../src/app/page/settings_controller.cpp) opens Settings in its own window, 880 pixels wide and as tall as its content up to 640 pixels. The window's frame reapplies the compact navigation breakpoint for its current width before layout. Resizing keeps the existing view, so its category, scroll state, focus and drafts survive; an open select dropdown is dismissed when its anchor geometry changes. View-level fields such as sort and view mode apply to the page that opened Settings.
 
 ## Filename presentation
 

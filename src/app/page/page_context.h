@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace luciole {
@@ -22,6 +23,7 @@ namespace luciole {
 
 class ActivePopup;
 class ContextMenuControl;
+class DialogWindow;
 class Flex;
 class InputDispatcher;
 class MillerView;
@@ -36,6 +38,11 @@ enum class PopupDismiss : std::uint8_t { Explicit, OutsideClick };
 // Dialog width tiers: Small for one-field prompts and confirmations, Medium for forms and inspectors, Large for
 // multi-pane editors. A dialog is never wider than the window minus the dialog margin on each side.
 enum class DialogWidth : std::uint8_t { Small, Medium, Large };
+
+// The preferred content width of a dialog of tier `width`.
+constexpr float dialogTierWidth(DialogWidth width) {
+  return width == DialogWidth::Small ? 440.0F : width == DialogWidth::Medium ? 600.0F : 880.0F;
+}
 
 // The part of BrowserPage that feature controllers use. BrowserPage implements it.
 //
@@ -59,6 +66,9 @@ enum class DialogWidth : std::uint8_t { Small, Medium, Large };
 // closed the popup, and it cancels the dialog's job and drops the pointers. When the page left its window
 // (!jobs().attached()), a job that already applies changes keeps running for the page that takes it over.
 // Never size a dialog root yourself: the page sets its width from the tier and its height from its content.
+//
+// Properties and Settings open in their own windows instead (openDialogWindow()). The controller owns each
+// DialogWindow and tears down in its closed callback; the window routes its own input, so it needs no popup hooks.
 //
 // Input, layout and scene hooks that the page cannot route generically yet are small controller methods the
 // page calls at the original spot.
@@ -108,7 +118,7 @@ public:
   virtual void applySettings(const luciole::BrowserSettings& settings, bool force) = 0;
   // True while the page is the focused pane of its window.
   virtual bool active() const = 0;
-  // True while Settings or the archive browser covers the page.
+  // True while the archive browser covers the page.
   virtual bool overlay() const = 0;
   // True while thumbnail work is paused for this page.
   virtual bool thumbnailsPaused() const = 0;
@@ -161,6 +171,12 @@ public:
   showDialog(std::unique_ptr<Flex> root, DialogWidth width, PopupDismiss dismiss = PopupDismiss::Explicit) = 0;
   // The content width a dialog of tier `width` gets in the window now; for content laid out at a fixed width.
   virtual float dialogWidth(DialogWidth width) const = 0;
+  // Shows `root` in its own window above this page's window, sized for tier `width` and its content, capped at
+  // `maxHeight`. `group` as in DialogWindowOptions. Null when the window could not be created.
+  virtual std::unique_ptr<DialogWindow> openDialogWindow(
+      std::unique_ptr<Flex> root, std::string_view title, DialogWidth width, float maxHeight,
+      std::string_view group = {}
+  ) = 0;
   // Closes the active dialog on the next main loop iteration.
   virtual void dismissPopup() = 0;
   // Closes the active dialog now.

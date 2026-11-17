@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/dialog_window.h"
 #include "app/file_chooser_session.h"
 #include "app/file_manager_service.h"
 #include "app/instance_service.h"
@@ -92,7 +93,6 @@ public:
 
 private:
   void clearExternalDrops();
-  static void dispatch(InputDispatcher& dispatcher, const PointerEvent& event);
   luciole::WindowId newWindow(std::unique_ptr<FileChooserSession> chooser = nullptr);
   luciole::TabId newTab(
       luciole::WindowId window, std::optional<luciole::Location> location, luciole::TabId duplicate = 0,
@@ -133,6 +133,8 @@ private:
   // Applies colors.toml before any surface is built, then follows its changes.
   luciole::PaletteWatcher m_palette;
   AnimationManager m_animations;
+  // Properties and Settings windows; pages own them, so it must outlive m_pages.
+  DialogWindows m_dialogs{m_connection, m_renderer, m_input, m_animations};
   luciole::ViewPreferenceWriter m_preferences;
   luciole::PinService m_pins;
   std::vector<luciole::SavedWindow> m_savedWindows;

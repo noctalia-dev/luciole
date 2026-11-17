@@ -299,6 +299,9 @@ bool WorkspaceApplication::hasWindows() const {
 }
 
 void WorkspaceApplication::focus(wl_surface* surface, bool entered) {
+  if (m_dialogs.focus(surface, entered)) {
+    return;
+  }
   for (const auto& [id, host] : m_hosts) {
     if (host->surface.wlSurface() != surface) {
       continue;
@@ -324,6 +327,7 @@ void WorkspaceApplication::focus(wl_surface* surface, bool entered) {
 }
 
 void WorkspaceApplication::outputChanged(wl_output* output) {
+  m_dialogs.outputChanged(output);
   for (auto& [id, host] : m_hosts) {
     (void)id;
     if (m_connection.outputForSurface(host->surface.wlSurface()) == output) {
@@ -383,6 +387,13 @@ bool WorkspaceApplication::running() {
         m_pages.at(tab)->unmount();
       }
       host->mounted.clear();
+      // Their parent is gone; like the window's in-window dialogs, they close with it.
+      for (auto& [tab, page] : m_pages) {
+        if (page->boundSurface() == &host->surface) {
+          (void)tab;
+          page->closeDialogWindows();
+        }
+      }
     }
     live |= host->surface.isRunning();
   }
@@ -460,6 +471,9 @@ void WorkspaceApplication::keyboard(const KeyboardEvent& event) {
       }
       host->surface.requestUpdate();
     }
+  }
+  if (m_dialogs.keyboard(m_connection.lastKeyboardSurface(), event)) {
+    return;
   }
   if (const auto focused = m_hosts.find(m_focused);
       focused != m_hosts.end() && focused->second->chooser && focused->second->chooser->keyboard(event)) {
@@ -576,6 +590,9 @@ void WorkspaceApplication::keyboard(const KeyboardEvent& event) {
 }
 
 void WorkspaceApplication::pointer(const PointerEvent& event) {
+  if (m_dialogs.pointer(event)) {
+    return;
+  }
   for (auto& [id, host] : m_hosts) {
     (void)id;
     if (host->chooser && host->chooser->pointer(event)) {
@@ -622,7 +639,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
   auto& active = *m_pages.at(window.active);
   // A button held on the tab strip stays with the strip.
   if (host->dispatcher.pointerCaptured() && !host->pointerPage) {
-    dispatch(host->dispatcher, event);
+    dispatchPointerEvent(host->dispatcher, event);
     return;
   }
   for (auto& [tab, page] : m_pages) {
@@ -768,7 +785,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
         return;
       }
     }
-    dispatch(host->dispatcher, event);
+    dispatchPointerEvent(host->dispatcher, event);
     return;
   }
   if (host->previewDivider
@@ -817,30 +834,6 @@ void WorkspaceApplication::clearExternalDrops() {
   for (auto& [id, page] : m_pages) {
     (void)id;
     page->clearExternalDrop();
-  }
-}
-
-void WorkspaceApplication::dispatch(InputDispatcher& dispatcher, const PointerEvent& event) {
-  const auto x = static_cast<float>(event.sx), y = static_cast<float>(event.sy);
-  switch (event.type) {
-  case PointerEvent::Type::Enter:
-    dispatcher.pointerEnter(x, y, event.serial);
-    break;
-  case PointerEvent::Type::Leave:
-    dispatcher.pointerLeave();
-    break;
-  case PointerEvent::Type::Motion:
-    dispatcher.pointerMotion(x, y, event.serial);
-    break;
-  case PointerEvent::Type::Button:
-    dispatcher.pointerButton(x, y, event.button, event.pressed, event.serial, event.time, event.touch);
-    break;
-  case PointerEvent::Type::Axis:
-    dispatcher.pointerAxis(
-        x, y, event.axis, event.axisSource, event.axisValue, event.axisDiscrete, event.axisValue120, event.axisLines,
-        event.axisGestureSerial
-    );
-    break;
   }
 }
 
@@ -948,7 +941,7 @@ luciole::TabId WorkspaceApplication::createPage(
   }
   auto page = std::make_unique<BrowserPage>(
       m_connection, m_renderer, m_input, settings, m_clipboard, host.surface, host.dispatcher, m_animations, m_pins,
-      m_drives, m_icons, m_thumbnails, m_preferences, m_hub, id
+      m_drives, m_icons, m_thumbnails, m_preferences, m_hub, m_dialogs, id
   );
   page->setHasOther([this, id] {
     const auto owner = m_model.owner(id);

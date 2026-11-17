@@ -13,7 +13,6 @@ public:
   enum class Kind : std::uint8_t {
     None,
     Menu,
-    Settings,
     PatternSelection,
     EmptyTrash,
     CreateItem,
@@ -21,7 +20,6 @@ public:
     BatchRename,
     FileRename,
     PlaceRename,
-    Properties,
     About,
     KeyboardShortcuts,
     QuickPreview,

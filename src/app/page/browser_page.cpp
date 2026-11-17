@@ -1,5 +1,6 @@
 #include "app/page/browser_page.h"
 
+#include "app/dialog_window.h"
 #include "app/startup_trace.h"
 #include "browser/action_registry.h"
 #include "browser/browser_controller.h"
@@ -70,10 +71,7 @@
 #include <utility>
 
 namespace {
-  // Dialog width tiers (see DialogWidth) and the gap a dialog keeps to each window edge.
-  constexpr float kDialogWidthSmall = 440.0F;
-  constexpr float kDialogWidthMedium = 600.0F;
-  constexpr float kDialogWidthLarge = 880.0F;
+  // The gap a dialog keeps to each window edge.
   constexpr float kDialogMargin = 32.0F;
   // The lib's default popup shadow, as on its context menus.
   constexpr ShadowStyle kDialogShadow{};
@@ -84,7 +82,7 @@ BrowserPage::BrowserPage(
     const luciole::BrowserSettings& settings, luciole::WaylandTextClipboard& clipboard, luciole::WindowSurface& surface,
     InputDispatcher& dispatcher, AnimationManager& animations, luciole::PinService& pins, luciole::DriveMonitor& drives,
     luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-    OperationHub& hub, luciole::TabId id
+    OperationHub& hub, DialogWindows& dialogs, luciole::TabId id
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
@@ -99,8 +97,8 @@ BrowserPage::BrowserPage(
           [this] { return m_connection.keyboardModifiers(); },
           [this] { return m_fileKeys.keyboardFocus() && m_list != nullptr && m_list->focusArea()->focused(); }
       ),
-      m_preferences(preferences), m_savedSettings(settings), m_pins(pins), m_drives(drives), m_hub(hub),
-      m_jobs(hub, id), m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
+      m_preferences(preferences), m_dialogWindows(dialogs), m_savedSettings(settings), m_pins(pins), m_drives(drives),
+      m_hub(hub), m_jobs(hub, id), m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
@@ -213,6 +211,7 @@ void BrowserPage::focusMiller(std::size_t index, bool reveal) {
 }
 
 BrowserPage::~BrowserPage() {
+  closeDialogWindows();
   m_hub.detach(m_workspaceId);
   m_dragDrop.stop();
   m_transferController.stopProgress();
@@ -400,6 +399,7 @@ luciole::FileDropTarget BrowserPage::externalDestination(const luciole::Location
 
 void BrowserPage::iconsReady() {
   m_surface->requestLayout();
+  m_propertiesController.iconsReady();
   if (m_popupSurface && !m_menuController.menu()) {
     m_popupSurface->requestLayout();
   }
@@ -456,7 +456,6 @@ void BrowserPage::windowFocusChanged(bool entered) {
     return;
   }
   if (!entered) {
-    m_settingsController.closeSelectDropdown();
     m_popupDispatcher.pointerLeave();
     // A grabbed menu also takes focus from the parent; its compositor dismissal owns that lifetime.
     return;
@@ -488,9 +487,7 @@ void BrowserPage::setForeignDrop(
 }
 
 bool BrowserPage::popupOwns(wl_surface* surface) const {
-  return (m_popupSurface && m_popupSurface->wlSurface() == surface)
-      || m_submenus.owns(surface)
-      || m_settingsController.dropdownOwns(surface);
+  return (m_popupSurface && m_popupSurface->wlSurface() == surface) || m_submenus.owns(surface);
 }
 
 bool BrowserPage::popup() const { return m_popupSurface != nullptr; }
@@ -555,6 +552,13 @@ void BrowserPage::rebind(luciole::WindowSurface& surface, InputDispatcher& dispa
   deactivate();
   m_surface = &surface;
   m_dispatcher = &dispatcher;
+  m_propertiesController.setParent(surface);
+  m_settingsController.setParent(surface);
+}
+
+void BrowserPage::closeDialogWindows() {
+  m_propertiesController.closeAll();
+  m_settingsController.close();
 }
 
 void BrowserPage::prepare(LayoutRect bounds, bool active, bool roundCorner) {
@@ -718,9 +722,6 @@ void BrowserPage::outputChanged(wl_output* output) {
 }
 
 void BrowserPage::pointer(const PointerEvent& event) {
-  if (m_settingsController.dropdownPointer(event)) {
-    return;
-  }
   if (m_popupSurface != nullptr && event.type == PointerEvent::Type::Button && event.pressed) {
     const bool inPopup = m_submenus.owns(event.surface)
         || (event.surface == m_popupSurface->wlSurface()
@@ -1025,13 +1026,7 @@ void BrowserPage::keyboard(const KeyboardEvent& event) {
     if (m_trashController.key(event)) {
       return;
     }
-    if (m_propertiesController.resultsKey(event)) {
-      return;
-    }
     if (m_previewController.quickPreviewKey(event)) {
-      return;
-    }
-    if (m_settingsController.key(event)) {
       return;
     }
     if (m_shortcutsController.key(event)) {
@@ -2194,7 +2189,6 @@ void BrowserPage::prepareFrame(bool, bool layout) {
   m_transferController.syncConflict();
   m_trashController.onFrame();
   m_createController.onFrame();
-  m_propertiesController.onFrame();
   m_batchRename.onFrame();
   m_renameController.onFrame();
   if (m_browserDirty) {
@@ -2681,17 +2675,39 @@ void BrowserPage::showPopup(
 }
 
 float BrowserPage::dialogWidth(DialogWidth width) const {
-  const float tier = width == DialogWidth::Small ? kDialogWidthSmall
-      : width == DialogWidth::Medium             ? kDialogWidthMedium
-                                                 : kDialogWidthLarge;
-  return std::floor(std::max(1.0F, std::min(tier, static_cast<float>(m_surface->width()) - kDialogMargin * 2.0F)));
+  return std::floor(
+      std::max(1.0F, std::min(dialogTierWidth(width), static_cast<float>(m_surface->width()) - kDialogMargin * 2.0F))
+  );
+}
+
+std::unique_ptr<DialogWindow> BrowserPage::openDialogWindow(
+    std::unique_ptr<Flex> root, std::string_view title, DialogWidth width, float maxHeight, std::string_view group
+) {
+  const float contentWidth = dialogTierWidth(width);
+  float height = 0;
+  {
+    // Measured before the window exists so it opens at its final size.
+    UiPhaseScope phase(UiPhase::Layout);
+    LayoutConstraints constraints;
+    constraints.setExactWidth(contentWidth);
+    height = root->measure(m_surface->renderTarget().renderer(), constraints).height;
+  }
+  auto window = std::make_unique<DialogWindow>(m_dialogWindows, *m_surface);
+  if (!window->open(
+          std::move(root),
+          {.title = std::string(title),
+           .width = static_cast<std::uint32_t>(std::ceil(contentWidth)),
+           .height = static_cast<std::uint32_t>(std::ceil(std::clamp(height, 1.0F, maxHeight))),
+           .group = std::string(group)}
+      )) {
+    return nullptr;
+  }
+  return window;
 }
 
 popup_chrome::Geometry BrowserPage::dialogGeometry(Flex& content) {
   auto& renderer = (m_popupSurface ? m_popupSurface->renderTarget() : m_surface->renderTarget()).renderer();
   const float width = dialogWidth(*m_dialogTier);
-  m_settingsController.layoutDialog(width);
-  m_propertiesController.layoutDialog(width);
   LayoutConstraints constraints;
   constraints.setExactWidth(width);
   const float height = std::ceil(
