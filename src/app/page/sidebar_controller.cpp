@@ -365,12 +365,25 @@ void SidebarController::showDropLine(Renderer& renderer, std::size_t slot) {
 void SidebarController::sync(const std::optional<luciole::Location>& location) {
   m_places->setShowHidden(m_page.browser().model().filter().showHidden);
   m_places->sync(location);
+  if (m_trashQueryLocation != location) {
+    m_trashQueryLocation = location;
+    refreshTrashAvailability();
+  }
+}
+
+void SidebarController::refreshTrashAvailability() {
   const std::weak_ptr<int> lifetime = m_lifetime;
   m_trashAvailability.query([this, lifetime](auto count) {
     if (!lifetime.expired() && count) {
       m_places->setTrashFull(*count > 0);
     }
   });
+}
+
+void SidebarController::refreshTrashAvailabilityAfterJob(std::uint64_t jobId) {
+  if (m_trashJobsRefreshed.insert(jobId).second) {
+    refreshTrashAvailability();
+  }
 }
 
 void SidebarController::onFrame() {

@@ -299,6 +299,23 @@ void BrowserPage::jobChanged(OperationJob& job) {
     m_createController.changed(job);
     break;
   }
+  if (job.kind() == JobKind::Trash) {
+    const auto status = job.service<luciole::TrashService>().snapshot().status;
+    if (status == luciole::TrashStatus::Finished
+        || status == luciole::TrashStatus::Error
+        || status == luciole::TrashStatus::Cancelled) {
+      m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
+    }
+  } else if (job.kind() == JobKind::EmptyTrash) {
+    const auto status = job.service<luciole::EmptyTrashService>().snapshot().status;
+    if (status == luciole::EmptyTrashStatus::Finished
+        || status == luciole::EmptyTrashStatus::Error
+        || status == luciole::EmptyTrashStatus::Cancelled) {
+      m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
+    }
+  } else if (job.kind() == JobKind::Restore && !job.service<luciole::RestoreService>().busy()) {
+    m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
+  }
   m_browserDirty = true;
   m_surface->requestUpdate();
 }

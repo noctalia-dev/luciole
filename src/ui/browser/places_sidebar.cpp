@@ -419,6 +419,7 @@ void luciole::PlacesSidebar::rebuild() {
     if (!m_tree) {
       auto tree = std::make_unique<SidebarTreeView>();
       m_tree = tree.get();
+      m_tree->setTrashFull(m_trashFull);
       tree->open = [this](const Location& location) {
         if (m_open) {
           m_open(location);

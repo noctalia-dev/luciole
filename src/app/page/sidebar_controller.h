@@ -7,8 +7,10 @@
 #include "render/scene/input_dispatcher.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -69,6 +71,9 @@ public:
   void markDirty() { m_placesDirty = true; }
   // Drive usage changed: updates the usage bars in place.
   void updateDriveUsage();
+  // Refreshes the provider state after a Trash operation completes.
+  void refreshTrashAvailability();
+  void refreshTrashAvailabilityAfterJob(std::uint64_t jobId);
   // Focuses the entry for `location` once no popup or overlay is open.
   void focusPlace(luciole::Location location) { m_restorePlaceFocus = std::move(location); }
   // Pins `bookmarks` before the pin at `before`, or reports why pins cannot change.
@@ -123,6 +128,8 @@ private:
   // Expires with this controller so drive callbacks that finish later do nothing.
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);
   luciole::TrashAvailability m_trashAvailability;
+  std::optional<luciole::Location> m_trashQueryLocation;
+  std::unordered_set<std::uint64_t> m_trashJobsRefreshed;
   float m_sidebarPressX = 0;
   bool m_resizingSidebar = false;
   InputArea* m_sidebarResize = nullptr;
