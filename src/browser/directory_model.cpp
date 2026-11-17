@@ -248,6 +248,10 @@ bool luciole::DirectoryModel::less(const SortItem& leftItem, const SortItem& rig
   const auto right = rightItem.id;
   const auto& leftPresentation = *leftItem.presentation;
   const auto& rightPresentation = *rightItem.presentation;
+  // Visible entries always precede hidden entries, regardless of field or direction.
+  if (leftItem.hidden != rightItem.hidden) {
+    return !leftItem.hidden;
+  }
   if (m_sort.directoriesFirst && (leftItem.type == FileType::Directory) != (rightItem.type == FileType::Directory)) {
     return leftItem.type == FileType::Directory;
   }
@@ -362,7 +366,7 @@ void luciole::DirectoryModel::rebuildProjection() {
         && (m_filterKey.empty() || filterText(source).contains(m_filterKey))
         && (!m_entryFilter || m_entryFilter(entry, m_snapshot.entries.known(source)))) {
       items.push_back(
-          {entry.id, static_cast<std::uint32_t>(source), entry.type, &m_presentations[source],
+          {entry.id, static_cast<std::uint32_t>(source), entry.type, entry.hidden, &m_presentations[source],
            m_snapshot.entries.known(source)}
       );
     }

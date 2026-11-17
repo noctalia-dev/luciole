@@ -117,6 +117,7 @@ namespace luciole {
       EntryId id;
       std::uint32_t source;
       FileType type;
+      bool hidden;
       const Presentation* presentation;
       const DirectoryEntry* entry;
     };
