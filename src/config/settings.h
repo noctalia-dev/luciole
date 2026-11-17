@@ -20,6 +20,7 @@ namespace luciole {
     ActivationMode activationMode = ActivationMode::DoubleClick;
     TypingMode typingMode = TypingMode::Search;
     bool confirmPermanentDeletion = true;
+    bool showPermanentDeletion = false;
     bool switchToNewTab = true;
     bool restoreLastWindow = false;
     ViewMode viewMode = ViewMode::List;
@@ -67,6 +68,7 @@ namespace luciole {
     ActivationMode,
     TypingMode,
     ConfirmPermanentDeletion,
+    ShowPermanentDeletion,
     SwitchToNewTab,
     RestoreLastWindow,
     ShowHidden,
@@ -146,6 +148,7 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::ActivationMode> ActivationMode{Id::ActivationMode};
     static constexpr PreferenceKey<luciole::TypingMode> TypingMode{Id::TypingMode};
     static constexpr PreferenceKey<bool> ConfirmPermanentDeletion{Id::ConfirmPermanentDeletion};
+    static constexpr PreferenceKey<bool> ShowPermanentDeletion{Id::ShowPermanentDeletion};
     static constexpr PreferenceKey<bool> SwitchToNewTab{Id::SwitchToNewTab};
     static constexpr PreferenceKey<bool> RestoreLastWindow{Id::RestoreLastWindow};
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};

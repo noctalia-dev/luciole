@@ -223,6 +223,9 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
     add(Action::Compress);
     addSeparator(entries);
     add(Action::Trash);
+    if (m_page.settings().showPermanentDeletion) {
+      add(Action::DeletePermanently);
+    }
   }
   addSeparator(entries);
   add(Action::Properties);
