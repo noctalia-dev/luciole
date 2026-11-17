@@ -126,7 +126,8 @@ namespace luciole {
     bool chooser = false;
     bool singleSelection = false;
   };
-  // Actions a file chooser window offers; everything else would act on files or leave the chooser.
+  // Actions a file chooser window offers: browsing, selection and New Folder. Everything else would act on files or
+  // leave the chooser.
   bool chooserAction(BrowserAction action);
   struct ActionState {
     bool enabled = true;
