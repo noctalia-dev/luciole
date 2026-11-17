@@ -2147,6 +2147,16 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
+  const bool showEmptyTrash =
+      !choosing() && snapshot.location && snapshot.location->isTrash() && !snapshot.entries.empty();
+  m_trashBar->setVisible(showEmptyTrash);
+  m_trashBar->setParticipatesInLayout(showEmptyTrash);
+  const auto emptyTrashState = actionState(Action::EmptyTrash, request);
+  m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
+  m_emptyTrashButton->setTooltip(
+      emptyTrashState.enabled ? std::string("Empty Trash")
+                              : std::string("Empty Trash\n") + std::string(emptyTrashState.reason)
+  );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
   const bool empty = model.rows().empty();
@@ -2415,6 +2425,7 @@ void BrowserPage::buildScene() {
            .fill = colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_savedSettings.backgroundOpacity)),
            .clipChildren = true,
            .participatesInLayout = false},
+          buildTrashBar(),
           ui::column(
               {.out = &m_paneContentFrame,
                .align = FlexAlign::Stretch,
@@ -2582,6 +2593,27 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
                .visible = !choosing(),
                .onClick = [this] { m_menuController.openMenu(); }}
           )
+      )
+  );
+}
+
+std::unique_ptr<Flex> BrowserPage::buildTrashBar() {
+  return ui::row(
+      {.out = &m_trashBar,
+       .align = FlexAlign::Center,
+       .justify = FlexJustify::End,
+       .paddingV = Style::spaceXs,
+       .paddingH = Style::spaceSm,
+       .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
+       .visible = false,
+       .participatesInLayout = false},
+      ui::button(
+          {.out = &m_emptyTrashButton,
+           .text = "Empty Trash…",
+           .glyph = "trash",
+           .controlHeight = Style::controlHeight,
+           .variant = ButtonVariant::Destructive,
+           .onClick = [this] { dispatchAction(Action::EmptyTrash); }}
       )
   );
 }

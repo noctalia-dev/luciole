@@ -318,6 +318,7 @@ private:
   void buildScene();
   std::unique_ptr<Flex> buildTitlebar();
   std::unique_ptr<Flex> buildToolbar();
+  std::unique_ptr<Flex> buildTrashBar();
   std::unique_ptr<Flex> buildFilePane();
 
   void dismissPopup() override;
@@ -448,6 +449,7 @@ private:
   Flex* m_paneHeader = nullptr;
   Label* m_paneTitle = nullptr;
   Flex* m_toolbar = nullptr;
+  Flex* m_trashBar = nullptr;
   LayoutRect m_pageBounds{};
   std::optional<InputDispatcher::TabFocusSnapshot> m_stashedFocus;
   std::optional<luciole::BrowseViewport> m_inactiveViewport;
@@ -472,6 +474,7 @@ private:
   Button* m_up = nullptr;
   Button* m_newFolderButton = nullptr;
   Button* m_sortButton = nullptr;
+  Button* m_emptyTrashButton = nullptr;
   bool m_browserDirty = true;
   std::unique_ptr<PopupSurface> m_popupSurface;
   PopupDismiss m_popupDismiss = PopupDismiss::OutsideClick;
