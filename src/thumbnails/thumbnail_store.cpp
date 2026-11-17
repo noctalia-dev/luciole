@@ -17,7 +17,6 @@
 #include <unistd.h>
 
 namespace {
-  constexpr std::size_t kMaxEntries = 1024;
   std::string_view directory(int side) {
     return side <= 128 ? "normal" : side <= 256 ? "large" : side <= 512 ? "x-large" : "xx-large";
   }
@@ -54,7 +53,7 @@ namespace {
       return nlohmann::json::array();
     }
     auto index = nlohmann::json::parse(*text);
-    if (!index.is_array() || index.size() > kMaxEntries) {
+    if (!index.is_array()) {
       throw std::runtime_error("invalid thumbnail index");
     }
     for (const auto& item : index) {
@@ -209,7 +208,7 @@ void luciole::ThumbnailStore::write(ThumbnailPng thumbnail, int side, std::uint6
 void luciole::ThumbnailStore::writeBatch(
     std::span<const ThumbnailCacheWrite> thumbnails, std::uint64_t budget, GCancellable* cancellable
 ) {
-  if (thumbnails.empty() || thumbnails.size() > 8 || g_cancellable_is_cancelled(cancellable)) {
+  if (thumbnails.empty() || thumbnails.size() > kMaxBatch || g_cancellable_is_cancelled(cancellable)) {
     return;
   }
   struct Encoded {
@@ -281,7 +280,7 @@ void luciole::ThumbnailStore::writeBatch(
                 ++it;
               }
             }
-            while (!index.empty() && (bytes + entry.bytes.size() > budget || index.size() >= kMaxEntries)) {
+            while (!index.empty() && bytes + entry.bytes.size() > budget) {
               const auto& oldest = index.front();
               bytes -= oldest["bytes"].get<std::uint64_t>();
               removeOwned(m_root, oldest["name"].get<std::string>(), oldest["identity"].get<std::string>());

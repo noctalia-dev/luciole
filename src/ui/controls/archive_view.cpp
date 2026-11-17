@@ -20,7 +20,7 @@ namespace {
       setAlign(FlexAlign::Center);
       setGap(10);
       setPadding(6, 12);
-      setRadius(Style::radiusSm);
+      setRadius(Style::scaledRadiusSm());
       auto icon = std::make_unique<luciole::FileIcon>(icons, 24);
       m_icon = icon.get();
       addChild(std::move(icon));

@@ -31,7 +31,11 @@ preview_width = 320
 activation_mode = "double_click"
 typing_mode = "search"
 switch_to_new_tab = true
+confirm_permanent_deletion = true
 restore_last_window = false
+compact_menus = true
+background_opacity = 1.0
+corner_radius_scale = 1.0
 sort_by = "name"
 directories_first = true
 ```
@@ -66,8 +70,12 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `show_backups` | `true` | Non-directory backup names ending in `~` |
 | `always_show_tab_bar` | `true` | Keep the tab bar visible when a window has only one tab |
 | `always_show_status_bar` | `false` | Keep the status pill visible when idle, showing the item count and free space |
+| `compact_menus` | `true` | Reduce the row height and padding in context menus without shrinking their text |
+| `background_opacity` | `1.0` | Number from `0` (clear) to `1` (opaque) for the window background; tabs, toolbar, sidebar and file area share it. Menus and dialogs stay opaque |
+| `corner_radius_scale` | `1.0` | Number from `0` (square) to `2` (extra rounded) scaling every corner radius, like Noctalia's setting of the same name. Open windows apply a change after restart; menus and dialogs opened afterwards use it at once |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
+| `confirm_permanent_deletion` | `true` | Ask before permanently deleting selected items, including Shift+Delete and selections in Trash; Empty Trash always confirms |
 | `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |
 | `restore_last_window` | `false` | Reopen tabs from the last closed window once in a new window, or at startup without a requested location |
 | `terminal_command` | `""` | Terminal command and optional arguments, for example `"foot"`; empty uses `$TERMINAL`, then automatic discovery |
@@ -118,9 +126,9 @@ Name accepts `0` for automatic sizing or an integer from `160` through `16384`. 
 | --- | --- | --- |
 | `thumbnail_policy` | `"local"` | `"never"`, `"local"`, `"all"` |
 | `thumbnail_max_file_mib` | `64` | Image/PDF source limit, integer `1` through `1024`; does not limit video/audio file size |
-| `thumbnail_cache_mib` | `128` | Integer `16` through `1024` |
+| `thumbnail_cache_mib` | `1024` | Integer `16` through `8192`; only Luciole-written thumbnails count and are pruned |
 
-Local policy generates thumbnails for eligible local files. To generate thumbnails on mounted network shares such as `/mnt/media`, choose Settings → Thumbnails → Show thumbnails → All locations. All permits generation from filesystem paths, including mounted shares, and reuses the shared thumbnail cache. Locations without a filesystem path remain cache-only; Luciole does not download entire remote files for thumbnail generation.
+Local policy generates thumbnails for eligible local files. It skips network shares and FUSE mounts without a local disk, such as rclone and sshfs. A FUSE mount of local files that has no disk of its own, such as gocryptfs, is skipped too; choose All locations to get its thumbnails. To generate thumbnails on mounted network shares such as `/mnt/media`, choose Settings → Thumbnails → Show thumbnails → All locations. All permits generation from filesystem paths, including mounted shares, and reuses the shared thumbnail cache. Locations without a filesystem path remain cache-only; Luciole does not download entire remote files for thumbnail generation.
 
 The Image/PDF size limit applies to image and PDF sources. Video stills and embedded audio artwork use seekable media access and are not rejected merely because their files exceed that limit. There is no pixel-count limit: a decoding helper's memory, CPU time and output limits decide how large an image can be, which admits phone photos up to about 200 megapixels. Settings also provides cache inspection/clearing. Luciole reuses compatible shared thumbnails and preserves cache files created or replaced by other applications. Older Luciole video thumbnails regenerate using representative frames instead of always taking the opening frame. With `ffmpegthumbnailer` installed, newly generated video thumbnails include its filmstrip edges, stored in the shared cache so other file managers display them too. Missing/failing helpers keep a plain thumbnail. The edges come from the thumbnailer rather than the icon theme. Native video previews generate clean frames separately.
 

@@ -56,6 +56,7 @@ namespace {
          {P::ShowEmblems, true},
          {P::ShowBackups, true},
          {P::SwitchToNewTab, true},
+         {P::ConfirmPermanentDeletion, true},
          {P::SidebarTree, false},
          {P::ExpandableFolders, true}}
     );
@@ -68,6 +69,7 @@ namespace {
          {P::ShowEmblems, false},
          {P::ShowBackups, false},
          {P::SwitchToNewTab, false},
+         {P::ConfirmPermanentDeletion, false},
          {P::SidebarTree, true},
          {P::ExpandableFolders, false}}
     );
@@ -115,6 +117,7 @@ namespace {
         && !loaded->browser.showHidden
         && !loaded->browser.showBackups
         && !loaded->browser.switchToNewTab
+        && !loaded->browser.confirmPermanentDeletion
         && loaded->browser.gridIconSize == 64
         && loaded->browser.thumbnails.policy == luciole::ThumbnailPolicy::All
         && loaded->browser.thumbnails.cacheMiB == 64

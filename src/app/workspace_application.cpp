@@ -28,6 +28,7 @@
 #include "ui/controls/scroll_view.h"
 #include "ui/controls/tooltip_presenter.h"
 #include "ui/palette.h"
+#include "ui/style.h"
 #include "wayland/popup_surface.h"
 #include "wayland/text_input_service.h"
 #include "wayland/toplevel_surface.h"
@@ -58,6 +59,8 @@ WorkspaceApplication::WorkspaceApplication(
   m_preferences.setChangedCallback([this](const std::string& error) {
     if (m_preferences.settings()) {
       m_defaults = m_preferences.settings()->browser;
+      // Controls built from now on (menus, dialogs, tooltips) take the new rounding; open windows on restart.
+      Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
     }
     for (auto& [id, page] : m_pages) {
       (void)id;
@@ -730,7 +733,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     for (const auto& [tab, button] : host->buttons) {
       if (host->tabScroll->containsScenePoint(x, y)
           && button->containsScenePoint(x, y)
-          && !host->closeButtons.at(tab).first->containsScenePoint(x, y)
+          && (event.button == BTN_MIDDLE || !host->closeButtons.at(tab).first->containsScenePoint(x, y))
           && event.type == PointerEvent::Type::Button
           && event.pressed) {
         if (event.button == BTN_MIDDLE) {
@@ -1463,7 +1466,6 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
        .align = FlexAlign::Center,
        .gap = Style::spaceXs,
        .paddingH = Style::spaceSm,
-       .fill = colorSpecFromRole(ColorRole::SurfaceContainerLow),
        .height = kTabStripHeight,
        .participatesInLayout = false},
       std::move(scroll),
@@ -1576,7 +1578,7 @@ void WorkspaceApplication::prepare(Host& host) {
     return;
   }
   if (!host.root) {
-    host.root = ui::column({.align = FlexAlign::Stretch, .fill = colorSpecFromRole(ColorRole::SurfaceContainerLow)});
+    host.root = ui::column({.out = &host.background, .align = FlexAlign::Stretch});
     host.root->setAnimationManager(&m_animations);
     host.surface.setSceneRoot(host.root.get());
     host.dispatcher.setSceneRoot(host.root.get());
@@ -1634,6 +1636,19 @@ void WorkspaceApplication::prepare(Host& host) {
     bar->setRadius(1.0F);
     bar->setZIndex(40);
     host.root->addChild(std::move(bar));
+    auto backdrop =
+        ui::box({.out = &host.dialogBackdrop, .fill = colorSpecFromRole(ColorRole::Scrim), .visible = false});
+    backdrop->setParticipatesInLayout(false);
+    backdrop->setHitTestVisible(false);
+    backdrop->setOpacity(0.5F);
+    backdrop->setZIndex(100);
+    host.root->addChild(std::move(backdrop));
+  }
+  if (host.backgroundOpacity != m_defaults.backgroundOpacity) {
+    host.backgroundOpacity = m_defaults.backgroundOpacity;
+    host.background->setFill(
+        colorSpecFromRole(ColorRole::SurfaceContainerLow, static_cast<float>(host.backgroundOpacity))
+    );
   }
   if (host.pendingFooter) {
     host.root->addChild(std::move(host.pendingFooter));
@@ -1769,12 +1784,15 @@ void WorkspaceApplication::prepare(Host& host) {
     const LayoutRect bounds{left + (index ? first : 0), top, index ? content - first : first, bodyHeight};
     if (split && tab == window.active) {
       // Inset by the corner radius on both ends so it reads as an indicator, not a clipped border.
-      host.activePaneBar->arrange(
-          renderer, {bounds.x + kWorkspaceRadius, top, std::max(0.0F, bounds.width - kWorkspaceRadius * 2), 2}
-      );
+      const float radius = workspaceRadius();
+      host.activePaneBar->arrange(renderer, {bounds.x + radius, top, std::max(0.0F, bounds.width - radius * 2), 2});
     }
     m_pages.at(tab)->prepare(bounds, tab == window.active, index == 0 && left > 0);
   }
   active.layoutNavigation(renderer);
   syncTooltip(host);
+  host.dialogBackdrop->setVisible(std::ranges::any_of(host.mounted, [this](auto tab) {
+    return m_pages.at(tab)->dimsWindow();
+  }));
+  host.dialogBackdrop->arrange(renderer, {0, 0, width, height});
 }

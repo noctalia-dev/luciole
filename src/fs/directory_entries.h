@@ -50,6 +50,7 @@ namespace luciole {
     std::optional<FileIdentity> identity;   // Only when it is not a local device and inode pair.
     std::string parentDisplayName;
     std::optional<TrashInfo> trash;
+    std::optional<Location> target; // Provider shortcut destination; never replaces the entry operation address.
   };
 
   // Local providers' entity tag and identity as numbers; the text forms are rebuilt exactly on request.
@@ -90,6 +91,10 @@ namespace luciole {
     Location location() const { return place.resolve(name); }
     // Presentation text; equals the name unless the provider reports another.
     const std::string& displayName() const;
+    const Location* shortcutTarget() const;
+    // Folder-like provider shortcuts navigate to their destination, retaining their own listing identity.
+    bool isFolderLink() const;
+    Location navigationLocation() const;
     std::optional<std::string> etag() const;
     std::optional<FileIdentity> identity() const;
     // Search result context; never an operation address.
@@ -105,6 +110,7 @@ namespace luciole {
     void setIdentity(std::optional<FileIdentity> identity);
     void setParentDisplayName(std::string text);
     void setTrash(std::optional<TrashInfo> trash);
+    void setShortcutTarget(std::optional<Location> target);
 
   private:
     EntryExtra& editExtra();

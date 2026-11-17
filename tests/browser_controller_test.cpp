@@ -164,6 +164,55 @@ namespace {
     retiring.reset();
   }
 
+  void testProviderShortcutNavigation() {
+    Fixture fixture;
+    Pump pump;
+    BrowserController browser({}, false);
+    const auto root = Location::fromPath(fixture.path.native());
+    const auto target = root.child("child");
+    browser.open(root);
+    pump.ready(browser);
+    std::optional<Location> launched;
+    browser.setFileActivatedCallback([&](const Location& location) { launched = location; });
+    auto snapshot = browser.model().snapshot();
+    luciole::DirectoryEntry shortcut{
+        .id = 10000,
+        .place = Location::network().child("server"),
+        .name = "server",
+        .type = luciole::FileType::Shortcut,
+        .size = {},
+        .modifiedSeconds = {}
+    };
+    shortcut.setDisplayName("Server <literal> 文");
+    shortcut.setShortcutTarget(target);
+    snapshot.entries = {shortcut};
+    browser.model().applySnapshot(snapshot);
+    const auto retained = browser.model().snapshot();
+    browser.activate(shortcut.id);
+    pump.ready(browser);
+    TEST_CHECK(!launched && browser.model().snapshot().location == target);
+    TEST_CHECK(retained.entries.front().location() == shortcut.location());
+    TEST_CHECK(retained.entries.front().navigationLocation() == target);
+    TEST_CHECK(browser.back());
+    pump.ready(browser);
+    TEST_CHECK(browser.model().snapshot().location == root);
+
+    snapshot = browser.model().snapshot();
+    shortcut.setShortcutTarget(std::nullopt);
+    snapshot.entries = {shortcut};
+    browser.model().applySnapshot(snapshot);
+    browser.activate(shortcut.id);
+    TEST_CHECK(!launched && !browser.message().empty() && browser.model().snapshot().location == root);
+    shortcut.setShortcutTarget(shortcut.location());
+    snapshot.entries = {shortcut};
+    browser.model().applySnapshot(snapshot);
+    browser.activate(shortcut.id);
+    TEST_CHECK(!launched && browser.model().snapshot().location == root);
+    // Copy-on-write target facts must not change a snapshot retained by another view.
+    shortcut.setShortcutTarget(root.child("other"));
+    TEST_CHECK(retained.entries.front().navigationLocation() == target);
+  }
+
   void testDuplicatedTabs() {
     Fixture fixture;
     Pump pump;
@@ -900,6 +949,7 @@ namespace {
 int main() {
   try {
     testActionContextsAndFileLinks();
+    testProviderShortcutNavigation();
     testDuplicatedTabs();
     testNavigation();
     testFailureAndLiveUpdates();

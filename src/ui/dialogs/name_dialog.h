@@ -25,6 +25,7 @@ private:
   void submit();
   Input* m_input = nullptr;
   Label* m_message = nullptr;
+  Flex* m_messageRow = nullptr;
   Button* m_save = nullptr;
   Button* m_cancel = nullptr;
   bool m_saving = false;

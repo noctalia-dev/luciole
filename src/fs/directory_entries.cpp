@@ -52,6 +52,22 @@ const std::string& luciole::DirectoryEntry::displayName() const {
   return extra && extra->displayName ? *extra->displayName : name;
 }
 
+const luciole::Location* luciole::DirectoryEntry::shortcutTarget() const {
+  return extra && extra->target ? &*extra->target : nullptr;
+}
+bool luciole::DirectoryEntry::isFolderLink() const {
+  return type == FileType::Directory || (type == FileType::Shortcut && shortcutTarget() != nullptr);
+}
+luciole::Location luciole::DirectoryEntry::navigationLocation() const {
+  const auto* target = type == FileType::Shortcut ? shortcutTarget() : nullptr;
+  return target ? *target : location();
+}
+void luciole::DirectoryEntry::setShortcutTarget(std::optional<Location> target) {
+  if (target || (extra && extra->target)) {
+    editExtra().target = std::move(target);
+  }
+}
+
 std::optional<std::string> luciole::DirectoryEntry::etag() const {
   if (tags.etag) {
     return localEtag(tags.etagSeconds, tags.etagNanoseconds);

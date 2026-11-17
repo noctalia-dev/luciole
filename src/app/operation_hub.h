@@ -78,10 +78,11 @@ public:
   bool takeResult() { return !std::exchange(m_resultTaken, true); }
   // Runs `callback` once the current run ends, or when the hub goes away first.
   void whenIdle(std::function<void(OperationJob&)> callback) { m_idle = std::move(callback); }
+  // Runs after preparation and mutation finish, or on hub teardown to release external drop offers.
+  void whenFinished(std::function<void(OperationJob&)> callback) { m_finished = std::move(callback); }
 
 private:
   friend class OperationHub;
-
   luciole::JobId m_id;
   Service m_service;
   bool m_running = false, m_ran = false, m_resultTaken = false;
@@ -90,6 +91,7 @@ private:
   std::uint64_t m_historyGeneration = 0;
   HistoryReplay m_historyReplay = HistoryReplay::None;
   std::function<void(OperationJob&)> m_idle;
+  std::function<void(OperationJob&)> m_finished;
 };
 
 // The application's file jobs. Each job keeps running when its page closes; JobRouting picks the page that shows

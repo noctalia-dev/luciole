@@ -6,7 +6,8 @@
 constexpr float kWorkspaceInset = Style::spaceSm;
 constexpr float kTabStripHeight = Style::controlHeightSm + 2.0F * Style::spaceXs;
 constexpr float kNavigationToolbarHeight = 54.0F;
-constexpr float kWorkspaceRadius = Style::radiusXl;
+// The pane's rounded top-left corner, following the corner roundness setting.
+inline float workspaceRadius() { return Style::scaledRadiusXl(); }
 constexpr float kMinimumPaneWidth = 160.0F;
 constexpr float kMinimumPreviewWidth = 208.0F;
 constexpr float kMinimumFreeSpacePaneWidth = 320.0F;

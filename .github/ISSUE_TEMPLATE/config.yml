@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Noctalia Discord
+    url: https://discord.noctalia.dev
+    about: Questions, support, or early feature ideas.
+  - name: Luciole docs
+    url: https://docs.noctalia.dev/luciole/
+    about: Installation, configuration, and usage guides.

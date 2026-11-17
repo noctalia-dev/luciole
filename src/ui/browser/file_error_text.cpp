@@ -30,6 +30,8 @@ std::string luciole::fileErrorText(const FileError& error) {
     return "A folder cannot be placed inside itself.";
   case Kind::WouldMerge:
     return "The folders would have to be merged.";
+  case Kind::NotMounted:
+    return "The location is not mounted.";
   case Kind::Unavailable:
     return "The location is unavailable.";
   case Kind::Unsupported:

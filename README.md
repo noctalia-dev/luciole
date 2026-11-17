@@ -1,12 +1,3 @@
-# Luciole
-
-A native Wayland file manager built to stay smooth: quick to start, fluid when scrolling through large folders, and previews that never block the window.
-
-It offers grid, list and Miller column views, tabs, split view and rich file previews, and runs on any Wayland compositor. It also serves as the Open and Save file picker for other applications through xdg-desktop-portal. It pairs naturally with [Noctalia](https://github.com/noctalia-dev/noctalia) and [Umbriel](https://github.com/noctalia-dev/umbriel). Under the hood: C++23, direct Wayland and OpenGL ES, with no Qt or GTK.
-
-> [!IMPORTANT]
-> Luciole is young and actively evolving. It is usable today, but settings, shortcuts and behavior may change between releases, and rough edges remain.
-
 <p align="center">
   <img src="assets/icons/dev.noctalia.luciole.svg" alt="Luciole Logo" width="192" />
 </p>
@@ -18,13 +9,22 @@ It offers grid, list and Miller column views, tabs, split view and rich file pre
   <a href="https://github.com/noctalia-dev/luciole/stargazers">
     <img src="https://img.shields.io/github/stars/noctalia-dev/luciole?style=for-the-badge&labelColor=FFF59B&color=FFF59B&logo=github&logoColor=070722" alt="GitHub stars" />
   </a>
-  <a href="docs/user/index.md">
+  <a href="https://docs.noctalia.dev/luciole/">
     <img src="https://img.shields.io/badge/docs-FFF59B?style=for-the-badge&logo=gitbook&logoColor=070722&labelColor=FFF59B" alt="Documentation" />
   </a>
   <a href="https://discord.noctalia.dev">
     <img src="https://img.shields.io/badge/discord-FFF59B?style=for-the-badge&labelColor=FFF59B&logo=discord&logoColor=070722" alt="Discord" />
   </a>
 </p>
+
+# Luciole
+
+A native Wayland file manager built to stay smooth: quick to start, fluid when scrolling through large folders, and previews that never block the window.
+
+It offers grid, list and Miller column views, tabs, split view and rich file previews, and runs on any Wayland compositor. It also serves as the Open and Save file picker for other applications through xdg-desktop-portal. It pairs naturally with [Noctalia](https://github.com/noctalia-dev/noctalia) and [Umbriel](https://github.com/noctalia-dev/umbriel). Under the hood: C++23, direct Wayland and OpenGL ES, with no Qt or GTK.
+
+> [!IMPORTANT]
+> Luciole is young and actively evolving. It is usable today, but settings, shortcuts and behavior may change between releases, and rough edges remain.
 
 ## Why Luciole?
 
@@ -70,6 +70,27 @@ Open Settings with Ctrl+, or from the main menu; changes apply immediately. For 
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development builds, code style and checks, and the [design notes](docs/design/README.md) for architecture. Bug reports are always welcome on the [issue tracker](https://github.com/noctalia-dev/luciole/issues); help and discussion happen on [Discord](https://discord.noctalia.dev).
 
+## Donations
+
+Donations are appreciated but completely optional.
+
+<p>
+  <a href="https://www.buymeacoffee.com/noctalia">
+    <img src="https://img.shields.io/badge/Buy_Me_a_Coffee-FFF59B?style=for-the-badge&logo=buymeacoffee&logoColor=070722&labelColor=FFF59B" alt="Buy Me a Coffee">
+  </a>
+  <a href="https://ko-fi.com/noctaliadev">
+    <img src="https://img.shields.io/badge/Ko--fi-FFF59B?style=for-the-badge&logo=kofi&logoColor=070722&labelColor=FFF59B" alt="Ko-fi">
+  </a>
+</p>
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Star History
+
+<p align="center">
+  <a href="https://noctalia.dev/luciole">
+    <img src="https://api.noctalia.dev/stars-animated/luciole" alt="Star History" />
+  </a>
+</p>

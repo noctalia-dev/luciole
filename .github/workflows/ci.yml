@@ -48,7 +48,7 @@ jobs:
             cairo pango harfbuzz \
             libxkbcommon glib2 glib-networking gvfs dbus shared-mime-info \
             gdk-pixbuf2 glycin libheif libwebp librsvg libpng \
-            tomlplusplus acl libarchive xz \
+            tomlplusplus acl libarchive xz curl libxml2 \
             nlohmann-json stb \
             python ffmpeg ffmpegthumbnailer poppler 7zip \
             just clang

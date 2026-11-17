@@ -60,11 +60,7 @@ luciole::BrowserController::BrowserController(SortOptions sort, bool showHidden,
       }
     }
   });
-  m_session.setChangedCallback([this] {
-    if (!m_switchingSources && (m_query.empty() || !m_searchRecursive)) {
-      publish(m_session.snapshot());
-    }
-  });
+  m_session.setChangedCallback([this] { sessionChanged(); });
   m_search.setChangedCallback([this] {
     if (!m_switchingSources && m_searchActive && !m_query.empty()) {
       publish(m_search.snapshot());
@@ -80,6 +76,7 @@ luciole::BrowserController::BrowserController(SortOptions sort, bool showHidden,
 
 luciole::BrowserController::~BrowserController() {
   m_lifetime.reset();
+  m_mount.reset();
   m_duplicateToken.cancel();
   cancelSearchTimeout();
   m_activation->resolved = {};
@@ -92,6 +89,10 @@ luciole::BrowserController::~BrowserController() {
 }
 
 void luciole::BrowserController::advanceContext() {
+  if (m_mount) {
+    m_mount->cancel();
+  }
+  m_mountAttempted = false;
   m_pendingMetadata.clear();
   m_duplicateToken.cancel();
   m_duplicateFactsPending = false;
@@ -269,6 +270,10 @@ bool luciole::BrowserController::up() {
 }
 
 void luciole::BrowserController::refresh() {
+  if (m_mount) {
+    m_mount->cancel();
+  }
+  m_mountAttempted = false;
   m_message.clear();
   if (m_query.empty() || !m_searchRecursive) {
     if (m_tree && m_query.empty()) {
@@ -691,6 +696,14 @@ void luciole::BrowserController::activate(EntryId id) {
           }
         }
     );
+  } else if (entry->type == FileType::Shortcut) {
+    if (const auto* target = entry->shortcutTarget(); target && *target != location) {
+      open(*target);
+    } else {
+      showMessage("This network location has no valid destination. Refresh and try again.");
+    }
+  } else if (entry->type == FileType::Mountable) {
+    activateMountable(location);
   } else if (entry->type == FileType::Directory) {
     open(location);
   } else if (m_fileActivated) {

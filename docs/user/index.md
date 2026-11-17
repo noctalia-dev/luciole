@@ -2,7 +2,7 @@
 
 Luciole is a native Wayland file manager with list, grid and optional Miller column views, tabs, split view and a side preview. It runs independently of the Noctalia shell.
 
-The application is in development. The guides below describe current features; [PLAN.md](../../PLAN.md) tracks unfinished work.
+The application is in development. The guides below describe current features.
 
 ## Start here
 

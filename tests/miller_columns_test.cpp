@@ -91,6 +91,43 @@ namespace {
     throw std::runtime_error("missing ancestor: " + path.native());
   }
 
+  void providerShortcutColumns() {
+    Fixture fixture;
+    Pump pump;
+    BrowserController source({}, false);
+    source.open(Location::fromPath(fixture.path.native()));
+    pump.ready(source);
+    MillerColumns columns;
+    columns.start(source, false);
+    pump.loaded(columns);
+    auto& parent = columns.active();
+    auto snapshot = parent.model().snapshot();
+    luciole::DirectoryEntry shortcut{
+        .id = 10000,
+        .place = Location::network().child("server"),
+        .name = "server",
+        .type = luciole::FileType::Shortcut,
+        .size = {},
+        .modifiedSeconds = {}
+    };
+    const auto first = Location::fromPath((fixture.path / "a").native());
+    shortcut.setShortcutTarget(first);
+    snapshot.entries = {shortcut};
+    parent.model().applySnapshot(snapshot);
+    TEST_CHECK(parent.model().select(shortcut.id));
+    columns.synchronize();
+    TEST_CHECK(columns.columns().size() == 2 && columns.columns().back()->location == first);
+    pump.loaded(columns);
+    const auto replacement = Location::fromPath((fixture.path / "b").native());
+    shortcut.setShortcutTarget(replacement);
+    snapshot.entries = {shortcut};
+    parent.model().applySnapshot(snapshot);
+    columns.synchronize();
+    TEST_CHECK(columns.columns().size() == 2 && columns.columns().back()->location == replacement);
+    pump.loaded(columns);
+    TEST_CHECK(columns.columns().back()->browser->model().rows().empty());
+  }
+
   void parentChainAndHistory() {
     Fixture fixture;
     std::ofstream(fixture.path / "a" / "nested" / "kept.txt~") << "backup";
@@ -352,6 +389,7 @@ namespace {
 int main() {
   try {
     branchesAndSelection();
+    providerShortcutColumns();
     parentChainAndHistory();
     hiddenLinksAndFailedParents();
     boundedEntryAndEarlyInteraction();

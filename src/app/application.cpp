@@ -24,6 +24,7 @@
 #include "system/icon_theme_poll_source.h"
 #include "ui/controls/input.h"
 #include "ui/controls/permission_editor.h"
+#include "ui/style.h"
 #include "wayland/text_input_service.h"
 #include "wayland/wayland_connection.h"
 #include "xdg-shell-client-protocol.h"
@@ -140,6 +141,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, S
       throw std::runtime_error(config.issues().front().format());
     }
     luciole::initializeLibrary();
+    Style::setCornerRadiusScale(static_cast<float>(config.settings().browser.cornerRadiusScale));
     GlibPollSource glib;
     TextInputService textInput;
     WaylandConnection connection;

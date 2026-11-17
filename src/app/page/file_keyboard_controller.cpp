@@ -109,7 +109,7 @@ void FileKeyboardController::enterCursorFolder() {
   const auto& model = m_page.browser().model();
   const auto focused = model.selection().focused;
   const auto* entry = focused ? model.entry(*focused) : nullptr;
-  if (entry == nullptr || entry->type != luciole::FileType::Directory) {
+  if (entry == nullptr || !entry->isFolderLink()) {
     return;
   }
   auto request = m_page.actionRequest(false);
@@ -166,7 +166,7 @@ bool FileKeyboardController::commandKey(const KeyboardEvent& event) {
       && !event.repeat) {
     if (event.sym == XKB_KEY_Delete && (event.modifiers == 0 || event.modifiers == KeyMod::Shift)) {
       const auto& folder = m_page.browser().model().snapshot().location;
-      if (folder && folder->isTrash()) {
+      if (event.modifiers == KeyMod::Shift || (folder && folder->isTrash())) {
         m_page.dispatchAction(Action::DeletePermanently);
       } else if (event.modifiers == 0) {
         m_page.dispatchAction(Action::Trash);
@@ -351,11 +351,11 @@ bool FileKeyboardController::folderKey(const KeyboardEvent& event) {
   const bool shift = (event.modifiers & KeyMod::Shift) != 0;
   if (KeySymbol::isEnter(event.sym) && (event.modifiers & ~KeyMod::Shift) == KeyMod::Ctrl) {
     const auto* entry = focused ? model.entry(*focused) : nullptr;
-    if (!event.repeat && !m_page.choosing() && entry != nullptr && entry->type == luciole::FileType::Directory) {
+    if (!event.repeat && !m_page.choosing() && entry != nullptr && entry->isFolderLink()) {
       const auto command = shift
           ? (m_page.settings().switchToNewTab ? WorkspaceCommand::NewBackgroundTab : WorkspaceCommand::NewTab)
           : WorkspaceCommand::OpenTab;
-      m_page.requestWorkspace(command, entry->location(), std::nullopt);
+      m_page.requestWorkspace(command, entry->navigationLocation(), std::nullopt);
     }
     return true;
   }
@@ -402,7 +402,7 @@ bool FileKeyboardController::listKey(const KeyboardEvent& event) {
       }
       if (request.targets.size() == 1) {
         const auto* entry = model.entry(request.targets.front().id);
-        if (entry != nullptr && entry->type == luciole::FileType::Directory) {
+        if (entry != nullptr && entry->isFolderLink()) {
           selectFirstOnLoad();
         }
       }

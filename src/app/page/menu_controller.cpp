@@ -16,6 +16,7 @@
 #include "browser/path_completion.h"
 #include "browser/places.h"
 #include "clipboard/text_clipboard.h"
+#include "config/settings.h"
 #include "core/deferred_call.h"
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
@@ -136,7 +137,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   const bool one = request.targets.size() == 1;
   const auto* single = one ? model.entry(request.targets.front().id) : nullptr;
   const auto singleLocation = single ? std::optional(single->location()) : std::nullopt;
-  const bool singleFolder = single != nullptr && single->type == luciole::FileType::Directory;
+  const bool singleFolder = single != nullptr && single->isFolderLink();
   const bool trash = request.targets.front().location.isTrash();
 
   add(Action::Open);
@@ -320,11 +321,15 @@ void MenuController::showOpenInMenu(const luciole::ActionRequest& request) {
         if (!m_page.requestCurrent(request, luciole::ActionScope::Targets)) {
           return;
         }
+        const auto* entry = m_page.browser().model().entry(request.targets.front().id);
+        if (!entry || !entry->isFolderLink()) {
+          return;
+        }
         m_page.requestWorkspace(
             id == NewTab          ? WorkspaceCommand::OpenTab
                 : id == NewWindow ? WorkspaceCommand::NewWindow
                                   : WorkspaceCommand::OpenOther,
-            request.targets.front().location, std::nullopt
+            entry->navigationLocation(), std::nullopt
         );
       },
       kShortSubmenuWidth
@@ -352,6 +357,12 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     return;
   }
   std::vector<ContextMenuControlEntry> entries{{.id = 1, .label = "Open"}};
+  if (!m_pins.contains(bookmark.location)) {
+    showContextMenu(
+        std::move(entries), [this, location = bookmark.location](int) { m_page.browser().open(location); }, {x, y, 1, 1}
+    );
+    return;
+  }
   {
     const auto& pins = m_pins.bookmarks();
     const auto found = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);
@@ -577,8 +588,10 @@ void MenuController::showContextMenu(
   m_page.cancelDrag();
   auto menu = std::make_unique<ContextMenuControl>();
   auto* control = menu.get();
-  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F);
+  const bool compact = m_page.settings().compactMenus;
+  const float contentHeight = ContextMenuControl::preferredHeight(entries, entries.size(), 1.0F, compact);
   const float height = std::min(contentHeight, m_page.popupMaxHeight());
+  control->setCompact(compact);
   control->setMaxVisible(entries.size());
   const float width = std::min(preferredWidth, static_cast<float>(m_page.surface().width()) - 32.0F);
   control->setEntries(std::move(entries));
@@ -611,7 +624,7 @@ void MenuController::showContextMenu(
   auto root = ui::column(
       {.align = FlexAlign::Stretch,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::radiusLg},
+       .radius = Style::scaledRadiusLg()},
       std::move(scrolling)
   );
   m_page.showPopup(std::move(root), control, anchor, width, height, alignLeft);

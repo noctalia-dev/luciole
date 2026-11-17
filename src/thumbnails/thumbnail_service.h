@@ -10,7 +10,16 @@ namespace luciole {
   // Cells borrow immutable prepared pixels; the shared texture cache owns upload and residency.
   class ThumbnailService {
   public:
+    // Safety caps only: released images normally leave when they go unseen past an idle limit.
+    static constexpr std::size_t kResidentBudget = 256U * 1024U * 1024U;
+    static constexpr std::size_t kMaxEntries = 4096;
+    // Whether reading a local path may go over a network; the Local policy generates nothing there. Called on
+    // worker threads.
+    using NetworkFilesystemCheck = std::function<bool(const std::string& path)>;
     ThumbnailService();
+    explicit ThumbnailService(NetworkFilesystemCheck networkFilesystem);
+    // Concurrent decoder helpers: a quarter of the CPUs, at least two and at most six.
+    static std::size_t decoders();
     ~ThumbnailService();
     ThumbnailService(const ThumbnailService&) = delete;
     ThumbnailService& operator=(const ThumbnailService&) = delete;
@@ -29,8 +38,8 @@ namespace luciole {
     const ThumbnailOptions& options() const;
     void setChangedCallback(std::function<void()> callback);
     void clearCache();
-    // Starts queued work and cancels work nobody holds. Released images stay resident until the budget evicts the
-    // least recently used.
+    // Starts queued work and cancels work nobody holds. Released images stay resident until they go unseen for five
+    // minutes (thirty seconds for previews) or the safety budget evicts the least recently used.
     void endFrame();
     bool clearing() const;
     const std::string& error() const;

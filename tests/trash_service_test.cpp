@@ -137,6 +137,68 @@ namespace {
         && std::ranges::any_of(versions, [](const auto& path) { return read(path) == "second version"; })
     );
   }
+  void multipleParents(const Fixture& fixture, Pump& pump) {
+    const auto first = fixture.folder("drop-first");
+    const auto second = fixture.folder("drop-second");
+    write(first / "same", "first");
+    write(second / "same", "second");
+    write(second / "keep", "untouched");
+    fs::create_symlink(second / "keep", first / "link");
+    luciole::TrashService service;
+    TEST_CHECK(service.prepare({location(first / "same"), location(second / "same"), location(first / "link")}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.canTrash() && fs::exists(first / "same") && fs::exists(second / "same"));
+    pump.trash(service);
+    TEST_CHECK(service.completed() == 3);
+    const auto firstCopy = fixture.archived(first / "same"), secondCopy = fixture.archived(second / "same");
+    const auto links = fixture.archived(first / "link");
+    TEST_CHECK(firstCopy.size() == 1 && read(firstCopy.front()) == "first");
+    TEST_CHECK(secondCopy.size() == 1 && read(secondCopy.front()) == "second");
+    TEST_CHECK(links.size() == 1 && fs::read_symlink(links.front()) == second / "keep");
+    TEST_CHECK(read(second / "keep") == "untouched");
+
+    write(first / "item", "original");
+    write(second / "item", "good");
+    TEST_CHECK(service.prepare({location(first / "item"), location(second / "item")}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.canTrash());
+    fs::rename(first, fixture.home / "drop-original");
+    fs::create_directory(first);
+    write(first / "item", "replacement");
+    pump.trash(service);
+    TEST_CHECK(service.snapshot().results[0].outcome == luciole::TrashOutcome::Failed);
+    TEST_CHECK(service.snapshot().results[1].outcome == luciole::TrashOutcome::Trashed);
+    TEST_CHECK(read(first / "item") == "replacement" && read(fixture.home / "drop-original/item") == "original");
+    TEST_CHECK(fixture.archived(second / "item").size() == 1);
+  }
+  void invalidDropPayloads(const Fixture& fixture, Pump& pump) {
+    const auto parent = fixture.folder("drop-invalid");
+    fs::create_directory(parent / "a");
+    write(parent / "a/child", "child");
+    write(parent / "a-", "between");
+    write(parent / "keep", "keep");
+    luciole::TrashService service;
+    TEST_CHECK(!service.prepare(std::vector<luciole::Location>{}));
+    for (const auto& sources : std::vector<std::vector<luciole::Location>>{
+             {location(parent / "keep"), luciole::Location::fromUri("sftp://example.invalid/file")},
+             {location(parent / "keep"), luciole::Location::trash()},
+             {location(parent / "keep"), location("/")},
+             {location(parent / "keep"), location(parent / "keep")},
+             {location(parent / "keep"), location(parent / "missing")},
+             {location(parent / "a"), location(parent / "a-"), location(parent / "a/child")}
+         }) {
+      TEST_CHECK(service.prepare(sources));
+      pump.until([&] { return !service.busy(); });
+      TEST_CHECK(service.snapshot().status == luciole::TrashStatus::Error && !service.canTrash());
+      TEST_CHECK(read(parent / "keep") == "keep" && read(parent / "a/child") == "child");
+      TEST_CHECK(read(parent / "a-") == "between");
+    }
+    TEST_CHECK(service.prepare({location(parent / "keep")}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.canTrash());
+    service.cancel();
+    TEST_CHECK(!service.canTrash() && !service.trash() && read(parent / "keep") == "keep");
+  }
   void rawNames(const Fixture& fixture, Pump& pump) {
     const auto raw = std::string("raw-") + static_cast<char>(0xff);
     const auto parent = fixture.folder(raw);
@@ -296,6 +358,8 @@ int main() {
     Fixture fixture;
     Pump pump;
     preservesRecoverableContent(fixture, pump);
+    multipleParents(fixture, pump);
+    invalidDropPayloads(fixture, pump);
     rawNames(fixture, pump);
     staleTargetsAndPartialResults(fixture, pump);
     rejectsInvalidRequests(fixture, pump);

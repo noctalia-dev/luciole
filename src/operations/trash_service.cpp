@@ -6,29 +6,39 @@
 
 #include <atomic>
 #include <cerrno>
+#include <climits>
 #include <fcntl.h>
 #include <filesystem>
+#include <map>
 #include <set>
+#include <string_view>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
 namespace {
+  struct Parent {
+    std::string path;
+    luciole::Fd directory;
+    explicit Parent(std::string path)
+        : path(std::move(path)),
+          directory(luciole::checkedFd(::open(this->path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC))) {}
+  };
   struct Target {
     luciole::Location location;
     std::string name;
     luciole::Fd item;
-    Target(luciole::Location location, std::string name, int parent)
+    std::shared_ptr<Parent> parent;
+    Target(luciole::Location location, std::string name, std::shared_ptr<Parent> parent)
         : location(std::move(location)), name(std::move(name)),
-          item(luciole::checkedFd(::openat(parent, this->name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC))) {}
+          item(
+              luciole::checkedFd(::openat(parent->directory.get(), this->name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC))
+          ),
+          parent(std::move(parent)) {}
   };
   struct Prepared {
-    std::string path;
-    luciole::Fd parent;
+    std::map<std::string, std::shared_ptr<Parent>> parents;
     std::vector<std::unique_ptr<Target>> targets;
-    explicit Prepared(std::string path)
-        : path(std::move(path)),
-          parent(luciole::checkedFd(::open(this->path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC))) {}
   };
   struct Reply {
     std::shared_ptr<Prepared> prepared;
@@ -102,7 +112,13 @@ void luciole::TrashService::cancel() {
   }
 }
 bool luciole::TrashService::prepare(const Location& parent, std::vector<Location> sources) {
-  if (busy() || sources.empty()) {
+  return prepareSources(parent, std::move(sources));
+}
+bool luciole::TrashService::prepare(std::vector<Location> sources) {
+  return prepareSources(std::nullopt, std::move(sources));
+}
+bool luciole::TrashService::prepareSources(const std::optional<Location>& parent, std::vector<Location> sources) {
+  if (busy() || sources.empty() || sources.size() > 4096) {
     return false;
   }
   m_state->prepared.reset();
@@ -112,25 +128,46 @@ bool luciole::TrashService::prepare(const Location& parent, std::vector<Location
     m_state->snapshot.results.push_back({source, TrashOutcome::Cancelled, {}});
   }
   State::launch(m_state, [parent, sources = std::move(sources)](const CancelToken& token) {
-    const auto path = parent.nativePath();
-    if (!path) {
+    const auto expectedParent = parent ? parent->nativePath() : std::nullopt;
+    if (parent && !expectedParent) {
       throwFileError(FileErrorKind::Unsupported, "Moving remote items to Trash is not supported yet.");
     }
-    auto prepared = std::make_shared<Prepared>(*path);
-    std::set<std::string> names;
+    auto prepared = std::make_shared<Prepared>();
+    std::set<std::string, std::less<>> paths;
     for (const auto& source : sources) {
       if (token.cancelled()) {
         return Reply{};
       }
-      const auto native = source.nativePath();
-      if (!native || std::filesystem::path(*native).parent_path().native() != *path) {
-        throwFileError(FileErrorKind::InvalidArgument, "Trash requires items from the current native folder.");
+      const auto native = source.isNative() ? source.nativePath() : std::nullopt;
+      if (!native || (expectedParent && std::filesystem::path(*native).parent_path().native() != *expectedParent)) {
+        throwFileError(
+            FileErrorKind::InvalidArgument, "Trash requires native items from the expected containing folders."
+        );
       }
       const auto name = std::filesystem::path(*native).filename().native();
-      if (name.empty() || name == "." || name == ".." || !names.insert(name).second) {
+      if (native->size() >= PATH_MAX || name.empty() || name == "." || name == ".." || !paths.insert(*native).second) {
         throwFileError(FileErrorKind::InvalidArgument, "The Trash selection contains an invalid or repeated item.");
       }
-      prepared->targets.push_back(std::make_unique<Target>(source, name, prepared->parent.get()));
+    }
+    for (const auto& path : paths) {
+      for (auto separator = path.find('/', 1); separator != std::string::npos;
+           separator = path.find('/', separator + 1)) {
+        if (paths.contains(std::string_view(path).substr(0, separator))) {
+          throwFileError(FileErrorKind::InvalidArgument, "The Trash selection contains overlapping items.");
+        }
+      }
+    }
+    for (const auto& source : sources) {
+      if (token.cancelled()) {
+        return Reply{};
+      }
+      const std::filesystem::path path(*source.nativePath());
+      const auto folder = path.parent_path().native();
+      auto& directory = prepared->parents[folder];
+      if (!directory) {
+        directory = std::make_shared<Parent>(folder);
+      }
+      prepared->targets.push_back(std::make_unique<Target>(source, path.filename().native(), directory));
     }
     return Reply{.prepared = std::move(prepared), .results = {}, .finished = false};
   });
@@ -153,12 +190,12 @@ bool luciole::TrashService::trash() {
       const auto& target = *prepared->targets[index];
       auto& result = reply.results[index];
       try {
-        const auto currentParent = checkedFd(::open(prepared->path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-        if (!sameIdentity(statFd(prepared->parent.get()), statFd(currentParent.get()))) {
+        const auto currentParent = checkedFd(::open(target.parent->path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+        if (!sameIdentity(statFd(target.parent->directory.get()), statFd(currentParent.get()))) {
           throwFileError(FileErrorKind::Changed, "The containing folder changed. Select the items again.");
         }
         struct stat current{};
-        if (::fstatat(prepared->parent.get(), target.name.c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0) {
+        if (::fstatat(target.parent->directory.get(), target.name.c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0) {
           throwErrno(errno);
         }
         if (!sameIdentity(statFd(target.item.get()), current)) {

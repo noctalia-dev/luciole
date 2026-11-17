@@ -23,7 +23,7 @@ namespace luciole {
     std::optional<FileError> error;
   };
 
-  // A native browse selection. Preparation pins one parent and its selected entries.
+  // Preparation pins native entries and their containing folders before any move.
   class TrashService {
   public:
     TrashService();
@@ -31,6 +31,8 @@ namespace luciole {
     TrashService(const TrashService&) = delete;
     TrashService& operator=(const TrashService&) = delete;
     bool prepare(const Location& parent, std::vector<Location> sources);
+    // Native drag payloads can span containing folders; preparation pins each one before any move.
+    bool prepare(std::vector<Location> sources);
     bool trash();
     void cancel();
     bool busy() const;
@@ -40,6 +42,7 @@ namespace luciole {
     void setChangedCallback(std::function<void()> callback);
 
   private:
+    bool prepareSources(const std::optional<Location>& parent, std::vector<Location> sources);
     struct State;
     std::shared_ptr<State> m_state;
   };

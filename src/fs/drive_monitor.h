@@ -16,6 +16,24 @@ namespace luciole {
     bool operator==(const DriveUsage&) const = default;
   };
 
+  // How a mounted drive is removed, chosen as GNOME Files does: power off a hot-plugged drive that supports it,
+  // else eject removable media, else unmount.
+  enum class DriveRemoval : std::uint8_t { None, Unmount, Eject, PowerOff };
+
+  // A process GIO reports as keeping a drive busy.
+  struct DriveBlocker {
+    int pid = 0;
+    std::string name;
+  };
+
+  struct DriveRemoveResult {
+    // Empty on success.
+    std::string error;
+    // Set when open files kept the drive busy; nothing was unmounted then.
+    bool busy = false;
+    std::vector<DriveBlocker> blockers;
+  };
+
   // The root filesystem ("/" as File System), then each mountable volume or mount reported by GIO's volume
   // monitor (removable media, extra partitions, network mounts), as Nautilus lists them under "Other Locations".
   struct Drive {
@@ -25,10 +43,8 @@ namespace luciole {
     std::string glyph;
     // Set while mounted.
     std::optional<Location> root;
-    // Unmount or eject is available (the drive is mounted and GIO allows it).
-    bool removable = false;
-    // Ejecting, not just unmounting, is what removal does (removable media).
-    bool ejectable = false;
+    // Set while mounted and GIO allows removing the drive.
+    DriveRemoval removal = DriveRemoval::None;
     // Filesystem usage of the mounted root; null until queried, when unmounted, or when the size is unknown.
     std::optional<DriveUsage> usage;
   };
@@ -55,8 +71,9 @@ namespace luciole {
     void setUsageChangedCallback(std::function<void()> callback);
     // Mounts the drive if needed; done receives the root, or an error message.
     void mount(const std::string& key, std::function<void(std::optional<Location>, std::string)> done);
-    // Ejects removable media, otherwise unmounts; done receives an error message, empty on success.
-    void remove(const std::string& key, std::function<void(std::string)> done);
+    // Removes the drive as its `removal` says, without forcing: when files on it are open, nothing is unmounted
+    // and the result lists the processes GIO found.
+    void remove(const std::string& key, std::function<void(DriveRemoveResult)> done);
 
   private:
     struct State;

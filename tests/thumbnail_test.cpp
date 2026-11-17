@@ -1096,13 +1096,24 @@ namespace {
     // The blocking pdftoppm shadows the real one; glycin still needs bwrap from the system PATH.
     ::setenv("PATH", (bin.native() + ":" + path).c_str(), 1);
     luciole::ThumbnailService service;
-    auto a = service.request(first, 128), b = service.request(second, 128);
-    TEST_CHECK(a && b);
-    pump.until([&] { return service.activeJobs() == 2; });
+    // Occupy every decoder with a blocked helper.
+    const auto decoders = luciole::ThumbnailService::decoders();
+    std::vector<std::shared_ptr<const luciole::FileIconImage>> busy{
+        service.request(first, 128), service.request(second, 128)
+    };
+    for (std::uint64_t id = 200; busy.size() < decoders; ++id) {
+      auto blocked = first;
+      blocked.id = id;
+      busy.push_back(service.request(blocked, 128));
+    }
+    TEST_CHECK(std::ranges::all_of(busy, [](const auto& image) { return image != nullptr; }));
+    pump.until([&] { return service.activeJobs() == decoders; });
     auto cached = service.request(warm, 128);
     TEST_CHECK(cached != nullptr);
     pump.until([&] { return cached->ready; });
-    TEST_CHECK(cached->pixels && service.activeJobs() == 2 && !a->ready && !b->ready);
+    TEST_CHECK(cached->pixels && service.activeJobs() == decoders && std::ranges::none_of(busy, [](const auto& image) {
+                 return image->ready;
+               }));
     // A preview takes the next free decoder ahead of thumbnails that queued before it.
     std::size_t completions = 0;
     service.setChangedCallback([&] { ++completions; });
@@ -1115,13 +1126,13 @@ namespace {
     const auto preview = service.request(warm, 512, true, luciole::ThumbnailPurpose::Preview);
     TEST_CHECK(preview != nullptr);
     pump.until([&] { return completions == queued.size() + 1; });
-    a.reset();
+    busy.erase(busy.begin());
     service.endFrame();
     pump.until([&] { return preview->ready; });
     TEST_CHECK(preview->pixels && std::ranges::none_of(queued, [](const auto& image) { return image->ready; }));
     service.setChangedCallback({});
     queued.clear();
-    b.reset();
+    busy.clear();
     service.endFrame();
     pump.until([&] { return service.activeJobs() == 0; });
     ::setenv("PATH", path.c_str(), 1);
@@ -1196,7 +1207,11 @@ namespace {
     TEST_CHECK(asset != nullptr);
     pump.until([&] { return asset->ready; });
     TEST_CHECK(asset->pixels && asset->pixels->width == 32 && asset->pixels->rgba[3] == 128);
-    TEST_CHECK(thumbnails.activeJobs() <= 2 && thumbnails.reservedBytes() <= 64U * 1024U * 1024U);
+    // A published image is charged its real size, not its size class's full square.
+    TEST_CHECK(
+        thumbnails.activeJobs() <= luciole::ThumbnailService::decoders()
+        && thumbnails.reservedBytes() == asset->pixels->rgba.size()
+    );
     // A released thumbnail stays resident: scrolling back to it must not wait for the disk or a decoder.
     asset.reset();
     thumbnails.endFrame();
@@ -1219,30 +1234,33 @@ namespace {
     options.policy = luciole::ThumbnailPolicy::Local;
     thumbnails.setOptions(options);
     std::vector<std::shared_ptr<const luciole::FileIconImage>> held;
-    for (std::uint64_t id = 1; id <= 1200; ++id) {
+    for (std::uint64_t id = 1; id <= luciole::ThumbnailService::kMaxEntries + 1; ++id) {
       entry.id = id;
       if (auto image = thumbnails.request(entry, 48)) {
         held.push_back(std::move(image));
       }
     }
     TEST_CHECK(
-        thumbnails.reservedBytes() <= 64U * 1024U * 1024U && held.size() < 1200 && thumbnails.queuedJobs() <= 1024
+        thumbnails.reservedBytes() <= luciole::ThumbnailService::kResidentBudget
+        && held.size() <= luciole::ThumbnailService::kMaxEntries
+        && thumbnails.queuedJobs() <= luciole::ThumbnailService::kMaxEntries
     );
     asset.reset();
     held.clear();
     std::vector<std::shared_ptr<const luciole::FileIconImage>> overscan;
-    for (std::uint64_t id = 1; id <= 16; ++id) {
+    constexpr std::uint64_t kLarge = luciole::ThumbnailService::kResidentBudget / (1024U * 1024U * 4U);
+    for (std::uint64_t id = 1; id <= kLarge; ++id) {
       entry.id = id;
       overscan.push_back(thumbnails.request(entry, 1024, false));
       TEST_CHECK(overscan.back() != nullptr);
     }
-    entry.id = 17;
+    entry.id = kLarge + 1;
     auto visible = thumbnails.request(entry, 1024, true);
-    TEST_CHECK(visible && thumbnails.reservedBytes() == 64U * 1024U * 1024U);
+    TEST_CHECK(visible && thumbnails.reservedBytes() == luciole::ThumbnailService::kResidentBudget);
     entry.id = 1;
     TEST_CHECK(!thumbnails.request(entry, 1024, false));
-    pump.until([&] { return thumbnails.activeJobs() == 2; });
-    TEST_CHECK(thumbnails.queuedJobs() == 14);
+    pump.until([&] { return thumbnails.activeJobs() == luciole::ThumbnailService::decoders(); });
+    TEST_CHECK(thumbnails.queuedJobs() == kLarge - luciole::ThumbnailService::decoders());
     visible.reset();
     overscan.clear();
     thumbnails.endFrame();
@@ -1280,6 +1298,22 @@ namespace {
     pump.drain();
     TEST_CHECK(!retiring->pixels);
   }
+  void testNetworkFilesystemPolicy(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "network.png";
+    write(path, png(picture()));
+    const auto entry = source(path, pump);
+    luciole::ThumbnailService thumbnails([](const std::string&) { return true; });
+    auto local = thumbnails.request(entry, 48);
+    pump.until([&] { return local->ready; });
+    TEST_CHECK(!local->pixels);
+    auto options = luciole::ThumbnailOptions{};
+    options.policy = luciole::ThumbnailPolicy::All;
+    thumbnails.setOptions(options);
+    auto all = thumbnails.request(entry, 48);
+    pump.until([&] { return all->ready; });
+    TEST_CHECK(static_cast<bool>(all->pixels));
+  }
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1313,6 +1347,7 @@ int main(int argc, char** argv) {
     testCacheLanesAndCancellation(fixture);
     testPublicationAndSourceChanges(fixture);
     testService(fixture);
+    testNetworkFilesystemPolicy(fixture);
     std::println("thumbnail checks passed");
     return 0;
   } catch (const std::exception& error) {

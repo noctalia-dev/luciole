@@ -23,6 +23,9 @@ class WorkspaceApplication {
     luciole::WindowId id;
     luciole::WindowSurface surface;
     std::unique_ptr<Node> root;
+    // The root paints the one window background behind every area, so no seam or corner shows through.
+    Flex* background = nullptr;
+    double backgroundOpacity = -1.0;
     std::unique_ptr<Node> toolbar;
     Node* toolbarNode = nullptr;
     Flex* strip = nullptr;
@@ -33,6 +36,7 @@ class WorkspaceApplication {
     InputArea* previewDivider = nullptr;
     Box* previewResizeLine = nullptr;
     Box* activePaneBar = nullptr;
+    Box* dialogBackdrop = nullptr;
     // The window's only scene input: tab strip, chrome and every mounted page share it.
     InputDispatcher dispatcher;
     // Page that took the last pointer event outside the tab strip, 0 for the strip; a held button stays with it.

@@ -40,6 +40,8 @@ alias_target('generated-headers', protocol_headers)
 
 gio = dependency('gio-2.0', version: '>=2.76')
 gio_unix = dependency('gio-unix-2.0', version: '>=2.76')
+curl = dependency('libcurl', version: '>=7.85')
+xml = dependency('libxml-2.0', version: '>=2.9')
 gdk_pixbuf = dependency('gdk-pixbuf-2.0', version: '>=2.44')
 glycin = dependency('glycin-2', version: '>=2.0.1')
 if not cpp.has_header('stb/stb_image_resize2.h')
@@ -138,7 +140,13 @@ fs_lib = static_library('luciole-fs',
     'src/fs/heap_trim.cpp',
     'src/fs/interned_text.cpp',
     'src/fs/location.cpp',
+    'src/fs/location_mount.cpp',
+    'src/fs/mount_interaction.cpp',
     'src/fs/native_listing.cpp',
+    'src/fs/network_listing.cpp',
+    'src/fs/ws_discovery.cpp',
+    'src/fs/ws_discovery_metadata.cpp',
+    'src/fs/ws_discovery_protocol.cpp',
     'src/fs/transfer_location.cpp',
     'src/fs/posix_fd.cpp',
     'src/fs/recursive_search.cpp',
@@ -147,9 +155,9 @@ fs_lib = static_library('luciole-fs',
     'src/fs/xdg_dirs.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [gio, libarchive, liblzma],
+  dependencies: [gio, libarchive, liblzma, curl, xml],
 )
-fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, libarchive, liblzma])
+fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, libarchive, liblzma, curl, xml])
 
 config_lib = static_library('luciole-config',
   files(
@@ -171,6 +179,7 @@ browser_lib = static_library('luciole-browser',
   files(
     'src/browser/action_registry.cpp',
     'src/browser/browser_controller.cpp',
+    'src/browser/browser_mount.cpp',
     'src/browser/chooser_policy.cpp',
     'src/browser/directory_model.cpp',
     'src/browser/directory_tree.cpp',
@@ -353,6 +362,7 @@ ui_lib = static_library('luciole-ui',
     'src/ui/dialogs/dialog_chrome.cpp',
     'src/ui/dialogs/link_dialog.cpp',
     'src/ui/dialogs/name_dialog.cpp',
+    'src/ui/dialogs/mount_dialog.cpp',
     'src/ui/dialogs/settings_dialog.cpp',
     'src/ui/palette_file.cpp',
   ),
@@ -395,6 +405,7 @@ app = executable('luciole',
     'src/ui/controls/glyph_picker.cpp',
     'src/app/page/location_bar_controller.cpp',
     'src/app/page/menu_controller.cpp',
+    'src/app/page/mount_controller.cpp',
     'src/app/page/preview_controller.cpp',
     'src/app/page/properties_controller.cpp',
     'src/app/page/rename_controller.cpp',
@@ -421,8 +432,8 @@ app = executable('luciole',
 )
 
 configure_file(
-  input: 'assets/dbus/org.freedesktop.FileManager1.service.in',
-  output: 'org.freedesktop.FileManager1.service',
+  input: 'assets/dbus/dev.noctalia.luciole.FileManager1.service.in',
+  output: 'dev.noctalia.luciole.FileManager1.service',
   configuration: {'bindir': get_option('prefix') / get_option('bindir')},
   install_dir: get_option('datadir') / 'dbus-1/services',
 )

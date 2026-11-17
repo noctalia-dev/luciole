@@ -4,6 +4,7 @@
 #include "app/page/active_popup.h"
 #include "app/page/page_context.h"
 #include "browser/browser_controller.h"
+#include "config/settings.h"
 #include "core/input/key_symbols.h"
 #include "core/ui_phase.h"
 #include "fs/gio_ptr.h"
@@ -67,7 +68,9 @@ void TrashController::restoreChanged(OperationJob& job) {
       return std::ranges::count(results, outcome, &luciole::RestoreResult::outcome);
     };
     const auto restored = count(luciole::RestoreOutcome::Restored);
-    std::string message = std::format("{} item{} restored", restored, restored == 1 ? "" : "s");
+    std::string message = std::format(
+        "{} item{} {}", restored, restored == 1 ? "" : "s", restore.moving() ? "moved out of Trash" : "restored"
+    );
     for (const auto& [outcome, label] :
          {std::pair{luciole::RestoreOutcome::Skipped, "skipped"}, std::pair{luciole::RestoreOutcome::Failed, "failed"},
           std::pair{luciole::RestoreOutcome::Cancelled, "cancelled"},
@@ -85,24 +88,47 @@ void TrashController::restoreChanged(OperationJob& job) {
   }
 }
 
+void TrashController::deleteItems(const std::vector<luciole::DirectoryEntry>& targets) {
+  if (targets.empty()) {
+    return;
+  }
+  if (m_page.settings().confirmPermanentDeletion) {
+    openEmptyTrash(targets);
+    return;
+  }
+  m_page.cancelDrag();
+  if (!m_page.jobs().create<luciole::EmptyTrashService>()->service<luciole::EmptyTrashService>().deleteSelection(
+          targets
+      )) {
+    m_page.actionError("Could not start deleting the selection.");
+  }
+}
+
 void TrashController::openEmptyTrash(std::optional<std::vector<luciole::DirectoryEntry>> selection) {
   if (m_page.jobs().busy()) {
     m_page.actionError("Another file operation is still finishing.");
     return;
   }
+  const bool outsideTrash = selection && !selection->empty() && !selection->front().location().isTrash();
   m_page.cancelDrag();
   const float width = m_page.dialogWidth(DialogWidth::Small);
+  std::string title = "Empty Trash?";
+  if (selection) {
+    title = selection->size() == 1 ? std::format("Delete “{}”?", selection->front().displayName())
+                                   : std::format("Delete {} items?", selection->size());
+  }
+  Label* titleLabel = nullptr;
   Label* message = nullptr;
   Label* size = nullptr;
   Button* confirm = nullptr;
   auto root = ui::column(
       {.align = FlexAlign::Stretch},
       luciole::dialogHeader(
-          selection ? "Delete selected items permanently?" : "Empty Trash?", "trash", [this] { m_page.dismissPopup(); }
+          title, "trash", [this] { m_page.dismissPopup(); }, &titleLabel
       ),
       ui::label(
           {.out = &message,
-           .text = "Reading Trash…",
+           .text = outsideTrash ? "Preparing deletion…" : "Reading Trash…",
            .maxWidth = width - 24.0F,
            .maxLines = 4,
            .configure = [](Label& label) { label.setUseMarkup(false); }}
@@ -122,13 +148,17 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
           ),
           ui::button(
               {.out = &confirm,
-               .text = selection ? "Delete permanently" : "Empty Trash",
+               .text = selection ? "Delete" : "Empty Trash",
                .enabled = false,
                .variant = ButtonVariant::Destructive,
                .onClick = [this] { confirmEmptyTrash(); }}
           )
       )
   );
+  if (selection) {
+    titleLabel->setMaxLines(2);
+    titleLabel->setEllipsize(TextEllipsize::Middle);
+  }
   luciole::applyDialogStyle(*root);
   m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.popupSurface() != nullptr) {
@@ -145,8 +175,10 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
     m_emptyTrashSize = size;
     m_emptyTrashConfirm = confirm;
     auto& emptyTrash = m_emptyTrash->service<luciole::EmptyTrashService>();
-    if (!(selection ? emptyTrash.prepareSelection(std::move(*selection)) : emptyTrash.prepare())) {
-      message->setText("Another Trash deletion is still finishing.");
+    if (!(outsideTrash    ? emptyTrash.prepareDeletion(std::move(*selection))
+              : selection ? emptyTrash.prepareSelection(std::move(*selection))
+                          : emptyTrash.prepare())) {
+      message->setText("Another deletion is still finishing.");
     }
   }
 }
@@ -207,7 +239,9 @@ void TrashController::emptyTrashChanged(OperationJob& job) {
     }
     m_page.actionError(std::move(message));
     auto& browser = m_page.browser();
-    if (const auto& location = browser.model().snapshot().location; location && location->isTrash()) {
+    if (snapshot.outsideTrash) {
+      browser.refresh();
+    } else if (const auto& location = browser.model().snapshot().location; location && location->isTrash()) {
       browser.open(luciole::Location::trash());
     }
   } else if (snapshot.status == luciole::EmptyTrashStatus::Error && job.takeResult()) {
@@ -226,16 +260,26 @@ void TrashController::syncEmptyTrash() {
   const auto& snapshot = emptyTrash.snapshot();
   if (snapshot.status == luciole::EmptyTrashStatus::Ready) {
     const auto count = snapshot.results.size();
-    m_emptyTrashMessage->setText(
-        count == 0 ? "Trash is already empty."
-                   : std::format(
-                         "Permanently delete {} item{} and their contents? This cannot be undone.", count,
-                         count == 1 ? "" : "s"
-                     )
-    );
+    if (count == 0) {
+      m_emptyTrashMessage->setText("Trash is already empty.");
+    } else if (snapshot.selection) {
+      m_emptyTrashMessage->setText(
+          count == 1 ? "This item will be permanently deleted. This cannot be undone."
+                     : "These items will be permanently deleted. This cannot be undone."
+      );
+    } else {
+      m_emptyTrashMessage->setText(
+          std::format(
+              "Permanently delete {} item{} and their contents? This cannot be undone.", count, count == 1 ? "" : "s"
+          )
+      );
+    }
     m_emptyTrashConfirm->setEnabled(emptyTrash.canEmpty());
   } else if (snapshot.status == luciole::EmptyTrashStatus::Error) {
-    m_emptyTrashMessage->setText("Could not read Trash: " + luciole::fileErrorText(snapshot.error));
+    m_emptyTrashMessage->setText(
+        std::string(snapshot.outsideTrash ? "Could not prepare deletion: " : "Could not read Trash: ")
+        + luciole::fileErrorText(snapshot.error)
+    );
     m_emptyTrashConfirm->setEnabled(false);
   }
   std::string sizeText = "Size: calculating…";

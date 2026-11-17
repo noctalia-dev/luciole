@@ -20,6 +20,8 @@
   dconf,
   dbus,
   gvfs,
+  curl,
+  libxml2,
   pango,
   harfbuzz,
   libpng,
@@ -112,7 +114,6 @@ stdenv.mkDerivation (finalAttrs: {
         "__pycache__"
         "result"
         "AGENTS.md"
-        "PLAN.md"
       ])
       && !(lib.hasPrefix "build-" name)
       && !(lib.hasPrefix "result-" name);
@@ -142,6 +143,8 @@ stdenv.mkDerivation (finalAttrs: {
     fontconfig
     cairo
     glib
+    curl
+    libxml2
     pango
     harfbuzz
     libpng

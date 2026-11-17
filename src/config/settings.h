@@ -19,6 +19,7 @@ namespace luciole {
     SortOptions sort;
     ActivationMode activationMode = ActivationMode::DoubleClick;
     TypingMode typingMode = TypingMode::Search;
+    bool confirmPermanentDeletion = true;
     bool switchToNewTab = true;
     bool restoreLastWindow = false;
     ViewMode viewMode = ViewMode::List;
@@ -26,6 +27,9 @@ namespace luciole {
     bool showBackups = true;
     bool alwaysShowTabBar = true;
     bool alwaysShowStatusBar = false;
+    bool compactMenus = true;
+    double backgroundOpacity = 1.0; // 0 (clear) to 1 (opaque) for the window background.
+    double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
     int sidebarWidth = kDefaultSidebarWidth;
@@ -62,12 +66,16 @@ namespace luciole {
   enum class BrowserPreferenceId : std::uint8_t {
     ActivationMode,
     TypingMode,
+    ConfirmPermanentDeletion,
     SwitchToNewTab,
     RestoreLastWindow,
     ShowHidden,
     ShowBackups,
     AlwaysShowTabBar,
     AlwaysShowStatusBar,
+    CompactMenus,
+    BackgroundOpacity,
+    CornerRadiusScale,
     SortBy,
     SortDescending,
     DirectoriesFirst,
@@ -137,12 +145,16 @@ namespace luciole {
     static constexpr PreferenceKey<std::string> TerminalCommand{Id::TerminalCommand};
     static constexpr PreferenceKey<luciole::ActivationMode> ActivationMode{Id::ActivationMode};
     static constexpr PreferenceKey<luciole::TypingMode> TypingMode{Id::TypingMode};
+    static constexpr PreferenceKey<bool> ConfirmPermanentDeletion{Id::ConfirmPermanentDeletion};
     static constexpr PreferenceKey<bool> SwitchToNewTab{Id::SwitchToNewTab};
     static constexpr PreferenceKey<bool> RestoreLastWindow{Id::RestoreLastWindow};
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};
     static constexpr PreferenceKey<bool> ShowBackups{Id::ShowBackups};
     static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
     static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
+    static constexpr PreferenceKey<bool> CompactMenus{Id::CompactMenus};
+    static constexpr PreferenceKey<double> BackgroundOpacity{Id::BackgroundOpacity};
+    static constexpr PreferenceKey<double> CornerRadiusScale{Id::CornerRadiusScale};
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};
     static constexpr PreferenceKey<bool> SortDescending{Id::SortDescending};
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
@@ -211,7 +223,7 @@ namespace luciole {
   private:
     BrowserPreferenceId m_preference;
     std::variant<
-        std::monostate, bool, int, SortField, ViewMode, ViewDensity, FilenameTruncation, DetailsColumnOrder,
+        std::monostate, bool, int, double, SortField, ViewMode, ViewDensity, FilenameTruncation, DetailsColumnOrder,
         ActivationMode, TypingMode, ThumbnailPolicy, std::string>
         m_value;
   };

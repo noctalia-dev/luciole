@@ -6,7 +6,15 @@ Prefer a distribution package when one is available; it provides the simplest in
 
 ## Arch Linux
 
-An AUR package is planned. Until it is published, follow the source build below.
+[`luciole-git`](https://aur.archlinux.org/packages/luciole-git) is available in the AUR and builds the latest development version. Install it with an AUR helper such as `paru` or `yay`:
+
+```sh
+paru -S luciole-git
+# or
+yay -S luciole-git
+```
+
+Optional helpers for video, PDF and archive support and network locations are listed as optional dependencies; see [optional features](#optional-features).
 
 ## Build from source
 

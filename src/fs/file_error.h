@@ -19,6 +19,7 @@ namespace luciole {
     WouldRecurse,
     WouldMerge,
     Unavailable,
+    NotMounted,
     Unsupported,
     Changed, // The item or its folder no longer matches what the operation captured.
     Cancelled,

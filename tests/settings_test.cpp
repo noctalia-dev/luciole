@@ -45,6 +45,50 @@ namespace {
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   }
 
+  void testBackgroundOpacity() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.backgroundOpacity == 1.0);
+    fixture.write("config.toml", "[browser]\nbackground_opacity = 0\n");
+    TEST_CHECK(service.reload() && service.settings().browser.backgroundOpacity == 0.0);
+    fixture.write("config.toml", "[browser]\nbackground_opacity = 0.4\n");
+    TEST_CHECK(service.reload() && service.settings().browser.backgroundOpacity == 0.4);
+    const std::array edit{luciole::OverrideEdit{luciole::BrowserPreference::BackgroundOpacity, 0.6}};
+    TEST_CHECK(service.saveOverrides(edit) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.backgroundOpacity == 0.6);
+    TEST_CHECK(read(fixture.paths().overrides).contains("background_opacity = 0.6\n"));
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::BackgroundOpacity, std::nullopt}};
+    TEST_CHECK(service.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.backgroundOpacity == 0.4);
+    for (const auto* value : {"-0.1", "1.5", "nan", "true", "'0.5'"}) {
+      fixture.write("config.toml", std::format("[browser]\nbackground_opacity = {}\n", value));
+      TEST_CHECK(!service.reload() && service.settings().browser.backgroundOpacity == 0.4);
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
+  void testCornerRadiusScale() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.cornerRadiusScale == 1.0);
+    fixture.write("config.toml", "[browser]\ncorner_radius_scale = 0\n");
+    TEST_CHECK(service.reload() && service.settings().browser.cornerRadiusScale == 0.0);
+    fixture.write("config.toml", "[browser]\ncorner_radius_scale = 2\n");
+    TEST_CHECK(service.reload() && service.settings().browser.cornerRadiusScale == 2.0);
+    const std::array edit{luciole::OverrideEdit{luciole::BrowserPreference::CornerRadiusScale, 1.5}};
+    TEST_CHECK(service.saveOverrides(edit) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.cornerRadiusScale == 1.5);
+    TEST_CHECK(read(fixture.paths().overrides).contains("corner_radius_scale = 1.5\n"));
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::CornerRadiusScale, std::nullopt}};
+    TEST_CHECK(service.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.cornerRadiusScale == 2.0);
+    for (const auto* value : {"-0.1", "2.5", "nan", "true", "'1'"}) {
+      fixture.write("config.toml", std::format("[browser]\ncorner_radius_scale = {}\n", value));
+      TEST_CHECK(!service.reload() && service.settings().browser.cornerRadiusScale == 2.0);
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
   void testTerminalCommand() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -79,6 +123,24 @@ namespace {
     TEST_CHECK(!restored.reload() && !restored.settings().browser.switchToNewTab);
     fixture.write("config.toml", "[browser]\nswitch_to_new_tab = true\n");
     TEST_CHECK(restored.reload() && restored.settings().browser.switchToNewTab);
+  }
+  void testDeletionConfirmationPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.confirmPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nconfirm_permanent_deletion = false\n");
+    TEST_CHECK(service.reload() && !service.settings().browser.confirmPermanentDeletion);
+    const std::array on{luciole::OverrideEdit{luciole::BrowserPreference::ConfirmPermanentDeletion, true}};
+    TEST_CHECK(service.saveOverrides(on) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && restored.settings().browser.confirmPermanentDeletion);
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::ConfirmPermanentDeletion, std::nullopt}};
+    TEST_CHECK(restored.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(restored.reload() && !restored.settings().browser.confirmPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nconfirm_permanent_deletion = 'false'\n");
+    TEST_CHECK(!restored.reload() && !restored.settings().browser.confirmPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nconfirm_permanent_deletion = true\n");
+    TEST_CHECK(restored.reload() && restored.settings().browser.confirmPermanentDeletion);
   }
   void testRestoreLastWindowPreference() {
     Fixture fixture;
@@ -986,7 +1048,7 @@ namespace {
     );
     for (const auto* invalid :
          {"thumbnail_policy = true", "thumbnail_policy = 'remote'", "thumbnail_max_file_mib = 0",
-          "thumbnail_max_file_mib = 1025", "thumbnail_cache_mib = 15", "thumbnail_cache_mib = 1025",
+          "thumbnail_max_file_mib = 1025", "thumbnail_cache_mib = 15", "thumbnail_cache_mib = 8193",
           "thumbnail_max_file_mib = 1.5"}) {
       fixture.write("config.toml", std::string("[browser]\n") + invalid + "\n");
       TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
@@ -1107,12 +1169,15 @@ namespace {
 
 int main() {
   try {
+    testBackgroundOpacity();
+    testCornerRadiusScale();
     testTerminalCommand();
     testSchemaAndDiagnostics();
     testPresentationSettings();
     testFilenameTruncation();
     testBackupPreference();
     testNewTabPreference();
+    testDeletionConfirmationPreference();
     testRestoreLastWindowPreference();
     testMillerSettings();
     testMillerParents();

@@ -5,6 +5,7 @@
 #include "app/page/page_context.h"
 #include "browser/browser_controller.h"
 #include "browser/location_presentation.h"
+#include "config/settings.h"
 #include "core/deferred_call.h"
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
@@ -287,6 +288,7 @@ void ArchiveController::sync() {
         }
     );
     m_view = root.get();
+    root->setFill(colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_page.settings().backgroundOpacity)));
     root->setParticipatesInLayout(false);
     root->setZIndex(1000);
     m_page.sceneRoot().addChild(std::move(root));

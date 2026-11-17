@@ -70,6 +70,10 @@ std::optional<std::string> luciole::Location::nativePath() const {
 }
 
 luciole::Location luciole::Location::trash() { return Location("trash:///"); }
+luciole::Location luciole::Location::network() { return Location("network:///"); }
+bool luciole::Location::isNetworkDiscovery() const {
+  return m_uri.starts_with("network:") || m_uri.starts_with("dns-sd:") || m_uri.starts_with("wsdd:");
+}
 bool luciole::Location::isTrash() const { return trashUri(m_uri); }
 bool luciole::Location::isNative() const { return g_file_is_native(gioFile(*this).get()) != FALSE; }
 

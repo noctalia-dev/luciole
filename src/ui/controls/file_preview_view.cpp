@@ -32,7 +32,7 @@ FilePreviewView::FilePreviewView(
     addChild(luciole::dialogHeader("Preview", "eye", std::move(close), &m_heading));
   } else {
     // Docked, the preview is part of the flush content plane.
-    setPadding(Style::spaceMd, Style::spaceMd, Style::borderWidth, Style::spaceMd);
+    setPadding(Style::spaceMd);
     setGap(Style::spaceMd);
     setFill(colorSpecFromRole(ColorRole::Surface));
     addChild(

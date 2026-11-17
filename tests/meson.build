@@ -13,6 +13,7 @@ activation_server = custom_target('launch-activation-server-header',
 )
 
 test_table = [
+  {'name': 'ws-discovery', 'deps': [fs_dep], 'env': gio_env, 'wrapper': files('ws_discovery_test.py')},
   {'name': 'input-lifetime', 'deps': [noctalia_ui_dep]},
   {'name': 'tab-workspace', 'deps': [browser_dep]},
   {'name': 'job-routing', 'deps': [browser_dep]},

@@ -52,9 +52,13 @@ namespace {
     }
     return clipboard(c, r);
   }
+  State trashItems(const C& c, const R& r, bool restore);
   State fileClipboard(const C& c, const R& r, bool cut) {
     if (!c.clipboardAvailable) {
       return unavailable("The application clipboard is unavailable.");
+    }
+    if (cut && r.folder && r.folder->isTrash()) {
+      return trashItems(c, r, false);
     }
     if (!all(c, r, [&](const DirectoryEntry& entry) {
           const auto location = entry.location();
@@ -472,10 +476,21 @@ namespace {
        .rule = [](const C& c, const R& r) { return trashItems(c, r, true); }},
       {.action = A::DeletePermanently,
        .label = "Delete Permanently…",
-       .shortcut = "Delete",
+       .shortcut = "Shift+Delete",
        .scope = S::Targets,
        .destructive = true,
-       .rule = [](const C& c, const R& r) { return trashItems(c, r, false); }},
+       .rule = [](const C& c, const R& r) {
+         if (r.folder && r.folder->isTrash()) {
+           return trashItems(c, r, false);
+         }
+         if (const auto state = writable(c); !state.enabled) {
+           return state;
+         }
+         return require(ready(c) && r.targets.size() <= 4096 && all(c, r, [](const DirectoryEntry& entry) {
+           const auto location = entry.location();
+           return location.isNative() && location.parent().has_value() && entry.access.remove != false;
+         }), "Select deletable native items outside Trash.");
+       }},
       {.action = A::Properties, .label = "Properties", .shortcut = "Alt+Return", .scope = S::Targets},
       {.action = A::Compress,
        .label = "Compress…",
@@ -649,6 +664,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::CopyPath:
   case A::CopyUri:
   case A::KeyboardShortcuts:
+  case A::CreateFolder:
     return true;
   case A::Miller:
   case A::OpenWith:
@@ -669,7 +685,6 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::ExtractHere:
   case A::ExtractTo:
   case A::BrowseArchive:
-  case A::CreateFolder:
   case A::CreateFile:
   case A::NewDocument:
   case A::PinCurrent:

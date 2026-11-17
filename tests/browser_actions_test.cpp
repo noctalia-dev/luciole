@@ -55,7 +55,7 @@ namespace {
     };
     const auto request = R::capture(context);
     TEST_CHECK(R::current(context, request, luciole::ActionScope::Targets));
-    for (const auto action : {A::Open, A::CopyFiles, A::Rename, A::Trash, A::Properties}) {
+    for (const auto action : {A::Open, A::CopyFiles, A::Rename, A::Trash, A::DeletePermanently, A::Properties}) {
       TEST_CHECK(!R::state(action, context, request).enabled);
     }
     test::editEntries(data, [](auto& entries) { entries[0].metadataPending = false; });
@@ -246,11 +246,17 @@ namespace {
     model.applySnapshot(data);
     model.select(1);
     luciole::ActionContext context{.model = model, .context = 33, .query = {}, .pinned = {}};
+    context.clipboardAvailable = true;
     const auto request = R::capture(context);
     TEST_CHECK(
         R::state(A::Restore, context, request).enabled && R::state(A::DeletePermanently, context, request).enabled
     );
+    test::editEntries(data, [&](auto& entries) { entries[0].access.rename = false; });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(R::state(A::CutFiles, context, request).enabled && !R::state(A::CopyFiles, context, request).enabled);
     context.operationsBusy = true;
+    TEST_CHECK(!R::state(A::CutFiles, context, request).enabled);
     TEST_CHECK(
         !R::state(A::Restore, context, request).enabled && !R::state(A::DeletePermanently, context, request).enabled
     );
@@ -261,10 +267,12 @@ namespace {
     TEST_CHECK(
         !R::state(A::Restore, context, request).enabled && R::state(A::DeletePermanently, context, request).enabled
     );
+    TEST_CHECK(R::state(A::CutFiles, context, request).enabled);
     test::editEntries(data, [&](auto& entries) { entries[0].access.remove = false; });
     ++data.generation;
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, request).enabled);
+    TEST_CHECK(!R::state(A::CutFiles, context, request).enabled);
     test::editEntries(data, [&](auto& entries) { entries[0].access.remove = true; });
     data.location = luciole::Location::fromUri("trash:///folder");
     test::editEntries(data, [&](auto& entries) {
@@ -272,11 +280,20 @@ namespace {
     });
     ++data.generation;
     model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
     data.location = luciole::Location::fromPath("/tmp/action-fixture");
     test::editEntries(data, [&](auto& entries) {
       entries[0].place = luciole::Location::fromPath("/tmp/action-fixture/alpha.txt");
     });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    TEST_CHECK(R::state(A::DeletePermanently, context, R::capture(context)).enabled);
+    context.operationsBusy = true;
+    TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
+    context.operationsBusy = false;
+    test::editEntries(data, [](auto& entries) { entries[0].access.remove = false; });
     ++data.generation;
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
@@ -802,7 +819,11 @@ namespace {
     TEST_CHECK(!luciole::shortcutMatches(A::Terminal, XKB_KEY_F4, KeyMod::Ctrl));
     TEST_CHECK(!luciole::shortcutMatches(A::Root, 0, 0));
     TEST_CHECK(luciole::shortcutAction({A::Grid, A::List, A::Miller}, XKB_KEY_2, KeyMod::Ctrl) == A::List);
-    TEST_CHECK(luciole::shortcutAction({A::DeletePermanently, A::Trash}, XKB_KEY_Delete, 0) == A::DeletePermanently);
+    TEST_CHECK(luciole::shortcutAction({A::DeletePermanently, A::Trash}, XKB_KEY_Delete, 0) == A::Trash);
+    TEST_CHECK(
+        luciole::shortcutAction({A::DeletePermanently, A::Trash}, XKB_KEY_Delete, KeyMod::Shift) == A::DeletePermanently
+    );
+    TEST_CHECK(!luciole::shortcutAction({A::DeletePermanently, A::Trash}, XKB_KEY_Delete, KeyMod::Ctrl));
     TEST_CHECK(!luciole::shortcutAction({A::Back, A::Forward}, XKB_KEY_Left, 0));
   }
 } // namespace

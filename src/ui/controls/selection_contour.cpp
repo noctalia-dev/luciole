@@ -29,7 +29,7 @@ namespace {
 
   void contour(
       cairo_t* cr, const std::vector<std::uint8_t>& selected, std::size_t columns, double columnStride,
-      double rowStride, double width, double height
+      double rowStride, double width, double height, double radius
   ) {
     constexpr auto absent = std::numeric_limits<std::size_t>::max();
     std::vector<Edge> edges;
@@ -102,7 +102,6 @@ namespace {
       if (index != start || vertices.size() < 4) {
         continue;
       }
-      constexpr double radius = SelectionContour::cornerRadius;
       constexpr double arc = 0.5522847498307936;
       for (std::size_t i = 0; i <= vertices.size(); ++i) {
         const auto current = vertices[i % vertices.size()];
@@ -131,7 +130,9 @@ namespace {
   using Context = std::unique_ptr<cairo_t, decltype(&cairo_destroy)>;
 } // namespace
 
-SelectionContour::SelectionContour() {
+float SelectionContour::cornerRadius() { return Style::scaledRadius(kBaseCornerRadius); }
+
+SelectionContour::SelectionContour() : m_radius(cornerRadius()) {
   setHitTestVisible(false);
   m_fill = static_cast<ImageNode*>(addChild(std::make_unique<ImageNode>()));
   m_outline = static_cast<ImageNode*>(addChild(std::make_unique<ImageNode>()));
@@ -186,7 +187,7 @@ void SelectionContour::doLayout(Renderer& renderer) {
     Context outlineContext(cairo_create(outline.get()), &cairo_destroy);
     cairo_scale(fillContext.get(), scale, scale);
     cairo_set_source_rgba(fillContext.get(), 1, 1, 1, 1);
-    contour(fillContext.get(), m_selected, m_columns, m_columnStride, m_rowStride, width(), height());
+    contour(fillContext.get(), m_selected, m_columns, m_columnStride, m_rowStride, width(), height(), m_radius);
     const std::unique_ptr<cairo_path_t, decltype(&cairo_path_destroy)> path(
         cairo_copy_path(fillContext.get()), &cairo_path_destroy
     );

@@ -62,7 +62,7 @@ public:
     auto& button = static_cast<TreeButton&>(tile);
     button.bind(
         m_owner.m_tree.row(id), entry->displayName(), glyph == m_owner.m_glyphs.end() ? "folder" : glyph->second,
-        m_owner.m_current == entry->location(), hovered, m_owner.width()
+        m_owner.m_current == entry->navigationLocation(), hovered, m_owner.width()
     );
     button.setKeyboardFocusHint(m_owner.m_grid->focusArea()->focused() && m_owner.m_model.selection().focused == id);
   }
@@ -102,7 +102,7 @@ public:
     if (m_expand) {
       (void)m_owner.m_tree.toggle(id);
     } else if (m_owner.open) {
-      const auto target = m_owner.m_model.entry(id)->location();
+      const auto target = m_owner.m_model.entry(id)->navigationLocation();
       m_owner.open(target);
     }
   }
@@ -275,11 +275,12 @@ void luciole::SidebarTreeView::prepare() {
 }
 std::optional<luciole::Bookmark> luciole::SidebarTreeView::bookmark(EntryId id) const {
   const auto* entry = m_model.entry(id);
-  return entry ? std::optional(Bookmark{entry->displayName(), entry->location(), {}}) : std::nullopt;
+  return entry ? std::optional(Bookmark{entry->displayName(), entry->navigationLocation(), {}}) : std::nullopt;
 }
 InputArea* luciole::SidebarTreeView::focusArea(const Location& location) {
-  const auto found =
-      std::ranges::find_if(m_model.rows(), [&](EntryId id) { return m_model.entry(id)->location() == location; });
+  const auto found = std::ranges::find_if(m_model.rows(), [&](EntryId id) {
+    return m_model.entry(id)->navigationLocation() == location;
+  });
   if (found == m_model.rows().end()) {
     return nullptr;
   }
@@ -293,7 +294,7 @@ std::optional<luciole::Bookmark> luciole::SidebarTreeView::folderAt(float x, flo
 }
 std::optional<LayoutRect> luciole::SidebarTreeView::folderRect(const Location& location) const {
   for (std::size_t i = 0; i < m_model.rows().size(); ++i) {
-    if (m_model.entry(m_model.rows()[i])->location() == location) {
+    if (m_model.entry(m_model.rows()[i])->navigationLocation() == location) {
       if (const auto rect = m_grid->itemRect(i)) {
         return rect;
       }
@@ -328,8 +329,10 @@ LayoutRect luciole::SidebarTreeView::dropLine(std::size_t slot) const {
   }
   float line = y;
   for (std::size_t i = 0; i < m_model.rows().size(); ++i) {
-    if (const auto rect = m_grid->itemRect(i)) {
-      line = std::max(line, rect->y + rect->height + 2);
+    if (m_pinIndices.contains(m_model.rows()[i])) {
+      if (const auto rect = m_grid->itemRect(i)) {
+        line = std::max(line, rect->y + rect->height + 2);
+      }
     }
   }
   return {x, std::min(line, y + height() - 2), width(), 2};

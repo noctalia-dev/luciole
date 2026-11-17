@@ -27,7 +27,7 @@ std::unique_ptr<Flex> StatusBarController::build() {
        .paddingV = Style::spaceXs,
        .paddingH = Style::spaceMd,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::radiusXl,
+       .radius = Style::scaledRadiusXl(),
        .border = colorSpecFromRole(ColorRole::OutlineVariant),
        .minHeight = Style::controlHeightSm,
        .visible = false,
@@ -84,9 +84,20 @@ std::unique_ptr<Flex> StatusBarController::buildNotice() {
 }
 
 void StatusBarController::sync(bool miller) {
-  const auto& model = m_page.browser().model();
+  const auto& browser = m_page.browser();
+  const auto& model = browser.model();
   const auto& snapshot = model.snapshot();
-  const bool loading = snapshot.status == luciole::DirectoryStatus::Loading;
+  const auto context = browser.contextSerial();
+  if (m_statusContext != context) {
+    m_statusContext = context;
+    m_contextLoaded = false;
+    m_freeBytes.reset();
+  }
+  if (snapshot.status == luciole::DirectoryStatus::Ready) {
+    m_contextLoaded = true;
+  }
+  const bool refreshing = snapshot.status == luciole::DirectoryStatus::Loading;
+  const bool loading = refreshing && (!m_contextLoaded || snapshot.incrementalResults);
   const bool alwaysShow = m_page.settings().alwaysShowStatusBar;
   std::string status;
   // The idle folder count stays hidden unless the setting keeps the pill visible.
@@ -116,7 +127,8 @@ void StatusBarController::sync(bool miller) {
         status += std::format(" · {} folders could not be searched", m_page.browser().skippedSearchFolders());
       }
     } else if (loading) {
-      status = "Loading folder…";
+      status = snapshot.location && snapshot.location->isNetworkDiscovery() ? "Finding network locations…"
+                                                                            : "Loading folder…";
     } else if (snapshot.status == luciole::DirectoryStatus::Cancelled) {
       status = "Loading stopped.";
     } else {
@@ -133,7 +145,7 @@ void StatusBarController::sync(bool miller) {
       }
     }
   }
-  if (snapshot.location && snapshot.location->isTrash() && !snapshot.error && !loading) {
+  if (snapshot.location && snapshot.location->isTrash() && !snapshot.error && !refreshing) {
     status += " · Refresh to update";
   }
   if (!model.selection().selected.empty()) {
@@ -160,13 +172,16 @@ void StatusBarController::sync(bool miller) {
   }
   m_status->setText(status);
   m_needed = needed;
-  const auto freeBytes = snapshot.metadata.filesystem.freeBytes;
-  m_freeSpaceAvailable = freeBytes
-      && !snapshot.metadataLoading
-      && !snapshot.filesystemError
-      && !snapshot.error
-      && snapshot.location
-      && !snapshot.location->isTrash();
+  auto freeBytes = snapshot.metadata.filesystem.freeBytes;
+  if (freeBytes) {
+    m_freeBytes = freeBytes;
+  } else if (snapshot.metadataLoading) {
+    freeBytes = m_freeBytes;
+  } else {
+    m_freeBytes.reset();
+  }
+  m_freeSpaceAvailable =
+      freeBytes && !snapshot.filesystemError && !snapshot.error && snapshot.location && !snapshot.location->isTrash();
   if (m_freeSpaceAvailable) {
     const luciole::GString size(g_format_size_full(*freeBytes, G_FORMAT_SIZE_IEC_UNITS));
     m_freeSpace->setText(std::format("{} free", size.get()));
@@ -179,7 +194,12 @@ void StatusBarController::sync(bool miller) {
   };
   const auto notice = [&] -> Notice {
     if (snapshot.error) {
-      return {"alert-triangle", "Could not open this folder", status};
+      return {
+          "alert-triangle",
+          snapshot.location && snapshot.location->isNetworkDiscovery() ? "Network browsing unavailable"
+                                                                       : "Could not open this folder",
+          status
+      };
     }
     if (loading) {
       return {"hourglass-empty", status, {}};
@@ -193,6 +213,12 @@ void StatusBarController::sync(bool miller) {
       return {"search", "No results", std::format("No files or folders match “{}”.", query)};
     }
     if (snapshot.entries.empty()) {
+      if (snapshot.location && snapshot.location->isNetworkDiscovery()) {
+        return {
+            "network", "No network locations found",
+            "You can still connect by entering a server address in the location bar."
+        };
+      }
       return snapshot.location == luciole::Location::trash() ? Notice{"trash", "Trash is empty", {}}
                                                              : Notice{"folder-open", "This folder is empty", {}};
     }

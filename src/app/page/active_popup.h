@@ -30,6 +30,7 @@ public:
     TransferConflict,
     DropAction,
     ArchivePassword,
+    Mount,
     RunProgram,
     Operations,
     OperationDetails,

@@ -42,6 +42,8 @@ luciole::FileError luciole::fileError(const GError& error) {
       kind = Kind::WouldMerge;
       break;
     case G_IO_ERROR_NOT_MOUNTED:
+      kind = Kind::NotMounted;
+      break;
     case G_IO_ERROR_HOST_NOT_FOUND:
     case G_IO_ERROR_HOST_UNREACHABLE:
     case G_IO_ERROR_CONNECTION_CLOSED:

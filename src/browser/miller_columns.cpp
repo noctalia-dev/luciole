@@ -198,11 +198,10 @@ void luciole::MillerColumns::synchronize() {
     if (entry && entry->metadataPending) {
       continue;
     }
-    const bool folder =
-        entry && entry->type == luciole::FileType::Directory && !entry->symlink && browser.searchQuery().empty();
+    const bool folder = entry && entry->isFolderLink() && !entry->symlink && browser.searchQuery().empty();
     if (i + 1 < m_columns.size()) {
       auto& child = *m_columns[i + 1];
-      const auto location = entry ? std::optional(entry->location()) : std::nullopt;
+      const auto location = entry ? std::optional(entry->navigationLocation()) : std::nullopt;
       const auto identity = entry ? entry->identity() : std::nullopt;
       if (child.explicitPath && !child.identity && entry && location == child.location) {
         child.identity = identity;
@@ -216,7 +215,7 @@ void luciole::MillerColumns::synchronize() {
     if (i != m_focused || !folder || i + 1 < m_columns.size()) {
       continue;
     }
-    const auto destination = entry->location();
+    const auto destination = entry->navigationLocation();
     const auto identity = entry->identity();
     const bool cycle = std::ranges::any_of(m_columns, [&](const auto& column) {
       return column->location == destination || (identity && column->identity == identity);

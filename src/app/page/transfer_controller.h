@@ -87,6 +87,7 @@ private:
       luciole::FilePayload payload, const luciole::Location& destination, luciole::TransferAction action,
       luciole::DropCompletion finish
   );
+  void trashDrop(luciole::FilePayload payload, const luciole::DropOptions& options, luciole::DropCompletion finish);
   void finishMove(OperationJob& job, luciole::ClipboardFiles selection);
 
   PageContext& m_page;

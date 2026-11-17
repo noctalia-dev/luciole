@@ -2,14 +2,17 @@
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
 #include "operations/copy_receipt.h"
+#include "operations/trash_item.h"
 #include "test_check.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <glib.h>
 #include <stdexcept>
+#include <string_view>
 #include <unistd.h>
 
 namespace {
@@ -18,9 +21,9 @@ namespace {
   struct Fixture {
     fs::path root;
     Fixture() {
-      std::string path = "/tmp/luciole-activity-XXXXXX";
-      TEST_CHECK(::mkdtemp(path.data()));
-      root = path;
+      const luciole::GString path(g_dir_make_tmp("luciole-activity-XXXXXX", nullptr));
+      TEST_CHECK(path != nullptr);
+      root = path.get();
       fs::create_directory(root / "destination");
     }
     ~Fixture() {
@@ -837,6 +840,93 @@ namespace {
     TEST_CHECK(g_utf8_validate(report->data(), static_cast<gssize>(report->size()), nullptr));
     TEST_CHECK(workspace.hub.activities()[0].state == ActivityState::Failed);
   }
+  void trashMoveNotifications(Pump& pump, bool provider) {
+    struct Observer final : OperationHub::Owner {
+      std::vector<luciole::TransferResult> effects;
+      unsigned notifications = 0;
+      void jobChanged(OperationJob&) override {}
+      void activityChanged() override {}
+      void transfersFinished(const std::vector<luciole::TransferResult>& results) override {
+        effects = results;
+        ++notifications;
+      }
+    } observer;
+    Fixture fixture;
+    fixture.write("source");
+    auto source = luciole::Location::fromUri("trash:///missing-notification-source");
+    if (provider) {
+      const auto original = fixture.at("source");
+      TEST_CHECK(g_file_trash(luciole::gioFile(original).get(), nullptr, nullptr));
+      const auto items = luciole::listTrashItems(luciole::CancelToken{});
+      const auto found = std::ranges::find_if(items, [&](const auto& item) {
+        return item.identity.original == original.nativePath();
+      });
+      TEST_CHECK(found != items.end());
+      source = found->location;
+    }
+    Workspace workspace;
+    const auto other = workspace.model.addTab(workspace.model.addWindow());
+    workspace.hub.attach(other, observer);
+    const auto job = workspace.hub.create<luciole::RestoreService>(workspace.page);
+    auto& service = job->service<luciole::RestoreService>();
+    TEST_CHECK(service.move({source}, fixture.at("destination")));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(observer.notifications == 1 && observer.effects.size() == 1);
+    TEST_CHECK(observer.effects[0].source == source);
+    TEST_CHECK(luciole::transferAffectsLocation(observer.effects, luciole::Location::trash()));
+    if (provider) {
+      TEST_CHECK(observer.effects[0].outcome == luciole::TransferOutcome::Moved);
+      TEST_CHECK(observer.effects[0].destination == fixture.at("destination/source"));
+      TEST_CHECK(luciole::transferAffectsLocation(observer.effects, fixture.at("destination")));
+      TEST_CHECK(fs::exists(fixture.root / "destination/source") && !fs::exists(fixture.root / "source"));
+    } else {
+      TEST_CHECK(observer.effects[0].outcome == luciole::TransferOutcome::Failed);
+      TEST_CHECK(fs::exists(fixture.root / "source"));
+    }
+    workspace.hub.detach(other);
+  }
+  void preparedJobCompletion(Pump& pump) {
+    Fixture fixture;
+    fixture.write("keep");
+    unsigned completions = 0;
+    {
+      Workspace workspace;
+      const auto job = workspace.hub.create<luciole::TrashService>(workspace.page);
+      auto& service = job->service<luciole::TrashService>();
+      job->whenFinished([&](OperationJob& done) {
+        ++completions;
+        TEST_CHECK(done.service<luciole::TrashService>().snapshot().status == luciole::TrashStatus::Cancelled);
+      });
+      TEST_CHECK(service.prepare({fixture.at("keep")}));
+      pump.until([&] { return !service.busy(); });
+      TEST_CHECK(service.canTrash() && completions == 0);
+      service.cancel();
+      workspace.hub.update(workspace.window);
+      TEST_CHECK(completions == 1 && fs::exists(fixture.root / "keep"));
+      workspace.hub.update(workspace.window);
+      TEST_CHECK(completions == 1);
+
+      const auto failed = workspace.hub.create<luciole::TrashService>(workspace.page);
+      auto& invalid = failed->service<luciole::TrashService>();
+      failed->whenFinished([&](OperationJob& done) {
+        ++completions;
+        TEST_CHECK(done.service<luciole::TrashService>().snapshot().status == luciole::TrashStatus::Error);
+      });
+      TEST_CHECK(invalid.prepare({fixture.at("missing")}));
+      pump.until([&] { return !invalid.busy(); });
+      workspace.hub.update(workspace.window);
+      TEST_CHECK(completions == 2);
+
+      const auto pending = workspace.hub.create<luciole::TrashService>(workspace.page);
+      auto& prepared = pending->service<luciole::TrashService>();
+      pending->whenFinished([&](OperationJob&) { ++completions; });
+      TEST_CHECK(prepared.prepare({fixture.at("keep")}));
+      pump.until([&] { return !prepared.busy(); });
+      TEST_CHECK(prepared.canTrash() && completions == 2);
+      // Teardown releases the outstanding drop without starting a prepared mutation.
+    }
+    TEST_CHECK(completions == 3 && fs::exists(fixture.root / "keep"));
+  }
   void cancelledArchive(Pump& pump) {
     Fixture fixture;
     fixture.write("input");
@@ -851,12 +941,19 @@ namespace {
   }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
   Pump pump;
+  if (argc == 2 && std::string_view(argv[1]) == "--trash-provider") {
+    trashMoveNotifications(pump, true);
+    return 0;
+  }
+  TEST_CHECK(argc == 1);
+  trashMoveNotifications(pump, false);
   transferLifecycle(pump);
   conflictCancelAndRehome(pump);
   historyAndInspection(pump);
   cancelledArchive(pump);
+  preparedJobCompletion(pump);
   boundedReports(pump);
   batchRenameHistory(pump);
   renameHistoryReplacement(pump);

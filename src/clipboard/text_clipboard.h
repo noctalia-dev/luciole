@@ -30,6 +30,7 @@ namespace luciole {
     std::function<void(std::string)> failed = nullptr;
     DragAction preferred = DragAction::Move;
     bool copyOnly = false;
+    bool moveOnly = false;
   };
 
   // Text, file selection and drag/drop share the ordinary application data device.

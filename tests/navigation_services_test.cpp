@@ -1,7 +1,9 @@
+#include "browser/browser_controller.h"
 #include "browser/path_completion.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/file_metadata.h"
 #include "fs/gio_interop.h"
+#include "fs/location_mount.h"
 #include "platform/terminal_launcher.h"
 #include "test_check.h"
 
@@ -52,6 +54,183 @@ namespace {
   private:
     GlibPollSource m_source;
   };
+  void mountInteractionChecks() {
+    luciole::MountInteraction interaction;
+    unsigned notifications = 0, replies = 0;
+    GMountOperationResult result = G_MOUNT_OPERATION_UNHANDLED;
+    interaction.setChangedCallback([&] { ++notifications; });
+    struct Reply {
+      unsigned* count;
+      GMountOperationResult* result;
+    } reply{&replies, &result};
+    g_signal_connect(
+        interaction.operation(), "reply", G_CALLBACK(+[](GMountOperation*, GMountOperationResult value, gpointer data) {
+          const auto& reply = *static_cast<Reply*>(data);
+          ++*reply.count;
+          *reply.result = value;
+        }),
+        &reply
+    );
+    const auto flags = static_cast<GAskPasswordFlags>(
+        G_ASK_PASSWORD_NEED_USERNAME
+        | G_ASK_PASSWORD_NEED_PASSWORD
+        | G_ASK_PASSWORD_NEED_DOMAIN
+        | G_ASK_PASSWORD_SAVING_SUPPORTED
+        | G_ASK_PASSWORD_ANONYMOUS_SUPPORTED
+    );
+    g_signal_emit_by_name(interaction.operation(), "ask-password", "Login <literal>", "user", "WORKGROUP", flags);
+    TEST_CHECK(notifications == 1 && interaction.prompt() && interaction.prompt()->message == "Login <literal>");
+    const auto first = interaction.prompt()->id;
+    TEST_CHECK(!interaction.answer(first + 1, {"user", "domain", "password", false}) && replies == 0);
+    TEST_CHECK(!interaction.answer(first, {"", "domain", "password", false}) && replies == 0);
+    TEST_CHECK(!interaction.answer(first, {"user", "domain", std::string("bad\0value", 9), false}));
+    TEST_CHECK(interaction.answer(first, {"user", "WORKGROUP", "fixture password", false}));
+    TEST_CHECK(replies == 1 && result == G_MOUNT_OPERATION_HANDLED && !interaction.prompt());
+    TEST_CHECK(std::string_view(g_mount_operation_get_password(interaction.operation())) == "fixture password");
+    TEST_CHECK(g_mount_operation_get_password_save(interaction.operation()) == G_PASSWORD_SAVE_FOR_SESSION);
+    g_signal_emit_by_name(interaction.operation(), "ask-password", "Try again", "user", "WORKGROUP", flags);
+    TEST_CHECK(interaction.prompt() && interaction.prompt()->id != first);
+    TEST_CHECK(!interaction.answer(first, {"user", "", "old reply", false}));
+    TEST_CHECK(interaction.answer(interaction.prompt()->id, {"", "", "", true}));
+    TEST_CHECK(g_mount_operation_get_anonymous(interaction.operation()) && replies == 2);
+    TEST_CHECK(std::string_view(g_mount_operation_get_password(interaction.operation())).empty());
+    const char* choices[] = {"Accept", "Reject", nullptr};
+    g_signal_emit_by_name(interaction.operation(), "ask-question", "Confirm", choices);
+    const auto question = interaction.prompt()->id;
+    TEST_CHECK(!interaction.choose(question, 2) && interaction.prompt());
+    TEST_CHECK(!interaction.answer(question, {"user", "", "", false}));
+    TEST_CHECK(interaction.choose(question, 1) && g_mount_operation_get_choice(interaction.operation()) == 1);
+    g_signal_emit_by_name(interaction.operation(), "ask-password", "Cancel", "", "", flags);
+    interaction.cancel();
+    interaction.cancel();
+    TEST_CHECK(replies == 4 && result == G_MOUNT_OPERATION_ABORTED && !interaction.prompt());
+    g_signal_emit_by_name(interaction.operation(), "ask-password", "Aborted", "", "", flags);
+    g_signal_emit_by_name(interaction.operation(), "aborted");
+    TEST_CHECK(!interaction.prompt());
+    g_signal_emit_by_name(
+        interaction.operation(), "ask-password", "Password only", "preset-user", "preset-domain",
+        G_ASK_PASSWORD_NEED_PASSWORD
+    );
+    TEST_CHECK(interaction.answer(interaction.prompt()->id, {"", "", "secret", false}));
+    TEST_CHECK(std::string_view(g_mount_operation_get_username(interaction.operation())) == "preset-user");
+    TEST_CHECK(std::string_view(g_mount_operation_get_domain(interaction.operation())) == "preset-domain");
+    const auto unsupported = static_cast<GAskPasswordFlags>(1U << 20);
+    g_signal_emit_by_name(interaction.operation(), "ask-password", "Unsupported", "", "", unsupported);
+    TEST_CHECK(!interaction.problem().empty() && replies == 6 && !interaction.prompt());
+    auto destroyed = std::make_unique<luciole::MountInteraction>();
+    const luciole::GioPtr<GMountOperation> held(G_MOUNT_OPERATION(g_object_ref(destroyed->operation())));
+    destroyed->setChangedCallback([&] { destroyed.reset(); });
+    g_signal_emit_by_name(held.get(), "ask-password", "Destroy", "", "", flags);
+    TEST_CHECK(!destroyed);
+  }
+  void mountLifetimeChecks() {
+    Fixture fixture;
+    Pump pump;
+    bool obsolete = false, done = false;
+    luciole::LocationMount mount;
+    const auto native = luciole::Location::fromPath(fixture.path.native());
+    mount.start(native, [&](const auto&) { obsolete = true; });
+    mount.cancel();
+    mount.start(native, [&](const auto& error) {
+      TEST_CHECK(!error);
+      done = true;
+    });
+    pump.until([&] { return done; });
+    TEST_CHECK(!obsolete);
+    auto destroyed = std::make_unique<luciole::LocationMount>();
+    destroyed->start(native, [&](const auto&) { obsolete = true; });
+    destroyed.reset();
+    done = false;
+    mount.start(native, [&](const auto& error) {
+      TEST_CHECK(!error);
+      done = true;
+    });
+    pump.until([&] { return done; });
+    TEST_CHECK(!obsolete);
+    GError* error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_MOUNTED, "Not mounted");
+    TEST_CHECK(luciole::fileError(*error).kind == luciole::FileErrorKind::NotMounted);
+    g_error_free(error);
+  }
+  void remoteMountChecks(const std::string& uri, const std::string& mode) {
+    TEST_CHECK(uri.starts_with("smb://127.0.0.1:"));
+    Pump pump;
+    auto browser = std::make_unique<luciole::BrowserController>(luciole::SortOptions{}, true);
+    const auto target = luciole::Location::fromUri(uri);
+    if (mode != "already" && mode != "server") {
+      const auto file = luciole::gioFile(target);
+      GError* error = nullptr;
+      const luciole::GioPtr<GFileInfo> info(
+          g_file_query_info(file.get(), G_FILE_ATTRIBUTE_STANDARD_TYPE, G_FILE_QUERY_INFO_NONE, nullptr, &error)
+      );
+      const luciole::GErrorPtr held(error);
+      TEST_CHECK(!info && error && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_MOUNTED));
+    }
+    unsigned prompts = 0;
+    browser->setChangedCallback([&] {
+      auto* interaction = browser->mountInteraction();
+      if (!interaction || !interaction->prompt()) {
+        return;
+      }
+      ++prompts;
+      const auto id = interaction->prompt()->id;
+      TEST_CHECK(prompts <= 3);
+      if (mode == "cancel") {
+        interaction->cancel();
+      } else if (mode == "navigate") {
+        browser->open(luciole::Location::fromPath("/tmp"));
+      } else if (mode == "destroy") {
+        browser.reset();
+      } else {
+        TEST_CHECK(interaction->answer(
+            id,
+            mode == "guest" ? luciole::MountCredentials{"", "", "", true}
+                            : luciole::MountCredentials{
+                                  "lysec", "WORKGROUP", prompts == 1 && mode == "retry" ? "wrong" : "password", false
+                              }
+        ));
+      }
+    });
+    browser->open(target);
+    pump.until([&] {
+      return !browser
+          || browser->model().snapshot().status == luciole::DirectoryStatus::Ready
+          || browser->model().snapshot().status == luciole::DirectoryStatus::Error
+          || browser->model().snapshot().status == luciole::DirectoryStatus::Cancelled;
+    });
+    if (mode == "destroy") {
+      TEST_CHECK(!browser && prompts == 1);
+    } else if (mode == "cancel") {
+      TEST_CHECK(browser->model().snapshot().status == luciole::DirectoryStatus::Cancelled && prompts == 1);
+    } else if (mode == "navigate") {
+      TEST_CHECK(browser->model().snapshot().location == luciole::Location::fromPath("/tmp") && prompts == 1);
+    } else {
+      if (mode == "server") {
+        const auto& server = browser->model().snapshot();
+        TEST_CHECK(server.status == luciole::DirectoryStatus::Ready);
+        const auto found =
+            std::ranges::find_if(server.entries, [](const auto& entry) { return entry.name == "guest"; });
+        TEST_CHECK(found != server.entries.end() && found->type == luciole::FileType::Mountable);
+        bool launched = false;
+        browser->setFileActivatedCallback([&](const auto&) { launched = true; });
+        browser->activate(found->id);
+        pump.until([&] {
+          return browser->model().snapshot().status == luciole::DirectoryStatus::Ready
+              || browser->model().snapshot().status == luciole::DirectoryStatus::Error;
+        });
+        TEST_CHECK(!launched);
+      }
+      const auto& snapshot = browser->model().snapshot();
+      if (snapshot.error) {
+        std::println(stderr, "Remote mount failed: {}", snapshot.error->message);
+      }
+      TEST_CHECK(
+          snapshot.status == luciole::DirectoryStatus::Ready && (mode == "server" || snapshot.location == target)
+      );
+      TEST_CHECK(std::ranges::any_of(snapshot.entries, [](const auto& entry) { return entry.name == "fixture.txt"; }));
+      TEST_CHECK(mode != "retry" || prompts == 2);
+    }
+    std::println("SMB mount {} checks passed ({} prompts)", mode, prompts);
+  }
   void identityChecks() {
     const luciole::GioPtr<GFileInfo> info(g_file_info_new());
     TEST_CHECK(!luciole::readFileIdentity(info.get()));
@@ -200,12 +379,18 @@ namespace {
     g_unsetenv("LUCIOLE_TEST_TERMINAL_LOG");
   }
 } // namespace
-int main() {
+int main(int argc, char** argv) {
+  if (argc == 4 && std::string_view(argv[1]) == "--smb") {
+    remoteMountChecks(argv[2], argv[3]);
+    return 0;
+  }
   g_unsetenv("DISPLAY");
   g_unsetenv("WAYLAND_DISPLAY");
   g_unsetenv("WAYLAND_SOCKET");
   g_unsetenv("TERMINAL");
   try {
+    mountInteractionChecks();
+    mountLifetimeChecks();
     identityChecks();
     completionChecks();
     terminalChecks();

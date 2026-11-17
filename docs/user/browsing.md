@@ -30,6 +30,18 @@ In List and Columns, Right or Enter enters the folder under the cursor and Left 
 
 The cursor ring marks the item the keyboard acts on and stays visible inside a multi-selection. Ctrl+arrow keys move it without changing the selection, and Ctrl+Space selects or unselects the item under it. Ctrl+Enter opens the folder under the cursor in a new tab; Ctrl+Shift+Enter reverses the Switch to new folder tabs preference. Escape anywhere outside the file list, such as Places or the toolbar, returns focus to the list. In the search field, Down or Enter moves to the results with the first one selected. F1 lists every shortcut.
 
+## Network folders
+
+Enter an address such as `smb://server/share` in the location bar, or open a saved network place. If the location is not mounted, Luciole asks the installed GIO/GVfs provider to connect and then opens the folder. You can also open an SMB server address and activate one of its listed shares. The same mounted share becomes visible to other applications using that desktop session.
+
+The **Network** sidebar entry is always available, including when no servers are found. Discovery starts when you open Network or expand it in the optional sidebar tree; ordinary local startup does not start discovery. Open a discovered server and its share as usual. You can also enter `network:///` directly. Grid, List and Columns use the discovered destination when opening an entry; middle-click and Ctrl+Enter can open it in a new tab.
+
+Luciole discovers SMB computers using its built-in WS-Discovery client, with optional DNS-SD discovery through GVfs and Avahi. No external WS-Discovery helper is needed. Discovery runs in the background while Network is open; closing its last view stops Luciole's discovery workers. Server names may replace numeric addresses as metadata arrives. Refresh retries discovery. A reachable server may not advertise itself, and multicast filtering can prevent discovery. You can still enter its known address or use a saved network place. Discovery does not ask for credentials or open every share in the background. If nothing is discovered, Network remains available.
+
+When the server requests login, use the username, domain and password fields, or Guest if the server offers anonymous access. A rejected password can produce another login prompt. Cancel stops that connection attempt; refreshing or opening the address again lets you retry. Navigating away or closing the page cancels its pending request. Credentials are passed to GIO for the session and are not saved in Luciole settings or bookmarks.
+
+Network protocols require their installed GVfs backends and a session D-Bus connection. See [packaging requirements](../../PACKAGING.md#gvfs-and-trash). A separate connect-to-server form, device-unlock dialogs and process-blocked mount questions are still planned.
+
 ## Views and selection
 
 [Undo/redo](file-operations.md#undo-and-redo) affects the most recent supported creation, rename or native copy/link/move in the running application, independently of the current folder or selection. When a text input is focused, its text-editing undo takes precedence.
@@ -40,9 +52,11 @@ List and Columns shorten overflowing filenames in the middle by default, keeping
 
 List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu.
 
+The background right-click menu also offers Sort. Changing the sort field, direction or Folders first shows the beginning of the new order, including in folders that need scrolling. Selected items stay selected. Sort changes made through list headings or Settings follow the same rule.
+
 In large folders, names can appear while detail values are still loading. “Reading…” means a value is pending; “Unknown” means it was unavailable after querying. Hidden extra columns are not queried by ordinary large-folder browsing. Enabling one loads its visible rows. Sorting by metadata or selecting many items can require facts from the rest of the folder; file actions wait for the facts they need.
 
-The floating status pill reports actions, search and selection. Settings → General → Always show status bar keeps it visible when idle with the item count and, when available, free space.
+The floating status pill reports actions, search and selection. Settings → Appearance → Always show status bar keeps it visible when idle with the item count and, when available, free space.
 
 Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
 
@@ -50,19 +64,23 @@ Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a
 
 Places contains Home, available XDG user folders, Trash and your pinned folders. Pin or unpin a folder through its context menu, or drag a folder into Places. Drag rows to reorder them. Trash can move within the list but cannot be unpinned. Its context menu offers Empty Trash.
 
+Drop native files or folders onto the Trash row to move them to Trash. This works in both sidebar modes. Trash accepts moves only; Ctrl-copy, Alt action choices, remote files and deferred archive extraction cannot target it.
+
 Pinned folders use the shared GTK bookmark file, also used by Nemo and Nautilus. Adding, removing, renaming or reordering user bookmarks in Luciole updates that file; changes from another application appear automatically. Built-in Places keep their Luciole layout and are not automatically added to other applications' bookmarks. Old Luciole-only pins are not imported.
 
 Use a bookmark's context menu and choose **Change icon…** to select a Tabler icon. This icon is stored in Luciole's private state and does not change the shared GTK bookmark or its appearance in other applications. Choose **Reset to default** to restore the place's standard icon.
 
 Drives starts with File System (`/`), followed by the volumes and mounts GIO reports: removable media, extra partitions and network mounts, but not other system mounts such as `/home` or `/boot`. Mounted drives come before unmounted ones. In the Places list, each mounted drive shows a bar of its used space under its row; the bar turns red at 90% used. Unmounted drives and filesystems that do not report a size have no bar.
 
-Settings → Sidebar & preview controls sidebar visibility, width, drive rows and the optional folder tree. The separate expandable-folder preference adds a tree within List view. Both tree options are off by default.
+The eject button and the drive's context menu remove a mounted drive the way GNOME Files does: Safely Remove powers off a USB disk plugged in during the session, Eject ejects removable media, and Unmount unmounts anything else. Removal never forces: while a program still has files open on the drive, nothing is unmounted and the status bar names the programs or Luciole's running file operations that keep it busy.
+
+Settings → Appearance controls sidebar visibility, width, drive rows and the optional folder tree. The separate expandable-folder preference adds a tree within List view. Both tree options are off by default.
 
 ## Tabs and split view
 
 Each tab can contain one or two browsing panes. A split belongs to its tab; it does not create another tab. Navigation, search, selection and scroll belong to each pane. Actions target the focused pane.
 
-The tab bar is shown by default even with one tab. Settings → General → Always show tab bar can hide it when there is only one tab.
+The tab bar is shown by default even with one tab. Settings → Appearance → Always show tab bar can hide it when there is only one tab.
 
 Middle-click a folder, breadcrumb or Places row, or use a folder's Open In → New Tab menu, to open it in another tab. Settings → General → Switch to new folder tabs is on by default. Turn it off to load those folders in background tabs while keeping your current tab, focused pane, search, selection and scroll. Shift+middle-click reverses the preference for that one opening. Click the tab or use Ctrl+Tab to visit it when ready.
 

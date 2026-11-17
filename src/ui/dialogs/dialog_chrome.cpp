@@ -1,5 +1,7 @@
 #include "ui/dialogs/dialog_chrome.h"
 
+#include "render/scene/input_area.h"
+#include "render/scene/input_dispatcher.h"
 #include "ui/builders.h"
 
 namespace luciole {
@@ -7,7 +9,7 @@ namespace luciole {
   void applyDialogStyle(Flex& root) {
     root.setFill(colorSpecFromRole(ColorRole::Surface));
     root.setBorder(colorSpecFromRole(ColorRole::OutlineVariant), Style::borderWidth);
-    root.setRadius(Style::radiusLg);
+    root.setRadius(Style::scaledRadiusLg());
     root.setPadding(Style::spaceMd);
     root.setGap(Style::spaceMd);
   }
@@ -35,15 +37,29 @@ namespace luciole {
     row->addChild(
         ui::button(
             {.glyph = "x",
-             .controlHeight = Style::controlHeightSm,
+             .glyphSize = Style::baseGlyphSize,
+             .controlHeight = 24.0F,
              .variant = ButtonVariant::Ghost,
              .tooltip = "Close",
-             .minWidth = Style::controlHeightSm,
-             .maxWidth = Style::controlHeightSm,
-             .onClick = std::move(close)}
+             .padding = Style::spaceXs,
+             .width = 24.0F,
+             .onClick = std::move(close),
+             .configure = [](Button& button) { button.inputArea()->setTabFocusKey(std::string(kDialogCloseFocusKey)); }}
         )
     );
     return ui::column({.align = FlexAlign::Stretch, .gap = Style::spaceSm}, std::move(row), ui::separator({}));
+  }
+
+  bool isDialogClose(const InputArea* area) { return area != nullptr && area->tabFocusKey() == kDialogCloseFocusKey; }
+
+  void focusFirstDialogControl(InputDispatcher& dispatcher) {
+    (void)dispatcher.cycleTabFocus(false);
+    if (isDialogClose(dispatcher.focusedArea())) {
+      (void)dispatcher.cycleTabFocus(false);
+    }
+    if (isDialogClose(dispatcher.focusedArea())) {
+      dispatcher.setFocus(nullptr);
+    }
   }
 
 } // namespace luciole

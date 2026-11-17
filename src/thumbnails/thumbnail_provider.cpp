@@ -128,10 +128,11 @@ namespace {
                                          "1",        "-filter_threads",
                                          "1",        "-protocol_whitelist",
                                          "file,pipe"};
+      // Decode only keyframes: an accurate seek decodes every frame since the previous keyframe, which dominates
+      // generation time for long GOPs.
+      arguments.insert(arguments.end(), {"-skip_frame:v", "nokey"});
       if (position > 0) {
-        arguments.insert(arguments.end(), {"-ss", std::to_string(position)});
-      } else {
-        arguments.insert(arguments.end(), {"-skip_frame:v", "nokey"});
+        arguments.insert(arguments.end(), {"-noaccurate_seek", "-ss", std::to_string(position)});
       }
       arguments.insert(
           arguments.end(),

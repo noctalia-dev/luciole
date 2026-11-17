@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
+#include "fs/native_listing.h"
 #include "fs/posix_fd.h"
 #include "thumbnails/thumbnail_codec.h"
 #include "thumbnails/thumbnail_provider.h"
@@ -17,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <string_view>
 #include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
@@ -35,8 +37,10 @@ namespace {
     );
   }
 
-  constexpr std::size_t kResidentBudget = 64U * 1024U * 1024U;
-  constexpr std::size_t kMaxEntries = 1024;
+  // Released images stay resident until they go unseen this long; the byte budget is only a safety cap.
+  constexpr std::chrono::minutes kThumbnailIdle{5};
+  constexpr std::chrono::seconds kPreviewIdle{30};
+  constexpr unsigned kSweepSeconds = 30;
   std::mutex diskMutex;
   std::string stamp(const struct stat& info) {
     return std::format(
@@ -62,8 +66,9 @@ namespace {
     bool decodeNeeded = false;
   };
   LoadResult load(
-      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options, GCancellable* cancel,
-      bool generate, luciole::ThumbnailPurpose purpose
+      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options,
+      const luciole::ThumbnailService::NetworkFilesystemCheck& networkFilesystem, GCancellable* cancel, bool generate,
+      luciole::ThumbnailPurpose purpose
   ) {
     using namespace luciole;
     LoadResult result;
@@ -83,15 +88,8 @@ namespace {
     if (g_cancellable_is_cancelled(cancel)) {
       return result;
     }
-    if (options.policy == ThumbnailPolicy::Local) {
-      const GioPtr<GFileInfo> filesystem(
-          g_file_query_filesystem_info(gioFile(location).get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE, cancel, nullptr)
-      );
-      if (!filesystem
-          || !g_file_info_has_attribute(filesystem.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)
-          || g_file_info_get_attribute_boolean(filesystem.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)) {
-        return result;
-      }
+    if (options.policy == ThumbnailPolicy::Local && networkFilesystem(*native)) {
+      return result;
     }
     const std::string mime(source.contentType.value_or(""));
     const bool media = mime.starts_with("video/") || mime.starts_with("audio/");
@@ -202,6 +200,9 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     DirectoryEntry source;
     GioPtr<GCancellable> cancel{g_cancellable_new()};
     std::uint64_t serial = 0, used = 0;
+    // Pixel bytes charged to the budget: the full square while pending, then the published image's real size.
+    std::size_t bytes = 0;
+    std::chrono::steady_clock::time_point seen;
     int side = 128;
     ThumbnailPurpose purpose = ThumbnailPurpose::Thumbnail;
     bool visible = false, failed = false;
@@ -227,8 +228,9 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     std::vector<ThumbnailCacheWrite> writes;
     std::uint64_t budget;
   };
-  static constexpr std::size_t kWriteBudget = 16U * 1024U * 1024U;
+  static constexpr std::size_t kWriteBudget = 64U * 1024U * 1024U;
   ThumbnailOptions options;
+  NetworkFilesystemCheck networkFilesystem;
   std::unordered_map<std::string, Item> cache;
   std::unordered_map<const FileIconImage*, Item*> leases;
   std::function<void()> changed;
@@ -238,6 +240,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   std::string error;
   GSource* idle = nullptr;
   GSource* writeTimer = nullptr;
+  GSource* sweepTimer = nullptr;
   std::deque<ThumbnailCacheWrite> writes;
   GioPtr<GCancellable> writeCancel{g_cancellable_new()};
   std::vector<GioPtr<GCancellable>> running;
@@ -268,6 +271,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     reserved = 0;
     destroySource(idle);
     destroySource(writeTimer);
+    destroySource(sweepTimer);
     g_cancellable_cancel(writeCancel.get());
     writeCancel.reset(g_cancellable_new());
     writes.clear();
@@ -278,7 +282,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     item->second.image->pixels.reset();
     item->second.image->ready = false;
     leases.erase(item->second.image.get());
-    reserved -= static_cast<std::size_t>(item->second.side) * item->second.side * 4;
+    reserved -= item->second.bytes;
     cache.erase(item);
   }
   bool reserve(std::size_t bytes, bool visible) {
@@ -297,6 +301,42 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     }
     reserved += bytes;
     return true;
+  }
+  // Held images count as seen; released ones are dropped once unseen past their purpose's idle limit.
+  void armSweep() {
+    if (sweepTimer || !alive) {
+      return;
+    }
+    sweepTimer = g_timeout_source_new_seconds(kSweepSeconds);
+    g_source_set_callback(
+        sweepTimer,
+        [](gpointer data) -> gboolean {
+          auto* owner = static_cast<State*>(data);
+          if (owner->sweep()) {
+            return G_SOURCE_CONTINUE;
+          }
+          g_source_unref(std::exchange(owner->sweepTimer, nullptr));
+          return G_SOURCE_REMOVE;
+        },
+        this, nullptr
+    );
+    g_source_attach(sweepTimer, g_main_context_default());
+  }
+  bool sweep() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = cache.begin(); it != cache.end();) {
+      auto& item = it->second;
+      const std::chrono::seconds idle = item.purpose == ThumbnailPurpose::Preview ? kPreviewIdle : kThumbnailIdle;
+      if (item.image.use_count() > 1) {
+        item.seen = now;
+      } else if (item.stage == Stage::Ready && now - item.seen >= idle) {
+        const auto old = it++;
+        erase(old);
+        continue;
+      }
+      ++it;
+    }
+    return !cache.empty();
   }
   void schedule() {
     if (idle || !alive || clearing) {
@@ -317,7 +357,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   }
   void queueWrite(ThumbnailCacheWrite write) {
     const auto bytes = write.thumbnail.image.rgba.size();
-    if (!alive || clearing || writes.size() >= 32 || bytes > kWriteBudget - writeBytes) {
+    if (!alive || clearing || writes.size() >= 2 * ThumbnailStore::kMaxBatch || bytes > kWriteBudget - writeBytes) {
       return;
     }
     writeBytes += bytes;
@@ -328,8 +368,8 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     if (!alive || clearing || writing || writeTimer || writes.empty()) {
       return;
     }
-    // Gather nearby completions without holding up decoded-pixel publication.
-    writeTimer = g_timeout_source_new(25);
+    // Gather nearby completions into one ledger rewrite without holding up decoded-pixel publication.
+    writeTimer = g_timeout_source_new(250);
     g_source_set_callback(
         writeTimer,
         [](gpointer data) -> gboolean {
@@ -349,8 +389,8 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     auto batch = std::make_unique<WriteBatch>();
     batch->owner = shared_from_this();
     batch->budget = static_cast<std::uint64_t>(options.cacheMiB) * 1024U * 1024U;
-    batch->writes.reserve(8);
-    while (!writes.empty() && batch->writes.size() < 8) {
+    batch->writes.reserve(std::min(writes.size(), ThumbnailStore::kMaxBatch));
+    while (!writes.empty() && batch->writes.size() < ThumbnailStore::kMaxBatch) {
       writeBytes -= writes.front().thumbnail.image.rgba.size();
       batch->writes.push_back(std::move(writes.front()));
       writes.pop_front();
@@ -447,6 +487,9 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
                                          identity ? identity->file : "", request->side, request->options.maxFileMiB})
                       .dump();
               *item.image = std::move(loaded->loaded.image);
+              const std::size_t bytes = item.image->pixels ? item.image->pixels->rgba.size() : 0;
+              owner->reserved = owner->reserved - item.bytes + bytes;
+              item.bytes = bytes;
               item.failed = !item.image->pixels;
               item.retry = std::chrono::steady_clock::now() + std::chrono::seconds(30);
               if (loaded->loaded.write) {
@@ -478,7 +521,10 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
       const auto& request = *static_cast<Request*>(data);
       auto result = std::make_unique<Result>();
       try {
-        result->loaded = load(request.source, request.side, request.options, cancel, request.generate, request.purpose);
+        result->loaded = load(
+            request.source, request.side, request.options, request.owner->networkFilesystem, cancel, request.generate,
+            request.purpose
+        );
       } catch (const std::exception& error) {
         result->error = error.what();
       }
@@ -505,7 +551,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
       }
       start(item, false);
     }
-    while (active < 2) {
+    while (active < decoders()) {
       const auto item = next(Stage::DecodeQueued);
       if (item == cache.end()) {
         break;
@@ -515,7 +561,16 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   }
 };
 
-luciole::ThumbnailService::ThumbnailService() : m_state(std::make_shared<State>()) {}
+luciole::ThumbnailService::ThumbnailService()
+    : ThumbnailService([](const std::string& path) { return luciole::networkFilesystem(path); }) {}
+luciole::ThumbnailService::ThumbnailService(NetworkFilesystemCheck networkFilesystem)
+    : m_state(std::make_shared<State>()) {
+  m_state->networkFilesystem = std::move(networkFilesystem);
+}
+std::size_t luciole::ThumbnailService::decoders() {
+  static const std::size_t count = std::clamp<std::size_t>(std::thread::hardware_concurrency() / 4, 2, 6);
+  return count;
+}
 int luciole::ThumbnailService::pixelSizeClass(int pixels, ThumbnailPurpose purpose) {
   return purpose == ThumbnailPurpose::Preview && pixels > 1024 ? kMaxPreviewImageSide
                                                                : ThumbnailStore::sizeClass(std::clamp(pixels, 1, 1024));
@@ -555,19 +610,23 @@ luciole::ThumbnailService::request(const DirectoryEntry& source, int pixels, boo
     found = state.cache.end();
   }
   if (found == state.cache.end()) {
-    if (!state.reserve(static_cast<std::size_t>(side) * side * 4, visible)) {
+    const auto bytes = static_cast<std::size_t>(side) * side * 4;
+    if (!state.reserve(bytes, visible)) {
       return {};
     }
     State::Item item(source);
     item.image = std::make_shared<FileIconImage>();
     item.serial = ++state.serial;
+    item.bytes = bytes;
     item.side = side;
     item.purpose = purpose;
     found = state.cache.emplace(key, std::move(item)).first;
     state.leases.emplace(found->second.image.get(), &found->second);
+    state.armSweep();
   }
   found->second.visible = visible;
   found->second.used = ++state.clock;
+  found->second.seen = std::chrono::steady_clock::now();
   if (found->second.stage == State::Stage::ProbeQueued || found->second.stage == State::Stage::DecodeQueued) {
     state.schedule();
   }
@@ -584,6 +643,7 @@ bool luciole::ThumbnailService::touch(const std::shared_ptr<const FileIconImage>
   }
   item.visible = visible;
   item.used = ++m_state->clock;
+  item.seen = std::chrono::steady_clock::now();
   return true;
 }
 std::shared_ptr<const luciole::FileIconImage> luciole::ThumbnailService::prepared(const DirectoryEntry& source) {

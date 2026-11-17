@@ -130,7 +130,7 @@ void OperationsController::open() {
       m_page.popupSurface()->requestLayout();
     }
   });
-  (void)m_page.popupDispatcher().cycleTabFocus(false);
+  luciole::focusFirstDialogControl(m_page.popupDispatcher());
   markDirty();
 }
 

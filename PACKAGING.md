@@ -68,6 +68,8 @@ These are pkg-config modules or header paths. Install the corresponding developm
 | `egl`, `glesv2` | EGL/OpenGL ES; shared-library detection also supports wayland-egl/libepoxy fallbacks |
 | `gio-2.0`, `gio-unix-2.0` | GLib/GIO 2.76+ |
 | `glib-2.0` | GLib |
+| `libcurl` | 7.85+; HTTP transport |
+| `libxml-2.0` | 2.9+; XML parsing |
 | `freetype2`, `fontconfig` | Font libraries |
 | `cairo`, `cairo-ft` | Cairo with FreeType integration |
 | `pango`, `pangocairo`, `pangoft2` | Pango 1.50+ |
@@ -99,6 +101,7 @@ In addition to linked-library runtime packages, ship or recommend the following 
 | Glycin loaders | Install compatible raster decoders and their runtime dependencies. |
 | Session D-Bus and GVfs | Required for the shipped Trash interface; see below. |
 | GVfs protocol backends | Install the backends for the network protocols the package supports. |
+| GVfs DNS-SD backend and Avahi | Optional DNS-SD discovery; requires the backend, its schemas/mount data and a working Avahi service. |
 | `glib-networking` | Supply GIO TLS support for secure WebDAV. |
 | `ffmpeg`, `ffprobe` | Media thumbnails and metadata. |
 | `ffmpegthumbnailer` | Recommended for shared video-thumbnail filmstrips; executable/runtime closure only, no development headers. |
@@ -114,6 +117,8 @@ Declare GVfs as a runtime dependency, not just a network-access recommendation. 
 
 A usable session bus and daemon activation are required; a GNOME desktop session is not. Luciole uses GIO directly and does not require `gvfs-fuse`. Do not force `GIO_USE_VFS=local` in a packaged launcher: that test-only setting disables provider access.
 
+DNS-SD discovery is optional and separate from SMB access. For example, Arch supplies [gvfs-dnssd](https://archlinux.org/packages/extra/x86_64/gvfs-dnssd/). Include the provider's GSettings schemas, mount data, executable and D-Bus activation files. Luciole's native WS-Discovery client uses the linked libraries above; neither `gvfs-wsdd` nor a `wsdd`, `wsdd2` or `wsdd-native` package is required. Do not require or enable a discovery daemon for Luciole. Direct SMB access still needs the GVfs SMB backend. Local firewall policy must permit outgoing UDP multicast and the corresponding replies for WS-Discovery; no privileged port or system service is required.
+
 Native packages should use normal system GIO module paths. Nix wrappers expose the separately installed modules through `GIO_EXTRA_MODULES`; users of ordinary distribution packages should not need that export. TLS uses the provider and system trust configuration.
 
 ## Installed layout
@@ -126,7 +131,7 @@ With relative `datadir=share`, Meson installs:
 <prefix>/share/luciole/assets/fonts/tabler.json
 <prefix>/share/luciole/assets/fonts/tabler-icons-license.txt
 <prefix>/share/luciole/templates/colors.toml
-<prefix>/share/dbus-1/services/org.freedesktop.FileManager1.service
+<prefix>/share/dbus-1/services/dev.noctalia.luciole.FileManager1.service
 <prefix>/share/dbus-1/services/org.freedesktop.impl.portal.desktop.luciole.service
 <prefix>/share/xdg-desktop-portal/portals/luciole.portal
 <prefix>/share/applications/dev.noctalia.luciole.desktop
@@ -153,7 +158,7 @@ A staged-install smoke test must point to its staged assets. Remove development 
 
 ### D-Bus activation
 
-`org.freedesktop.FileManager1.service` starts the configured absolute binary path with `--file-manager-service`. Keep the prefix correct and make the session's Wayland environment available to activation. The generic service filename may conflict with another file manager; follow the distribution's provider-selection policy.
+`dev.noctalia.luciole.FileManager1.service` registers `org.freedesktop.FileManager1` and starts the configured absolute binary path with `--file-manager-service`. Keep the prefix correct and make the session's Wayland environment available to activation. The file is named after Luciole, as Dolphin's `org.kde.dolphin.FileManager1.service` is, so it never conflicts with the generic `org.freedesktop.FileManager1.service` that Nautilus ships. When several file managers provide the name, the bus activates one of them. To prefer Luciole, a user copies this file to `~/.local/share/dbus-1/services/org.freedesktop.FileManager1.service`, which takes precedence over system directories.
 
 Installing Luciole does not select it as the `inode/directory` MIME default. The application also owns `dev.noctalia.luciole` for single-instance forwarding, without a separate service file for that name.
 
@@ -201,6 +206,8 @@ nix flake check path:.
 
 The package wrapper supplies helper paths, GIO/TLS/dconf modules, desktop settings schemas, Glycin loader data, MIME data and Adwaita icons. The development shell and checks provide the corresponding runtime environment. Native distributions should use their normal desktop integration rather than copying Nix store paths.
 
+The Nix recipe supplies libcurl and libxml2 as link dependencies. Optional DNS-SD requires a system Avahi service; the application package does not enable system services.
+
 On NixOS, enable `services.gvfs.enable = true;` for the GVfs daemons and session activation. Luciole's NixOS module installs the application; Home Manager/hjem manage its declarative base configuration. These modules do not independently enable GVfs, select a default file manager or install an always-running Luciole service.
 
 ## Verification
@@ -215,7 +222,7 @@ meson test -C build-check --print-errorlogs
 
 Tests additionally need Python 3, `dbus-daemon`, `glib-compile-schemas`, `wayland-server` development files and libwebp development files. Provide FFmpeg, ffmpegthumbnailer, Poppler utilities, 7-Zip and Glycin loaders, including AVIF/HEIF support. Ordinary headless suites need no compositor; their local-VFS override does not verify GVfs activation.
 
-Smoke-test the installed binary's help/version, configuration validation, fonts, completions and an installed window with asset overrides unset. Verify image/helper availability and session access to `trash:///`. Use disposable files for operation checks. Destructive whole-Trash checks require a private mount namespace hiding user drives, not just temporary HOME/XDG directories; see [test isolation](AGENTS.md#verification-and-tests).
+Smoke-test the installed binary's help/version, configuration validation, fonts, completions and an installed window with asset overrides unset. Verify image/helper availability and session access to `trash:///`. Use disposable files for operation checks. Destructive whole-Trash checks require a private mount namespace hiding user drives, not just temporary HOME/XDG directories.
 
 ## Contact
 

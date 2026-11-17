@@ -819,6 +819,55 @@ namespace {
     peer.until([&] { return peer.finished() == 1; });
   }
 
+  void testMoveOnlyDrops() {
+    constexpr auto copy = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, move = WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE,
+                   ask = WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
+    for (const auto actions : std::initializer_list<std::uint32_t>{copy, move, copy | move | ask}) {
+      for (const bool success : {false, true}) {
+        ClipboardPeer peer;
+        std::optional<DropOptions> options;
+        DropCompletion finish;
+        peer.clipboard().setDropCallbacks(
+            [&](wl_surface*, float, float) {
+              return FileDropTarget{
+                  .receive =
+                      [&](const FilePayload&, DropOptions received, DropCompletion complete) {
+                        options = std::move(received);
+                        finish = std::move(complete);
+                      },
+                  .preferred = DragAction::Move,
+                  .moveOnly = true
+              };
+            },
+            [] {}
+        );
+        peer.beginDrop(actions, true);
+        // Process negotiation even when rejection leaves the preferred action at zero.
+        for (int iteration = 0; iteration < 4; ++iteration) {
+          peer.pump();
+        }
+        TEST_CHECK(peer.mask() == (actions == copy ? 0 : move));
+        TEST_CHECK(peer.preferred() == (actions == copy ? 0 : move));
+        peer.drop();
+        if (actions == copy) {
+          peer.until([&] { return peer.destroyed() == 1; });
+          TEST_CHECK(!options && peer.finished() == 0);
+          continue;
+        }
+        peer.until([&] { return options.has_value(); });
+        TEST_CHECK(options->action == DragAction::Move && options->canMove && !options->canCopy);
+        TEST_CHECK(!options->select(TransferAction::Copy) && !options->select(TransferAction::Link));
+        TEST_CHECK(options->select(TransferAction::Move) && !options->select(TransferAction::Move));
+        TEST_CHECK(peer.finished() == 0);
+        finish(success);
+        peer.until([&] { return peer.destroyed() == 1; });
+        TEST_CHECK(peer.finished() == (success ? 1U : 0U));
+        finish(true);
+        peer.pump();
+        TEST_CHECK(peer.finished() == (success ? 1U : 0U));
+      }
+    }
+  }
 } // namespace
 int main() {
   try {
@@ -826,6 +875,7 @@ int main() {
     testDropReadLifetimes();
     testDeferredExtractionDrops();
     testAskDropNegotiation();
+    testMoveOnlyDrops();
     testDeferredCompletion(false);
     testDeferredCompletion(true);
     testReplacement(false);

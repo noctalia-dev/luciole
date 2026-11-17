@@ -22,6 +22,8 @@ std::vector<luciole::Breadcrumb> luciole::locationBreadcrumbs(const Location& lo
       label = "Home";
     } else if (parent) {
       label = filenameDisplayText(current->basename().value_or(current->uri()));
+    } else if (*current == Location::network()) {
+      label = "Network";
     } else if (location.isTrash()) {
       label = "Trash";
     } else if (current->isNative()) {
@@ -44,6 +46,10 @@ std::vector<luciole::Breadcrumb> luciole::locationBreadcrumbs(const Location& lo
 }
 
 std::string luciole::locationEditText(const Location& location) {
+  // Virtual discovery folders have no native path; asking GVfs can start discovery just to build a tooltip.
+  if (location.isNetworkDiscovery()) {
+    return location.uri();
+  }
   const auto path = location.nativePath();
   return path && g_utf8_validate(path->c_str(), static_cast<gssize>(path->size()), nullptr) ? *path : location.uri();
 }

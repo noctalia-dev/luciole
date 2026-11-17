@@ -48,6 +48,7 @@
 #include "ui/controls/scroll_view.h"
 #include "ui/controls/side_list_metrics.h"
 #include "ui/controls/tooltip_presenter.h"
+#include "ui/dialogs/dialog_chrome.h"
 #include "ui/dialogs/name_dialog.h"
 #include "ui/palette.h"
 #include "ui/style.h"
@@ -353,7 +354,7 @@ std::string BrowserPage::title() const {
   if (!location()) {
     return "Luciole";
   }
-  return location()->displayName().value_or("Luciole");
+  return location() == luciole::Location::network() ? "Network" : location()->displayName().value_or("Luciole");
 }
 
 void BrowserPage::preferencesChanged(const std::string& error) {
@@ -494,6 +495,13 @@ bool BrowserPage::popupOwns(wl_surface* surface) const {
 
 bool BrowserPage::popup() const { return m_popupSurface != nullptr; }
 
+// Modal dialogs and quick preview dim the window; menus, popovers and other outside-click dialogs leave it undimmed.
+bool BrowserPage::dimsWindow() const {
+  return popup()
+      && m_dialogTier.has_value()
+      && (m_popupDismiss == PopupDismiss::Explicit || m_activePopup.kind() == ActivePopup::Kind::QuickPreview);
+}
+
 bool BrowserPage::overlay() const { return m_archiveController.open(); }
 
 bool BrowserPage::previewEnabled() const {
@@ -578,7 +586,7 @@ void BrowserPage::prepare(LayoutRect bounds, bool active, bool roundCorner) {
   stampFocusKeys(*m_sidebar.bundle());
   // Panes are part of the flush content plane; the split view marks the active pane with the window's top bar.
   m_body->clearBorder();
-  m_body->setRadii(roundCorner ? Radii(kWorkspaceRadius, 0, 0, 0) : Radii(0, 0, 0, 0));
+  m_body->setRadii(roundCorner ? Radii(workspaceRadius(), 0, 0, 0) : Radii(0, 0, 0, 0));
   if (active && !m_active) {
     m_active = true;
     // A press or Tab that activated the pane already focused inside it; otherwise bring back its last focus.
@@ -880,8 +888,8 @@ bool BrowserPage::openInNewTab(float x, float y) {
   if (m_list && m_list->containsScenePoint(x, y)) {
     if (auto index = m_list->itemAtScene(x, y); index && *index < browser().model().rows().size()) {
       const auto* entry = browser().model().entry(browser().model().rows()[*index]);
-      if (entry && entry->type == luciole::FileType::Directory) {
-        m_workspaceRequest(command, entry->location());
+      if (entry && entry->isFolderLink()) {
+        m_workspaceRequest(command, entry->navigationLocation());
       }
       return true;
     }
@@ -1410,7 +1418,7 @@ void BrowserPage::runAction(
       {Action::Trash, [](BrowserPage& page, const Call& call) { page.m_trashController.trashItems(call.targets); }},
       {Action::Restore, [](BrowserPage& page, const Call& call) { page.m_trashController.restore(call.targets); }},
       {Action::DeletePermanently,
-       [](BrowserPage& page, const Call& call) { page.m_trashController.openEmptyTrash(call.targets); }},
+       [](BrowserPage& page, const Call& call) { page.m_trashController.deleteItems(call.targets); }},
       {Action::Properties,
        [](BrowserPage& page, const Call& call) { page.m_propertiesController.show(call.targets); }},
       {Action::Compress,
@@ -1544,7 +1552,9 @@ void BrowserPage::sortAction(Action action) {
 
 void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& targets) {
   if (choosing()) {
-    if (targets.size() == 1 && targets.front().type == luciole::FileType::Directory) {
+    if (targets.size() == 1
+        && (targets.front().type == luciole::FileType::Directory
+            || targets.front().type == luciole::FileType::Mountable)) {
       browser().activate(targets.front().id);
     } else {
       m_chooser.open(targets);
@@ -1696,6 +1706,16 @@ bool BrowserPage::requestCurrent(const luciole::ActionRequest& request, luciole:
 
 bool BrowserPage::operationsBusy() const { return actionContext().operationsBusy; }
 
+std::vector<std::string> BrowserPage::runningJobTitles() const {
+  std::vector<std::string> titles;
+  for (const auto& activity : m_hub.activities()) {
+    if (!activity.finished) {
+      titles.push_back(activity.title);
+    }
+  }
+  return titles;
+}
+
 bool BrowserPage::visible() const { return m_visible; }
 
 void BrowserPage::operationProgressTick() {
@@ -1742,7 +1762,7 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
     browser().setDefaultIconSize(settings.gridIconSize);
   }
   if (m_settingsController.open() && (force || before.sort != settings.sort)) {
-    browser().model().setSort(settings.sort);
+    applySort(settings.sort);
   }
   if (m_settingsController.open()
       && (force || before.showHidden != settings.showHidden)
@@ -1774,6 +1794,9 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
       adapter->setActivationMode(m_activationMode);
     }
   }
+  if (m_body && (force || before.backgroundOpacity != settings.backgroundOpacity)) {
+    m_body->setFill(colorSpecFromRole(ColorRole::Surface, static_cast<float>(settings.backgroundOpacity)));
+  }
   m_sidebar.applySettings(before, settings, force);
   if (m_settingsController.open()) {
     m_detailsHeader.applySettings(before, settings, force);
@@ -1802,17 +1825,28 @@ void BrowserPage::captureViewAnchor() {
   }
 }
 
-void BrowserPage::changeSort(luciole::SortOptions options) {
+void BrowserPage::applySort(luciole::SortOptions options) {
   if (options == browser().model().sort()) {
     return;
   }
-  captureViewAnchor();
+  // An explicit reorder starts at the new beginning, rather than following the old first visible item.
+  m_viewAnchor.reset();
+  m_pendingHistoryViewport.reset();
+  m_fileKeys.resetReveal();
   m_listAdapter.onPointerCancel();
   m_gridAdapter.onPointerCancel();
   browser().model().setSort(options);
   for (const auto& column : m_miller.columns()) {
     column->browser->model().setSort(options);
   }
+  m_sortScrollPending = true;
+}
+
+void BrowserPage::changeSort(luciole::SortOptions options) {
+  if (options == browser().model().sort()) {
+    return;
+  }
+  applySort(options);
   m_preferences.saveSort(options);
   dispatcher().setFocus(m_list->focusArea());
 }
@@ -1997,7 +2031,8 @@ void BrowserPage::syncBrowser() {
   m_viewSwitch->setSelectedIndex(grid ? 0 : m_viewMode == luciole::ViewMode::List ? 1 : 2);
   const auto request = actionRequest(false);
   for (const auto& [button, action] : std::array{
-           std::pair{m_back, Action::Back}, std::pair{m_forward, Action::Forward}, std::pair{m_up, Action::Up}
+           std::pair{m_back, Action::Back}, std::pair{m_forward, Action::Forward}, std::pair{m_up, Action::Up},
+           std::pair{m_newFolderButton, Action::CreateFolder}
        }) {
     const auto state = actionState(action, request);
     button->setEnabled(state.enabled);
@@ -2158,6 +2193,7 @@ void BrowserPage::prepareFrame(bool, bool layout) {
   m_operations.onFrame();
   m_settingsController.onFrame();
   m_sidebar.onFrame();
+  m_mountController.onFrame();
   m_archiveController.onFrame();
   m_transferController.syncConflict();
   m_trashController.onFrame();
@@ -2188,6 +2224,13 @@ void BrowserPage::layoutFrame(Renderer& renderer) {
   m_locationBar.prepareLayout();
   if (m_appliedViewMode != m_viewMode) {
     applyViewMode();
+  }
+  if (std::exchange(m_sortScrollPending, false)) {
+    // Apply after preference notifications and view switches can capture another anchor.
+    m_viewAnchor.reset();
+    m_pendingHistoryViewport.reset();
+    m_list->setSelectedIndex(m_list->selectedIndex(), false);
+    m_list->scrollView().requestScrollToOffset(0);
   }
   if (m_viewAnchor) {
     const auto& rows = browser().model().rows();
@@ -2267,7 +2310,7 @@ void BrowserPage::buildScene() {
       ui::column(
           {.out = &m_body,
            .align = FlexAlign::Stretch,
-           .fill = colorSpecFromRole(ColorRole::Surface),
+           .fill = colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_savedSettings.backgroundOpacity)),
            .clipChildren = true,
            .participatesInLayout = false},
           ui::column(
@@ -2388,6 +2431,15 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
       m_locationBar.buildLocationArea(), m_locationBar.buildSearchArea(),
       ui::row(
           {.align = FlexAlign::Center, .gap = Style::spaceXs},
+          ui::button(
+              {.out = &m_newFolderButton,
+               .glyph = "folder-plus",
+               .variant = ButtonVariant::Ghost,
+               .tooltip = "New Folder… (Ctrl+Shift+N)",
+               .visible = choosing(),
+               .participatesInLayout = choosing(),
+               .onClick = [this] { dispatchAction(Action::CreateFolder); }}
+          ),
           ui::button(
               {.out = &m_sortButton,
                .glyph = "arrows-sort",
@@ -2689,7 +2741,7 @@ void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width, Popu
       static_cast<float>(chrome.bleed.up), static_cast<float>(chrome.bleed.right),
       static_cast<float>(chrome.bleed.down), static_cast<float>(chrome.bleed.left)
   );
-  if (auto* shadow = popup_chrome::addShadow(*frame, chrome, kDialogShadow, Style::radiusLg)) {
+  if (auto* shadow = popup_chrome::addShadow(*frame, chrome, kDialogShadow, Style::scaledRadiusLg())) {
     shadow->setParticipatesInLayout(false);
     m_dialogShadow = shadow;
   }
@@ -2721,7 +2773,7 @@ void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width, Popu
       m_popupSurface->requestLayout();
     }
   });
-  (void)m_popupDispatcher.cycleTabFocus(false);
+  luciole::focusFirstDialogControl(m_popupDispatcher);
   m_popupSurface->requestLayout();
 }
 

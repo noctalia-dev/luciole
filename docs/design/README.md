@@ -7,6 +7,6 @@ The [user guide](../user/index.md) explains how to use and configure Luciole. Th
 - [Configuration and persistence](configuration.md): precedence, reload, typed edits and atomic writes.
 - [File jobs and desktop boundaries](file-jobs.md): job ownership, conflicts, provider operations and launching.
 
-[CONTRIBUTING.md](../../CONTRIBUTING.md) defines development conventions, [AGENTS.md](../../AGENTS.md) contains agent policies and detailed delivery/verification records, and [PLAN.md](../../PLAN.md) contains only unfinished work. [PACKAGING.md](../../PACKAGING.md) owns dependency and install requirements.
+[CONTRIBUTING.md](../../CONTRIBUTING.md) defines development conventions and [PACKAGING.md](../../PACKAGING.md) owns dependency and install requirements.
 
-When behavior changes, update its user guide. When ownership, phase rules, persistence or provider guarantees change, update the relevant design note too. Keep notes about current contracts separate from proposals in the remaining-work plan.
+When behavior changes, update its user guide. When ownership, phase rules, persistence or provider guarantees change, update the relevant design note too.

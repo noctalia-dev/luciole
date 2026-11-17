@@ -500,12 +500,17 @@ struct luciole::WaylandTextClipboard::State : std::enable_shared_from_this<State
       target.preferred = DragAction::Copy;
     }
     const bool acceptedTarget = extraction ? static_cast<bool>(target.extract) : static_cast<bool>(target.receive);
-    if (files && target.receive && !target.copyOnly && offer.types.contains(std::string(kAskDropMime))) {
+    if (files
+        && target.receive
+        && !target.copyOnly
+        && !target.moveOnly
+        && offer.types.contains(std::string(kAskDropMime))) {
       target.preferred = DragAction::Ask;
     }
     const bool modern = wl_data_offer_get_version(dragging) >= WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION;
-    const auto mask = target.copyOnly || extraction ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
-                                                    : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+    const auto mask = target.moveOnly   ? (modern && !target.copyOnly ? WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE : 0)
+        : target.copyOnly || extraction ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+                                        : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
             | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE
             | WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
     const auto supported = offer.actions & mask;

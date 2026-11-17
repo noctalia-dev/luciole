@@ -172,6 +172,7 @@ void PreviewController::layoutPane(bool show) {
     }
     const auto& snapshot = m_preview.snapshot();
     m_view->setVisible(true);
+    m_view->setFill(colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_page.settings().backgroundOpacity)));
     m_view->sync(
         snapshot, m_bounds->width, m_bounds->height,
         snapshot.entry ? m_page.browser().model().typeLabel(snapshot.entry->id) : ""

@@ -23,9 +23,10 @@ NameDialog::NameDialog(
            .onSubmit = [this](const std::string&) { this->submit(); }}
       )
   );
+  // The message row holds the hint or an error; it collapses while there is neither.
   addChild(
       ui::column(
-          {.align = FlexAlign::Stretch, .minHeight = 44.0F, .maxHeight = 44.0F},
+          {.out = &m_messageRow, .align = FlexAlign::Stretch, .minHeight = 44.0F, .maxHeight = 44.0F},
           ui::label(
               {.out = &m_message,
                .text = m_hint,
@@ -56,6 +57,7 @@ NameDialog::NameDialog(
           )
       )
   );
+  showError({});
 }
 
 void NameDialog::setSaving(bool saving) {
@@ -69,6 +71,9 @@ void NameDialog::setSaving(bool saving) {
 void NameDialog::showError(const std::string& error) {
   m_input->setInvalid(!error.empty());
   m_message->setText(error.empty() ? m_hint : error);
+  const bool shown = !error.empty() || !m_hint.empty();
+  m_messageRow->setVisible(shown);
+  m_messageRow->setParticipatesInLayout(shown);
   m_message->setColor(colorSpecFromRole(error.empty() ? ColorRole::OnSurfaceVariant : ColorRole::Error));
 }
 

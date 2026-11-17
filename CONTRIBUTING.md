@@ -6,7 +6,7 @@ luciole shares its conventions with [noctalia](https://github.com/noctalia-dev/n
 
 [docs/user/](docs/user/index.md) contains guides for using Luciole. [docs/design/](docs/design/README.md) documents subsystem ownership and implementation contracts. Update relevant user guides with behavior, configuration and shortcut changes; update design notes with architectural or contract changes in the same increment. Keep code references and index links accurate.
 
-[PACKAGING.md](PACKAGING.md) remains the dependency/install guide and must change with packaging requirements. [PLAN.md](PLAN.md) contains unfinished work, not descriptions of delivered features. Documentation is ordinary Markdown checked by `just lint-prose`; no site generator or documentation formatter is needed.
+[PACKAGING.md](PACKAGING.md) remains the dependency/install guide and must change with packaging requirements. Documentation is ordinary Markdown checked by `just lint-prose`. `tools/sync-docs.sh` publishes docs/user/ to [docs.noctalia.dev/luciole](https://docs.noctalia.dev/luciole/) through a sibling checkout of noctalia-docs; no documentation formatter is needed.
 
 ## Code Style
 

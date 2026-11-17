@@ -121,11 +121,7 @@ std::unique_ptr<Node> FileChooserSession::attach(
   }
 
   auto footer = ui::row(
-      {.align = FlexAlign::Center,
-       .gap = Style::spaceSm,
-       .paddingH = Style::spaceMd,
-       .fill = colorSpecFromRole(ColorRole::SurfaceContainerLow),
-       .height = kChooserFooterHeight}
+      {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingH = Style::spaceMd, .height = kChooserFooterHeight}
   );
   const auto plain = [](Label& label) { label.setUseMarkup(false); };
   if (m_request.mode == luciole::FileChooserMode::Save) {

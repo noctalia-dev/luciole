@@ -12,6 +12,8 @@ namespace luciole {
     // For a URI that already is g_file_get_uri() output of a native file; skips revalidation and re-canonicalization.
     static Location fromCanonicalNativeUri(std::string uri);
     static Location trash();
+    static Location network();
+    bool isNetworkDiscovery() const;
 
     const std::string& uri() const { return m_uri; }
     std::optional<std::string> nativePath() const;

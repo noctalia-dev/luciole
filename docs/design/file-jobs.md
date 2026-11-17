@@ -36,6 +36,26 @@ External drag destinations use actual core `wl_keyboard.modifiers` events delive
 
 The 2026-11-13 investigation reproduces Ctrl choosing Move in Luciole and Shift choosing Copy in a matched native Qt receiver when drag destinations do not receive the held state. The corresponding Umbriel fix forwards modifiers to the active native pointer-drag focus client and clears stale state on leave/drop/client destruction, retaining keyboard-focus, key-event, cursor-ownership, session-lock and capture boundaries. This is compositor-owned protocol delivery, outside both Noctalia library copies. Luciole does not guess missing modifiers, identify source applications or force a global action. A compositor must supply the modifier state for an external target to honor it.
 
+## Trash drops
+
+The Places Trash root is a separate move destination, routed through TrashService rather than TransferService. Both sidebar modes and the internal fallback use the same path. FileDropTarget's moveOnly policy negotiates only Move, including when the source advertises Ask intent; legacy and Copy-only offers are rejected. Ctrl and Alt hover policies reject copy/chooser drops. Provider sources and deferred extraction remain unsupported.
+
+TrashService accepts up to 4096 native locations spanning containing folders. Preparation validates the complete payload, rejects duplicates and lexical ancestor overlaps, and pins every containing folder and entry on a worker before any mutation. Each move revalidates the parent binding and no-follow entry identity, then uses GIO trash without permanent-deletion fallback. Cancellation and partial outcomes retain their existing per-item reporting. No Trash Undo record is introduced.
+
+OperationJob::whenFinished waits through preparation and mutation; whenIdle still describes one worker run. Trash drops acknowledge success only after every result is Trashed. Preparation failure, cancellation, partial failure and hub teardown release the offer without claiming success. Source removal belongs to the Trash backend. This move preference follows [Nautilus's Trash target policy](https://github.com/GNOME/nautilus/blob/main/src/nautilus-dnd.c); Luciole's native-only scope and payload validation remain its own constraints.
+
+## Moving out of Trash
+
+Top-level Trash entries can be dragged or cut/pasted into native folders. Cut ignores the provider's intentionally false rename capability and uses its top-level delete capability and identity checks. Nested Trash entries remain immutable. Trash drags advertise Move only and cannot become pins or Copy/Link operations. Native and Trash sources cannot be mixed in one move, and provider destinations remain unsupported.
+
+TransferController routes these payloads through RestoreService::move. A worker captures all source identities and original names, plus the chosen destination folder identity, before any mutation. Every move revalidates the captured source and folder binding, including after a conflict decision. Source names use the original basename when available. Existing Restore retains its original-location policy. Both paths use the standard GIO Trash move, including provider-owned recovery-metadata cleanup and its same-filesystem restriction. Folder merge/replacement, cross-filesystem fallback and Trash Undo are not added.
+
+The existing Restore job supplies progress, conflicts, cancellation between complete provider moves, ownership across pages and accurate outcomes. Start publishes busy synchronously so a fast worker cannot bypass completion observers. Move jobs are labelled Move out of Trash. Shared normalized results drive drag acknowledgement, cut-clipboard reconciliation and application-wide provider-pane refresh, including inactive Trash panes and Miller columns. The handling page already refreshes through its job result callback. Only confirmed moved sources are removed from a cut clipboard; a drag acknowledges success only when every item arrived. Skipped, failed, cancelled or unconfirmed sources retain their clipboard entries. No sender-side deletion or direct manipulation of Trash backing files is used. This follows [GVfs's native Trash pull operation](https://github.com/GNOME/gvfs/blob/master/daemon/gvfsbackendtrash.c), which accepts a selected native destination and requires top-level sources for moves.
+
+## Permanent deletion
+
+Settings → General → Confirm permanent deletion maps to browser.confirm_permanent_deletion and defaults to true. TrashController applies it to selected-item permanent deletion both inside and outside Trash. Empty Trash always uses its confirmation. EmptyTrashService's explicit preparation paths wait for confirmation; deleteSelection validates captured identities on a worker and starts deletion automatically, skipping confirmation size calculation. Native deletion uses std::filesystem::remove_all without following entry symlinks; Trash uses its existing GIO backend. Cancellation between selected items and activity reporting are reused. A recursive error may leave partial contents and is reported as unconfirmed; permanent deletion creates no Undo receipt. Plain Delete outside Trash retains Move to Trash.
+
 ## External deferred extraction
 
 [WaylandTextClipboard](../../src/clipboard/text_clipboard.cpp) selects advertised contracts independently of destination routing. URI lists take precedence and retain normal Copy/Move/Ask/Link processing. The paired `application/x-kde-ark-dndextract-service` and `application/x-kde-ark-dndextract-path` fields select a Copy-only extraction handoff. Both fields are read asynchronously after drop, under five-second/1 MiB per-pipe limits, then individually capped at 4096 bytes. An incomplete pair, Move-only offer, unsupported destination or pin-only target is rejected. No process identity or archiver preference participates.
@@ -48,7 +68,7 @@ Ordinary dropped URI lists have a separate 120-second worker-read deadline, reta
 
 The delayed-payload regression reproduces a valid offer being destroyed at five seconds in the previous build, then verifies delivery after 5.3 seconds with the fix. Wire peers also check overlapping old/new drops, prompt read-end closure on transport destruction and malformed/empty/non-UTF-8 payload errors. These are receiver protocol checks; they do not prove a producer supports exporting files or establish universal Xwayland interoperability.
 
-X11 Direct Save requires a source-window-property handshake that an ordinary native Wayland MIME offer cannot supply. Luciole does not accept `XdndDirectSave0` or arbitrary raw data. Additional export adapters and any compositor bridge remain separate work in PLAN.md. No shared rendering-library edit, Qt/KIO linkage or additional compiled dependency is introduced.
+X11 Direct Save requires a source-window-property handshake that an ordinary native Wayland MIME offer cannot supply. Luciole does not accept `XdndDirectSave0` or arbitrary raw data. Additional export adapters and any compositor bridge are not implemented. No shared rendering-library edit, Qt/KIO linkage or additional compiled dependency is introduced.
 
 ## Remote destination Copy history
 
@@ -215,7 +235,7 @@ Desktop confirmation displays the captured name/Exec and launches the captured k
 
 ## Verification
 
-Use temporary fixtures for races, conflicts, raw/Unicode names, partial moves, source retention and cancellation. Tests are declared in [tests/meson.build](../../tests/meson.build), including transfer/provider-transfer, archive, Trash/restore, clipboard/payload, job-routing and launcher suites. Real GTK/Qt interoperability, private network servers, compositor input and crash/failure injection complement headless tests. Preserve the exact boundaries of previous results in [AGENTS.md](../../AGENTS.md) and outstanding coverage in [PLAN.md](../../PLAN.md#release-verification-and-open-follow-ups).
+Use temporary fixtures for races, conflicts, raw/Unicode names, partial moves, source retention and cancellation. Tests are declared in [tests/meson.build](../../tests/meson.build), including transfer/provider-transfer, archive, Trash/restore, clipboard/payload, job-routing and launcher suites. Real GTK/Qt interoperability, private network servers, compositor input and crash/failure injection complement headless tests.
 
 ## Terminal launch policy
 

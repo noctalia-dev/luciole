@@ -94,6 +94,38 @@ namespace {
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(!notified);
   }
+  void nativeDeletion(Pump& pump) {
+    Fixture fixture;
+    const auto folder = fixture.root / "selected";
+    fs::create_directories(folder / "nested");
+    write(folder / "nested/file", "delete");
+    write(fixture.root / "keep", "preserve");
+    fs::create_symlink(fixture.root / "keep", folder / "link");
+    fs::create_symlink("missing", folder / "broken");
+    luciole::DirectorySession session;
+    session.open(luciole::Location::fromPath(fixture.root.native()));
+    pump.until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
+    TEST_CHECK(session.snapshot().status == luciole::DirectoryStatus::Ready);
+    const auto found =
+        std::ranges::find(session.snapshot().entries, std::string("selected"), &luciole::DirectoryEntry::name);
+    TEST_CHECK(found != session.snapshot().entries.end());
+    // Freeze the entry: asynchronous session updates can replace its storage.
+    const auto selected = *found; // NOLINT(performance-unnecessary-copy-initialization)
+    luciole::EmptyTrashService service;
+    TEST_CHECK(service.prepareDeletion({selected}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.canEmpty() && read(folder / "nested/file") == "delete");
+    service.cancel();
+    TEST_CHECK(service.deleteSelection({selected}));
+    service.cancel();
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(!service.empty() && read(folder / "nested/file") == "delete");
+    TEST_CHECK(service.deleteSelection({selected}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.snapshot().status == Status::Finished && service.snapshot().outsideTrash);
+    TEST_CHECK(!fs::exists(folder) && read(fixture.root / "keep") == "preserve");
+    TEST_CHECK(service.snapshot().results.size() == 1 && service.snapshot().results[0].outcome == Outcome::Deleted);
+  }
   void successfulEmptyAndNewArrivals(Pump& pump) {
     Fixture fixture;
     luciole::EmptyTrashService service;
@@ -154,14 +186,13 @@ namespace {
     for (const auto* name : {"keep-selected-test", "delete-selected-test"}) {
       trash(fixture.root / name);
     }
-    const auto selected = [&] {
+    const auto selected = [&](const char* name = "delete-selected-test") {
       luciole::DirectorySession session;
       session.open(luciole::Location::trash());
       pump.until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
       TEST_CHECK(session.snapshot().status == luciole::DirectoryStatus::Ready);
       const auto found = std::ranges::find_if(session.snapshot().entries, [&](const auto& entry) {
-        return entry.trashInfo().original
-            == luciole::Location::fromPath((fixture.root / "delete-selected-test").native());
+        return entry.trashInfo().original == luciole::Location::fromPath((fixture.root / name).native());
       });
       TEST_CHECK(found != session.snapshot().entries.end());
       return *found;
@@ -184,9 +215,9 @@ namespace {
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(service.snapshot().status == Status::Error && !service.empty());
     entry = selected();
-    TEST_CHECK(service.prepareSelection({entry}));
+    TEST_CHECK(service.deleteSelection({entry}));
     pump.until([&] { return !service.busy(); });
-    pump.empty(service);
+    TEST_CHECK(service.snapshot().status == Status::Finished && !service.canEmpty());
     TEST_CHECK(service.snapshot().results.front().outcome == Outcome::Deleted);
     TEST_CHECK(
         !fs::exists(trashFiles() / "delete-selected-test")
@@ -196,8 +227,9 @@ namespace {
     TEST_CHECK(service.prepareSelection({entry}));
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(service.snapshot().status == Status::Error && !service.empty());
-    pump.prepare(service);
-    pump.empty(service);
+    TEST_CHECK(service.deleteSelection({selected("keep-selected-test")}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.snapshot().results.front().outcome == Outcome::Deleted);
   }
   void staleItemsAndPartialOutcomes(Pump& pump) {
     Fixture fixture;
@@ -350,7 +382,9 @@ namespace {
 int main(int argc, char** argv) {
   try {
     Pump pump;
-    if (argc == 2 && std::string_view(argv[1]) == "--provider") {
+    if (argc == 2 && std::string_view(argv[1]) == "--selected-provider") {
+      selectedDeletion(pump);
+    } else if (argc == 2 && std::string_view(argv[1]) == "--provider") {
       successfulEmptyAndNewArrivals(pump);
       selectedDeletion(pump);
       staleItemsAndPartialOutcomes(pump);
@@ -360,6 +394,7 @@ int main(int argc, char** argv) {
       trashAvailability(pump);
     } else {
       TEST_CHECK(argc == 1);
+      nativeDeletion(pump);
       unavailableAndLifetime(pump);
       unavailableTrashAvailability(pump);
     }

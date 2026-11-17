@@ -12,14 +12,15 @@ class OperationJob;
 class PageContext;
 struct KeyboardEvent;
 
-// Moving items to Trash, emptying Trash or deleting from it, and reporting restored items.
+// Trash, permanent deletion and reporting restored items.
 class TrashController {
 public:
   explicit TrashController(PageContext& page);
 
   void trashItems(const std::vector<luciole::DirectoryEntry>& targets);
   void restore(const std::vector<luciole::DirectoryEntry>& targets);
-  // Empties Trash, or deletes `selection` from it, after the user confirms.
+  void deleteItems(const std::vector<luciole::DirectoryEntry>& targets);
+  // Empties Trash, or permanently deletes `selection`, after the user confirms.
   void openEmptyTrash(std::optional<std::vector<luciole::DirectoryEntry>> selection = std::nullopt);
   // Without an explicitly focused control, Enter safely cancels the confirmation.
   bool key(const KeyboardEvent& event);

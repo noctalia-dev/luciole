@@ -1,0 +1,39 @@
+name: Feature Request
+description: Suggest an addition or change to Luciole
+title: "[FEATURE] "
+labels: ["enhancement"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea. Explaining the problem you run into is the most useful place to start;
+        a complete design is not needed. Not sure whether it fits? Ask in [Discord](https://discord.noctalia.dev).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      placeholder: When I ..., Luciole ..., so I end up ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would a better experience look like?
+      placeholder: It would help if I could ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Possible approach
+      description: Optional. Settings sketches, mockups, or how another file manager handles it.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Anything else?
+      description: Links, screenshots, or any other context.

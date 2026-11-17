@@ -1,8 +1,10 @@
 #include "fs/directory_session.h"
 
+#include "fs/background_job.h"
 #include "fs/gio_interop.h"
 #include "fs/heap_trim.h"
 #include "fs/native_listing.h"
+#include "fs/network_listing.h"
 
 #include <algorithm>
 #include <bit>
@@ -195,6 +197,15 @@ namespace luciole {
         .access = readFileAccess(info),
     };
     entry.setDisplayName(g_file_info_get_display_name(info));
+    if (entry.type == FileType::Shortcut) {
+      if (const char* target = infoString(info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI)) {
+        try {
+          entry.setShortcutTarget(Location::fromUri(target));
+        } catch (const std::invalid_argument&) {
+          // A malformed provider target stays non-navigable; it is never guessed from display text.
+        }
+      }
+    }
     entry.icon = local
         ? icons.getLocal(
               name, g_file_info_get_file_type(info), infoString(info, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE), *folder
@@ -266,6 +277,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   std::function<void()> changed;
   std::shared_ptr<Scan> scan;
   GioPtr<GFileMonitor> monitor;
+  std::unique_ptr<NetworkListing> network;
+  std::optional<CancelToken> monitorToken;
+  bool monitorPending = false;
   NameIds identities;
   // Names in the published entries whose content type is still the name-based guess.
   std::unordered_set<std::string> unsniffed;
@@ -475,7 +489,15 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void stop() {
+    if (network) {
+      network->setChangedCallback({});
+      network.reset();
+    }
     stopScan();
+    if (monitorToken) {
+      monitorToken->cancel();
+    }
+    monitorPending = false;
     if (monitor) {
       g_file_monitor_cancel(monitor.get());
       monitor.reset();
@@ -616,8 +638,60 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     }
   }
 
+  void connectMonitor() {
+    g_signal_connect(
+        monitor.get(), "changed",
+        G_CALLBACK(+[](GFileMonitor*, GFile* file, GFile* other, GFileMonitorEvent event, gpointer data) {
+          const auto state = static_cast<State*>(data)->shared_from_this();
+          state->monitorChanged(file, other, event);
+        }),
+        this
+    );
+  }
   void watch() {
+    if (monitorPending) {
+      return;
+    }
     const auto file = gioFile(*snapshot.location);
+    if (snapshot.location->isNetworkDiscovery()) {
+      monitorPending = true;
+      monitorToken = CancelToken{};
+      runJob<GioPtr<GFileMonitor>>(
+          *monitorToken,
+          [file = gioFile(*snapshot.location), token = *monitorToken] {
+            GError* error = nullptr;
+            GioPtr<GFileMonitor> result(
+                g_file_monitor_directory(file.get(), G_FILE_MONITOR_NONE, gioCancellable(token), &error)
+            );
+            if (const GErrorPtr owned(error); owned) {
+              throw FileErrorException(fileError(*owned));
+            }
+            return result;
+          },
+          [weak = weak_from_this(), token = *monitorToken](JobResult<GioPtr<GFileMonitor>> result) {
+            if (const auto owner = weak.lock(); owner && !token.cancelled()) {
+              owner->monitorPending = false;
+              if (result && *result) {
+                owner->monitor = std::move(*result);
+                owner->connectMonitor();
+                // Cover changes between the initial enumeration and monitor attachment.
+                owner->dirty = true;
+                if (!owner->scan || !owner->scan->enumerating) {
+                  owner->schedule();
+                }
+              } else {
+                owner->snapshot.monitorError = result
+                    ? FileError{FileErrorKind::Unsupported, "Network changes cannot be monitored; refresh to update."}
+                    : result.error();
+              }
+              owner->notify();
+            } else if (result && *result) {
+              g_file_monitor_cancel(result->get());
+            }
+          }
+      );
+      return;
+    }
     if (!g_file_is_native(file.get())) {
       snapshot.monitorError = FileError{
           .kind = FileErrorKind::Unsupported,
@@ -633,15 +707,52 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       g_error_free(error);
       return;
     }
-    g_signal_connect(
-        monitor.get(), "changed",
-        G_CALLBACK(+[](GFileMonitor*, GFile* file, GFile* other, GFileMonitorEvent event, gpointer data) {
-          // Keep State alive if its observer destroys the session.
-          const auto state = static_cast<State*>(data)->shared_from_this();
-          state->monitorChanged(file, other, event);
-        }),
-        this
-    );
+    connectMonitor();
+  }
+
+  void publishNetwork() {
+    if (!network) {
+      return;
+    }
+    const auto& fresh = network->snapshot();
+    auto entries = fresh.entries;
+    if (entryLimit && entries.size() > entryLimit) {
+      entries.resize(entryLimit);
+    }
+    for (auto& entry : entries) {
+      entry.id = resolveId ? resolveId(entry) : identities.find(entry.name).value_or(0);
+      if (!entry.id) {
+        entry.id = nextId++;
+      }
+    }
+    snapshot.entries = std::move(entries);
+    if (!resolveId) {
+      identities.index(snapshot.entries);
+    }
+    snapshot.status = fresh.loading && snapshot.entries.empty() ? DirectoryStatus::Loading : DirectoryStatus::Ready;
+    snapshot.monitorError = fresh.warning;
+    snapshot.incrementalResults = true;
+    notify();
+  }
+  void openNetwork() {
+    ++snapshot.generation;
+    snapshot.status = DirectoryStatus::Loading;
+    snapshot.error.reset();
+    snapshot.metadataLoading = false;
+    snapshot.contentTypesPending = false;
+    snapshot.accessError.reset();
+    snapshot.filesystemError.reset();
+    snapshot.metadata = {
+        .access = {.read = true, .write = false, .execute = true, .rename = false, .trash = false, .remove = false},
+        .filesystem = {.readOnly = true, .remote = true, .type = "network"}
+    };
+    network = std::make_unique<NetworkListing>();
+    network->setChangedCallback([weak = weak_from_this()] {
+      if (const auto state = weak.lock()) {
+        state->publishNetwork();
+      }
+    });
+    network->start();
   }
 
   void begin() {
@@ -875,7 +986,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   void enumerate() {
     std::string attributes = kAttributes;
     if (!scan->local) {
-      attributes.append(",").append(kIconAttribute);
+      attributes.append(",").append(kIconAttribute).append(",").append(G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
     }
     if (scan->trash) {
       attributes.append(",").append(kTrashAttributes);
@@ -1063,12 +1174,21 @@ void luciole::DirectorySession::open(const Location& location) {
   state->snapshot.entries = {};
   state->entriesAccessInvalidated = false;
   state->snapshot.monitorError.reset();
+  if (location == Location::network()) {
+    state->openNetwork();
+    return;
+  }
   state->watch();
   state->begin();
 }
 
 void luciole::DirectorySession::refresh() {
   const auto state = m_state;
+  if (state->network) {
+    ++state->snapshot.generation;
+    state->network->refresh();
+    return;
+  }
   if (state->snapshot.location) {
     if (!state->monitor) {
       state->snapshot.monitorError.reset();
@@ -1104,6 +1224,9 @@ void luciole::DirectorySession::setCatalogueEnabled(bool enabled) {
     return;
   }
   state->catalogueEnabled = enabled;
+  if (state->network) {
+    return;
+  }
   if (state->snapshot.status == DirectoryStatus::Ready
       && !state->snapshot.entries.isCatalogue()
       && state->snapshot.entries.size() <= 512) {

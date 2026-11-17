@@ -12,6 +12,7 @@
 #include "app/page/file_keyboard_controller.h"
 #include "app/page/location_bar_controller.h"
 #include "app/page/menu_controller.h"
+#include "app/page/mount_controller.h"
 #include "app/page/operations_controller.h"
 #include "app/page/page_context.h"
 #include "app/page/preview_controller.h"
@@ -152,6 +153,7 @@ public:
   void setForeignDrop(std::function<std::optional<std::pair<luciole::Location, LayoutRect>>(float, float)> callback);
   bool popupOwns(wl_surface* surface) const;
   bool popup() const;
+  bool dimsWindow() const;
   bool overlay() const override;
   bool previewVisible() const;
   int previewWidth() const;
@@ -233,6 +235,7 @@ private:
   bool targetsCurrent(const std::vector<luciole::DirectoryEntry>& targets) override;
   bool requestCurrent(const luciole::ActionRequest& request, luciole::ActionScope scope) const override;
   bool operationsBusy() const override;
+  std::vector<std::string> runningJobTitles() const override;
   PageJobs& jobs() override;
   bool visible() const override;
   bool active() const override;
@@ -273,6 +276,7 @@ private:
   void setViewMode(luciole::ViewMode mode);
   void applyViewMode();
   float gridHeight() const;
+  void applySort(luciole::SortOptions options);
   void changeSort(luciole::SortOptions options);
   void changeGridZoom(int requested);
   bool zoomFromKey(const KeyboardEvent& event);
@@ -380,6 +384,7 @@ private:
   SubmenuController m_submenus{*this, m_connection, m_renderer, m_animations};
   ProgramController m_programs{*this, m_submenus, m_connection};
   CreateController m_createController{*this, m_templates, m_submenus};
+  MountController m_mountController{*this};
   ArchiveController m_archiveController{*this, m_launcher, m_icons, m_connection};
   TransferController m_transferController{*this, [this] { operationProgressTick(); }};
   OperationsController m_operations{*this, m_hub, [this](luciole::JobId id, bool retry) {
@@ -424,6 +429,7 @@ private:
   luciole::PathCompletion m_siblingCompletion;
   std::optional<luciole::ViewMode> m_appliedViewMode;
   std::optional<luciole::EntryId> m_viewAnchor;
+  bool m_sortScrollPending = false;
   std::uint64_t m_visitSerial = 0;
   std::optional<luciole::BrowseViewport> m_pendingHistoryViewport;
   Node* m_root = nullptr;
@@ -454,6 +460,7 @@ private:
   Button* m_back = nullptr;
   Button* m_forward = nullptr;
   Button* m_up = nullptr;
+  Button* m_newFolderButton = nullptr;
   Button* m_sortButton = nullptr;
   bool m_browserDirty = true;
   std::unique_ptr<PopupSurface> m_popupSurface;

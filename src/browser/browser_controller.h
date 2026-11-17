@@ -2,6 +2,7 @@
 
 #include "browser/directory_model.h"
 #include "fs/cancel_token.h"
+#include "fs/location_mount.h"
 #include "fs/recursive_search.h"
 
 #include <glib.h>
@@ -55,6 +56,7 @@ namespace luciole {
     bool forward();
     bool up();
     void refresh();
+    MountInteraction* mountInteraction() const;
     void stop();
     void toggleHidden();
     void setShowBackups(bool showBackups);
@@ -90,6 +92,11 @@ namespace luciole {
     struct ActivationState;
     std::shared_ptr<ActivationState> m_activation;
     void advanceContext();
+    void sessionChanged();
+    void mountLocation(const Location& location, bool mountable = false);
+    void activateMountable(const Location& location);
+    std::unique_ptr<LocationMount> m_mount;
+    bool m_mountAttempted = false;
     void notify() const;
     void publish(DirectorySnapshot snapshot);
     void showMessage(std::string message);

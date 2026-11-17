@@ -1,0 +1,56 @@
+name: Bug Report
+description: Report a bug, crash, or regression in Luciole
+title: "[BUG] "
+labels: ["bug"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Fill in what you know and leave the rest blank.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      placeholder: I expected ..., but instead ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we reproduce it?
+      placeholder: |
+        1. Open ...
+        2. Press ...
+        3. See ...
+
+  - type: input
+    id: version
+    attributes:
+      label: Luciole version
+      description: Paste `luciole --version` if you can.
+      placeholder: "luciole 0.1.0 (c8adc515af29)"
+
+  - type: input
+    id: regression
+    attributes:
+      label: Last working version
+      description: If this used to work, name the last version or commit where it did.
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: System details
+      description: Distribution, compositor, GPU, or anything else that seems relevant.
+      placeholder: |
+        Distribution: Arch
+        Compositor: Umbriel 0.1.0
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Terminal output, backtraces, screenshots, or recordings. Large outputs can be attached as a file.

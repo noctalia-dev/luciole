@@ -41,6 +41,11 @@ private:
       luciole::PreferenceKey<int> key, const std::string& title, const std::vector<int>& values,
       std::string suffix = "px"
   );
+  // A 0 to `maximum` slider shown as a percentage.
+  void addFraction(
+      luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step,
+      std::string subtitle = {}
+  );
   template <class T>
   void addRow(
       luciole::PreferenceKey<T> key, const std::string& title, std::function<void(const T&)> show,

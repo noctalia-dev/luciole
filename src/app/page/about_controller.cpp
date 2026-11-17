@@ -9,6 +9,7 @@
 #include "platform/file_launcher.h"
 #include "render/core/renderer.h"
 #include "render/core/texture_manager.h"
+#include "render/scene/input_dispatcher.h"
 #include "ui/builders.h"
 #include "ui/controls/image.h"
 #include "ui/controls/scroll_view.h"
@@ -21,9 +22,10 @@
 #include <cmath>
 #include <format>
 #include <span>
+#include <string_view>
 
 namespace {
-  constexpr float kLogoSize = 96.0F;
+  constexpr float kLogoSize = 112.0F;
 } // namespace
 
 AboutController::AboutController(PageContext& page, luciole::FileLauncher& launcher)
@@ -40,42 +42,50 @@ void AboutController::open() {
       {.out = &scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .fillWidth = true, .flexGrow = 1.0F}
   );
   body->content()->setAlign(FlexAlign::Stretch);
-  body->content()->setGap(Style::spaceMd);
+  body->content()->setGap(Style::spaceSm);
   body->content()->addChild(
       ui::row(
           {.justify = FlexJustify::Center},
           ui::image({.out = &logo, .fit = ImageFit::Contain, .width = kLogoSize, .height = kLogoSize})
       )
   );
-  const auto text = [&](const std::string& value, bool caption = false) {
+  const auto centered = [&](std::string value, float size, ColorRole role, FontWeight weight = FontWeight::Normal) {
     body->content()->addChild(
         ui::label(
-            {.text = value,
-             .fontSize = caption ? Style::fontSizeCaption : Style::fontSizeBody,
+            {.text = std::move(value),
+             .fontSize = size,
+             .fontWeight = weight,
+             .color = colorSpecFromRole(role),
              .maxWidth = width,
-             .maxLines = 1000,
+             .maxLines = 3,
+             .textAlign = TextAlign::Center,
              .configure = [](Label& label) { label.setUseMarkup(false); }}
         )
     );
   };
-  text(
-      std::format(
-          "Version {} · {}\nRevision {}\nBuilt with {}", LUCIOLE_VERSION, LUCIOLE_BUILD_TYPE, LUCIOLE_BUILD_REVISION,
-          LUCIOLE_COMPILER
-      )
+  centered("Luciole", Style::fontSizeHeader, ColorRole::OnSurface, FontWeight::SemiBold);
+  centered("A smooth, native Wayland file manager", Style::fontSizeBody, ColorRole::OnSurfaceVariant);
+  centered(std::format("Version {}", LUCIOLE_VERSION), Style::fontSizeBody, ColorRole::Primary, FontWeight::SemiBold);
+  // Builds without a recorded revision omit it instead of printing "unknown".
+  const std::string_view revision = LUCIOLE_BUILD_REVISION;
+  centered(
+      revision == "unknown" ? std::format("{} build · {}", LUCIOLE_BUILD_TYPE, LUCIOLE_COMPILER)
+                            : std::format("{} build · {} · {}", LUCIOLE_BUILD_TYPE, revision, LUCIOLE_COMPILER),
+      Style::fontSizeCaption, ColorRole::OnSurfaceVariant
   );
   const auto link = [this](const char* address) { m_launcher.open(luciole::Location::fromUri(address)); };
+  const auto linkButton = [&](const char* label, const char* glyph, const char* address) {
+    return ui::button({.text = label, .glyph = glyph, .variant = ButtonVariant::Default, .onClick = [link, address] {
+                         link(address);
+                       }});
+  };
   body->content()->addChild(
       ui::row(
-          {.gap = Style::spaceSm},
-          ui::button(
-              {.text = "Project website",
-               .variant = ButtonVariant::Default,
-               .onClick = [link] { link("https://noctalia.dev"); }}
-          ),
-          ui::button({.text = "Source code", .variant = ButtonVariant::Default, .onClick = [link] {
-                        link("https://github.com/noctalia-dev/luciole");
-                      }})
+          {.justify = FlexJustify::Center, .gap = Style::spaceSm, .paddingV = Style::spaceSm},
+          linkButton("Website", "world", "https://noctalia.dev"),
+          linkButton("Source code", "brand-github", "https://github.com/noctalia-dev/luciole"),
+          linkButton("Report an issue", "bug", "https://github.com/noctalia-dev/luciole/issues"),
+          linkButton("Discord", "brand-discord", "https://discord.noctalia.dev")
       )
   );
   body->content()->addChild(
@@ -96,6 +106,8 @@ void AboutController::open() {
   luciole::applyDialogStyle(*root);
   m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.popupSurface()) {
+    // Nothing to act on by default: a focused link would read as selected. Tab still reaches the links.
+    m_page.popupDispatcher().setFocus(nullptr);
     m_page.activePopup().bind(ActivePopup::Kind::About, [this] {
       m_scroll = nullptr;
       m_message = nullptr;

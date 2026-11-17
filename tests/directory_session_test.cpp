@@ -14,10 +14,12 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <linux/magic.h>
 #include <print>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <thread>
 #include <unistd.h>
 
@@ -389,10 +391,11 @@ namespace {
   void testChangesDuringLoading(Pump& pump) {
     Fixture fixture;
     fixture.write("original");
+    fixture.write("unchanged");
     DirectorySession session;
     session.open(fixture.location());
     ready(pump, session);
-    const auto originalId = entry(session, "original").id;
+    const auto unchangedId = entry(session, "unchanged").id;
     bool changed = false;
     session.setChangedCallback([&] {
       if (!changed && session.snapshot().status == DirectoryStatus::Loading) {
@@ -408,14 +411,17 @@ namespace {
           && hasEntry(session, "during-load")
           && !hasEntry(session, "original");
     });
-    TEST_CHECK(entry(session, "moved").id == originalId);
+    // An explicit rescan can see the new name before the monitor reports its rename.
+    // Monitor-driven rename continuity is covered by testEnumerationAndMonitoring.
+    TEST_CHECK(entry(session, "unchanged").id == unchangedId);
+    const auto movedId = entry(session, "moved").id;
 
     // An atomic replacement must invalidate the target's old identity, even
     // when the temporary source never appeared in a published listing.
     fixture.write("replacement-tmp", "replacement");
     fs::rename(fixture.path / "replacement-tmp", fixture.path / "moved");
-    pump.until([&session, originalId] {
-      return entry(session, "moved").id != originalId && entry(session, "moved").size == 11;
+    pump.until([&session, movedId] {
+      return entry(session, "moved").id != movedId && entry(session, "moved").size == 11;
     });
     session.setChangedCallback({});
     fs::remove_all(fixture.path);
@@ -660,7 +666,8 @@ namespace {
         compareWithGio(entry);
       }
     }
-    TEST_CHECK(entry(session, "inner").access.rename == false);
+    // Root can retain write access after chmod, including in the CI container.
+    TEST_CHECK(entry(session, "inner").access.rename == (::access((fixture.path / "locked").c_str(), W_OK) == 0));
     fs::permissions(fixture.path / "locked", fs::perms::owner_all);
   }
 
@@ -856,6 +863,23 @@ namespace {
     TEST_CHECK(session.snapshot().entries.front().name == "inside");
     fs::permissions(fixture.path / "closed", fs::perms::owner_all);
   }
+
+  void testNetworkFilesystem() {
+    const Fixture fixture;
+    TEST_CHECK(!luciole::networkFilesystem(fixture.path.native()));
+    TEST_CHECK(luciole::networkFilesystem((fixture.path / "missing").native()));
+    constexpr std::uint32_t kFuse = 0x65735546;
+    const dev_t disk = makedev(8, 1);
+    const dev_t anonymous = makedev(0, 63);
+    struct statfs filesystem{};
+    filesystem.f_type = kFuse;
+    TEST_CHECK(luciole::networkFilesystem(filesystem, anonymous));
+    TEST_CHECK(!luciole::networkFilesystem(filesystem, disk));
+    filesystem.f_type = NFS_SUPER_MAGIC;
+    TEST_CHECK(luciole::networkFilesystem(filesystem, anonymous));
+    filesystem.f_type = EXT4_SUPER_MAGIC;
+    TEST_CHECK(!luciole::networkFilesystem(filesystem, disk));
+  }
 } // namespace
 
 int main() {
@@ -888,6 +912,7 @@ int main() {
     testCapabilityLifecycle(pump);
     testNativeMatchesGio(pump);
     testNativeUnsupportedFallsBack(pump);
+    testNetworkFilesystem();
     testDeferredSniffing(pump);
     testBrowseCatalogue(pump);
     testCatalogueContinuity();
