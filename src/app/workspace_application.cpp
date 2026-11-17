@@ -554,6 +554,10 @@ void WorkspaceApplication::keyboard(const KeyboardEvent& event) {
       }
       return;
     }
+    if (event.sym == XKB_KEY_Escape && host.stripMove.pending()) {
+      host.stripMove.cancel();
+      return;
+    }
     if (event.sym == XKB_KEY_Escape && host.pressedTab) {
       host.pressedTab.reset();
       host.tabDrag = false;
@@ -667,6 +671,9 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     }
     return;
   }
+  if (stripMovePointer(*host, event)) {
+    return;
+  }
   if (host->pressedTab) {
     if (event.type == PointerEvent::Type::Motion) {
       host->tabDrag |= std::abs(x - host->pressX) > 8 || std::abs(y - host->pressY) > 8;
@@ -764,7 +771,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
         child |= x >= bx && x <= bx + button->width();
       }
       if (!child) {
-        host->surface.beginMove(event.serial);
+        host->stripMove.press(event.serial, x, y);
         return;
       }
     }
@@ -1307,6 +1314,24 @@ void WorkspaceApplication::saveWindows(std::vector<luciole::SavedWindow> windows
   if (!m_pins.saveWindows(windows)) {
     m_pendingWindows = std::move(windows);
   }
+}
+
+bool WorkspaceApplication::stripMovePointer(Host& host, const PointerEvent& event) {
+  if (!host.stripMove.pending()) {
+    return false;
+  }
+  if (event.type == PointerEvent::Type::Motion) {
+    if (const auto serial = host.stripMove.motion(static_cast<float>(event.sx), static_cast<float>(event.sy))) {
+      host.surface.beginMove(*serial);
+    }
+    return true;
+  }
+  if (event.type == PointerEvent::Type::Button || event.type == PointerEvent::Type::Leave) {
+    host.stripMove.cancel();
+    // The press never reached the strip's controls, so neither does its release.
+    return event.type == PointerEvent::Type::Button && !event.pressed;
+  }
+  return false;
 }
 
 void WorkspaceApplication::tabMenu(Host& host, luciole::TabId tab, float x, float y) {

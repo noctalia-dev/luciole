@@ -2410,10 +2410,22 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
       {
           .acceptedButtons = InputArea::buttonMask(BTN_LEFT) | InputArea::buttonMask(BTN_RIGHT),
           .flexGrow = 1.0F,
+          .onLeave = [this] { m_titlebarMove.cancel(); },
+          .onMotion =
+              [this](const InputArea::PointerData& data) {
+                if (const auto serial = m_titlebarMove.motion(data.localX, data.localY)) {
+                  m_surface->beginMove(*serial);
+                }
+              },
+          // InputArea reports releases through onPress too.
           .onPress =
               [this](const InputArea::PointerData& data) {
+                if (!data.pressed) {
+                  m_titlebarMove.cancel();
+                  return;
+                }
                 if (data.button == BTN_LEFT) {
-                  m_surface->beginMove(data.serial);
+                  m_titlebarMove.press(data.serial, data.localX, data.localY);
                 } else {
                   m_surface->showWindowMenu(data.serial, static_cast<int>(data.sceneX), static_cast<int>(data.sceneY));
                 }

@@ -6,6 +6,7 @@
 #include "app/operation_hub.h"
 #include "app/page/browser_page.h"
 #include "app/palette_watcher.h"
+#include "app/window_move_gesture.h"
 #include "browser/tab_workspace.h"
 #include "config/state_store.h"
 #include "thumbnails/thumbnail_service.h"
@@ -51,6 +52,8 @@ class WorkspaceApplication {
     luciole::TabId chromeOwner = 0;
     std::optional<luciole::TabId> pressedTab;
     float pressX = 0, pressY = 0;
+    // A left press on empty tab strip, until it becomes a window move.
+    WindowMoveGesture stripMove;
     bool tabDrag = false, resizing = false, closed = false;
     bool decorated = false;
     bool stripVisible = true;
@@ -118,6 +121,8 @@ private:
   bool restoreLastWindow(luciole::WindowId window);
   bool restoreWindow(luciole::WindowId window, const luciole::SavedWindow& saved);
   void saveWindows(std::vector<luciole::SavedWindow> windows);
+  // A pending move from an empty tab strip press; true when it consumed the event.
+  bool stripMovePointer(Host& host, const PointerEvent& event);
   void tabMenu(Host& host, luciole::TabId tab, float x, float y);
   static Button::ButtonPalette closeTabPalette(ColorRole foreground);
   void rebuildStrip(Host& host, const luciole::TabWindow& window);

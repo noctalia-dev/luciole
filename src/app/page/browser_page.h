@@ -26,6 +26,7 @@
 #include "app/page/submenu_controller.h"
 #include "app/page/transfer_controller.h"
 #include "app/page/trash_controller.h"
+#include "app/window_move_gesture.h"
 #include "app/workspace_command.h"
 #include "app/workspace_layout.h"
 #include "browser/action_registry.h"
@@ -456,6 +457,7 @@ private:
   ChooserHooks m_chooser;
 
   Flex* m_titlebar = nullptr;
+  WindowMoveGesture m_titlebarMove;
   Flex* m_paneContentFrame = nullptr;
   VirtualGridView* m_list = nullptr;
   Segmented* m_viewSwitch = nullptr;
