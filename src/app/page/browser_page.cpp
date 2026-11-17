@@ -626,7 +626,11 @@ void BrowserPage::prepare(LayoutRect bounds, bool active, bool roundCorner) {
   stampFocusKeys(*m_sidebar.bundle());
   // Panes are part of the flush content plane; the split view marks the active pane with the window's top bar.
   m_body->clearBorder();
-  m_body->setRadii(roundCorner ? Radii(workspaceRadius(), 0, 0, 0) : Radii(0, 0, 0, 0));
+  if (roundCorner) {
+    m_body->setStyleRadii(Radii(Style::radiusXl, 0, 0, 0));
+  } else {
+    m_body->setRadii(Radii(0, 0, 0, 0));
+  }
   if (active && !m_active) {
     m_active = true;
     // A press or Tab that activated the pane already focused inside it; otherwise bring back its last focus.

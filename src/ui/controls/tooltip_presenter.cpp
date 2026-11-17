@@ -48,7 +48,7 @@ TooltipPresenter::TooltipPresenter(std::function<void()> requestUpdate)
   setAlign(FlexAlign::Stretch);
   setPadding(kPadV, kPadH);
   setFill(colorSpecFromRole(ColorRole::Surface));
-  setRadius(Style::scaledRadiusMd());
+  setStyleRadius(Style::radiusMd);
   setBorder(colorSpecFromRole(ColorRole::OutlineVariant), Style::borderWidth);
   setParticipatesInLayout(false);
   setHitTestVisible(false);

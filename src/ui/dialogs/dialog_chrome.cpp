@@ -9,7 +9,7 @@ namespace luciole {
   void applyDialogStyle(Flex& root) {
     root.setFill(colorSpecFromRole(ColorRole::Surface));
     root.setBorder(colorSpecFromRole(ColorRole::OutlineVariant), Style::borderWidth);
-    root.setRadius(Style::scaledRadiusLg());
+    root.setStyleRadius(Style::radiusLg);
     root.setPadding(Style::spaceMd);
     root.setGap(Style::spaceMd);
   }

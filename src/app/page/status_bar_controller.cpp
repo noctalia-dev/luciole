@@ -27,7 +27,7 @@ std::unique_ptr<Flex> StatusBarController::build() {
        .paddingV = Style::spaceXs,
        .paddingH = Style::spaceMd,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusXl(),
+       .styleRadius = Style::radiusXl,
        .border = colorSpecFromRole(ColorRole::OutlineVariant),
        .minHeight = Style::controlHeightSm,
        .visible = false,

@@ -107,7 +107,9 @@ SettingsDialog::SettingsDialog(
   section("Appearance", "paint");
   card("Window");
   addFraction(P::BackgroundOpacity, "Background opacity", 1.0, 0.01);
-  addFraction(P::CornerRadiusScale, "Corner roundness", 2.0, 0.05, "Applies to open windows after restart");
+  addFraction(P::CornerRadiusScale, "Corner roundness", 2.0, 0.05, {}, [](double value) {
+    Style::setCornerRadiusScale(static_cast<float>(value));
+  });
   addBool(P::AlwaysShowTabBar, "Always show tab bar");
   addBool(P::AlwaysShowStatusBar, "Always show status bar");
   addBool(P::CompactMenus, "Compact context menus");
@@ -385,7 +387,8 @@ void SettingsDialog::addNumber(
 }
 
 void SettingsDialog::addFraction(
-    luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step, std::string subtitle
+    luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step, std::string subtitle,
+    std::function<void(double)> onPreview
 ) {
   Label* percent = nullptr;
   auto slider = std::make_unique<Slider>();
@@ -400,7 +403,12 @@ void SettingsDialog::addFraction(
       {.align = FlexAlign::Center, .gap = Style::spaceSm, .width = 180.0F}, std::move(slider),
       ui::label({.out = &percent, .fontSize = Style::fontSizeCaption, .minWidth = 36.0F})
   );
-  control->setOnValueChanged([percent, showPercent](double value) { showPercent(percent, value); });
+  control->setOnValueChanged([percent, showPercent, onPreview = std::move(onPreview)](double value) {
+    showPercent(percent, value);
+    if (onPreview) {
+      onPreview(value);
+    }
+  });
   // Whole percents, so a snapped 0.6000000000000001 matches an inherited 0.6.
   control->setOnDragEnd([this, key, control] {
     send(key, std::optional(std::round(control->value() * 100.0) / 100.0));

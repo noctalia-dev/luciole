@@ -126,7 +126,7 @@ bool SubmenuController::create(float width, float height) {
       ui::scrollView({.out = &m_scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .flexGrow = 1.0F});
   scroll->content()->addChild(std::move(menu));
   m_root = ui::column(
-      {.fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh), .radius = Style::scaledRadiusLg()}, std::move(scroll)
+      {.fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh), .styleRadius = Style::radiusLg}, std::move(scroll)
   );
   m_root->setAnimationManager(&m_animations);
   m_surface->setSceneRoot(m_root.get());

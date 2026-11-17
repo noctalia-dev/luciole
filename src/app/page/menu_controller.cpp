@@ -621,7 +621,7 @@ void MenuController::showContextMenu(
   auto root = ui::column(
       {.align = FlexAlign::Stretch,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusLg()},
+       .styleRadius = Style::radiusLg},
       std::move(scrolling)
   );
   m_page.showPopup(std::move(root), control, anchor, width, height, alignLeft);

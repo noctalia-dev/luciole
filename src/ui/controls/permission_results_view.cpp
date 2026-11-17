@@ -44,7 +44,7 @@ namespace {
       setAlign(FlexAlign::Center);
       setPadding(Style::spaceSm, Style::spaceMd);
       setGap(Style::spaceSm);
-      setRadius(Style::scaledRadiusMd());
+      setStyleRadius(Style::radiusMd);
       const auto literal = [](Label& label) { label.setUseMarkup(false); };
       addChild(ui::glyph({.out = &m_glyph, .glyph = "circle-dot", .glyphSize = kGlyphSize}));
       addChild(

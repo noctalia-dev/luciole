@@ -59,7 +59,7 @@ WorkspaceApplication::WorkspaceApplication(
   m_preferences.setChangedCallback([this](const std::string& error) {
     if (m_preferences.settings()) {
       m_defaults = m_preferences.settings()->browser;
-      // Controls built from now on (menus, dialogs, tooltips) take the new rounding; open windows on restart.
+      // Live-radius bindings update open widgets; controls built afterwards pick it up directly.
       Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
     }
     for (auto& [id, page] : m_pages) {
