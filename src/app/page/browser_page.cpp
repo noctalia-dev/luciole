@@ -2029,6 +2029,16 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
+  const auto createFolderState = actionState(Action::CreateFolder, request);
+  m_newFolderButton->setEnabled(createFolderState.enabled);
+  const auto& createFolder = luciole::ActionRegistry::definition(Action::CreateFolder);
+  m_newFolderButton->setTooltip(
+      std::string(createFolder.label)
+      + " ("
+      + std::string(createFolder.shortcut)
+      + ")"
+      + (createFolderState.enabled ? "" : "\n" + std::string(createFolderState.reason))
+  );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
   const bool empty = model.rows().empty();
@@ -2408,6 +2418,15 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
       m_locationBar.buildLocationArea(), m_locationBar.buildSearchArea(),
       ui::row(
           {.align = FlexAlign::Center, .gap = Style::spaceXs},
+          ui::button(
+              {.out = &m_newFolderButton,
+               .glyph = "folder-plus",
+               .variant = ButtonVariant::Ghost,
+               .tooltip = "New Folder (Ctrl+Shift+N)",
+               .visible = choosing(),
+               .participatesInLayout = choosing(),
+               .onClick = [this] { dispatchAction(Action::CreateFolder); }}
+          ),
           ui::button(
               {.out = &m_sortButton,
                .glyph = "arrows-sort",

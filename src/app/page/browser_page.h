@@ -458,6 +458,7 @@ private:
   Button* m_back = nullptr;
   Button* m_forward = nullptr;
   Button* m_up = nullptr;
+  Button* m_newFolderButton = nullptr;
   Button* m_sortButton = nullptr;
   bool m_browserDirty = true;
   std::unique_ptr<PopupSurface> m_popupSurface;

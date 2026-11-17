@@ -660,6 +660,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::CopyPath:
   case A::CopyUri:
   case A::KeyboardShortcuts:
+  case A::CreateFolder:
     return true;
   case A::Miller:
   case A::OpenWith:
@@ -680,7 +681,6 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::ExtractHere:
   case A::ExtractTo:
   case A::BrowseArchive:
-  case A::CreateFolder:
   case A::CreateFile:
   case A::NewDocument:
   case A::PinCurrent:
