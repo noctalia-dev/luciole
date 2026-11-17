@@ -159,6 +159,7 @@ struct luciole::PreviewService::State : std::enable_shared_from_this<State> {
   PreviewSnapshot view;
   ThumbnailService& thumbnails;
   PreviewMetadataService metadata;
+  FolderTotalsService totals;
   std::shared_ptr<const FileIconImage> pendingImage;
   GioPtr<GCancellable> cancel;
   std::function<void()> changed;
@@ -242,6 +243,12 @@ luciole::PreviewService::PreviewService(ThumbnailService& thumbnails) : m_state(
       state->notify();
     }
   });
+  m_state->totals.setChangedCallback([weak] {
+    if (const auto state = weak.lock(); state && state->alive && state->view.entry) {
+      state->view.totals = state->totals.snapshot();
+      state->notify();
+    }
+  });
 }
 void luciole::PreviewService::thumbnailsChanged() {
   if (!m_state->alive || !m_state->pendingImage) {
@@ -256,6 +263,7 @@ luciole::PreviewService::~PreviewService() {
   m_state->changed = {};
 }
 void luciole::PreviewService::clear() {
+  m_state->totals.clear();
   m_state->metadata.clear();
   if (!m_state->view.entry && !m_state->pendingImage && !m_state->pending) {
     return;
@@ -301,6 +309,14 @@ void luciole::PreviewService::show(
   state.view.entry = *entry;
   state.metadata.show(*entry, options);
   state.view.metadata = state.metadata.fields();
+  // Folder contents are calculated on the shared totals service; a new selection supersedes the running walk.
+  if (entry->type == luciole::FileType::Directory && !entry->symlink) {
+    const std::array<DirectoryEntry, 1> root = {*entry};
+    (void)state.totals.start(root);
+    state.view.totals = state.totals.snapshot();
+  } else {
+    state.totals.clear();
+  }
   state.view.status = PreviewStatus::Unavailable;
   // The view shows the type icon while loading or when nothing renders, and the Details card names the type, so
   // only real failures need a message.

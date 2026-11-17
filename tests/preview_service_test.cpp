@@ -102,6 +102,57 @@ namespace {
     TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Unavailable && preview.snapshot().text.empty());
     preview.clear();
   }
+  void folderTotalsChecks(const std::filesystem::path& root) {
+    luciole::ThumbnailService thumbnails;
+    luciole::PreviewService preview(thumbnails);
+    const auto folder = [](const std::filesystem::path& path) {
+      auto result = entry(path, "inode/directry");
+      result.type = luciole::FileType::Directory;
+      return result;
+    };
+    const auto tree = root / "totals-tree";
+    std::filesystem::create_directory(tree / "nested");
+    write(tree / "one.txt", "abc");
+    write(tree / "nested" / "two.txt", "de");
+    preview.show(folder(tree), 512);
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Running);
+    wait([&] { return preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Complete; });
+    TEST_CHECK(
+        preview.snapshot().totals.files == 2
+        && preview.snapshot().totals.folders == 1
+        && preview.snapshot().totals.bytes == 5
+        && !preview.snapshot().totals.partial()
+    );
+    // Selecting the same folder again keeps its completed totals.
+    preview.show(folder(tree), 512);
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Complete);
+    const auto other = root / "totals-other";
+    std::filesystem::create_directory(other);
+    write(other / "three.txt", "xyz");
+    preview.show(folder(other), 512);
+    wait([&] { return preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Complete; });
+    // Stepping to another folder while its walk runs supersedes it; the stale result never publishes.
+    preview.show(folder(tree), 512);
+    preview.show(folder(other), 512);
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Running);
+    wait([&] { return preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Complete; });
+    const auto settle = std::chrono::steady_clock::now() + std::chrono::milliseconds(150);
+    wait([&] { return std::chrono::steady_clock::now() >= settle; });
+    TEST_CHECK(
+        preview.snapshot().totals.files == 1
+        && preview.snapshot().totals.folders == 0
+        && preview.snapshot().totals.bytes == 3
+    );
+    // Selecting a file clears the totals.
+    const auto file = root / "totals-file.txt";
+    write(file, "plain");
+    preview.show(entry(file), 512);
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
+    wait([&] { return !preview.busy(); });
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
+    preview.clear();
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
+  }
   void checks(const std::filesystem::path& root) {
     const auto portraitLayout = luciole::previewImageLayout(1000, 3000, 320, 1300, 1);
     TEST_CHECK(portraitLayout.pixels >= 846);
@@ -291,6 +342,7 @@ int main(int argc, char** argv) {
     checks(root);
     svgChecks(root);
     inheritedTextChecks(root);
+    folderTotalsChecks(root);
     std::println("preview checks passed");
   } catch (const std::exception& error) {
     std::println(stderr, "preview: {}", error.what());

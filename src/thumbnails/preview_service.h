@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fs/folder_totals.h"
 #include "thumbnails/preview_metadata.h"
 #include "thumbnails/thumbnail_service.h"
 
@@ -12,9 +13,11 @@ namespace luciole {
     std::shared_ptr<const FileIconImage> image;
     bool imageUpgradeFailed = false;
     MetadataFields metadata;
+    FolderTotalsSnapshot totals;
   };
-  // One current selection and at most one text worker. Superseded work never publishes. Images come from the shared
-  // ThumbnailService, whose owner forwards its change notifications to thumbnailsChanged().
+  // One current selection, at most one text worker and one folder-totals walk for a selected directory. Superseded
+  // work never publishes. Images come from the shared ThumbnailService, whose owner forwards its change
+  // notifications to thumbnailsChanged().
   class PreviewService {
   public:
     explicit PreviewService(ThumbnailService& thumbnails);

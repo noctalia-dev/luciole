@@ -17,8 +17,9 @@ namespace luciole {
       return unavailable || unsupported || changed || limited || overflow || phase == FolderTotalsPhase::Cancelled;
     }
   };
-  // Read-only native traversal, started explicitly by an inspector.
+  // Read-only native traversal, started explicitly by the preview pane or the Properties dialog.
   // One worker per instance, bounded progress delivery, no link following or content reads.
+  // A new start supersedes a running traversal; the superseded result never publishes.
   class FolderTotalsService {
   public:
     FolderTotalsService();

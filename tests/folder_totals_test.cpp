@@ -150,10 +150,19 @@ namespace {
     TEST_CHECK(!service.busy() && service.snapshot().phase == FolderTotalsPhase::Idle);
     drain();
     TEST_CHECK(changes == 0);
+    const auto few = root / "few";
+    fs::create_directory(few);
+    std::ofstream(few / "one") << 'x';
+    std::ofstream(few / "two") << 'x';
+    std::ofstream(few / "three") << 'x';
     const std::vector targets{entry(root / "many")};
-    TEST_CHECK(service.start(targets) && !service.start(targets));
+    TEST_CHECK(service.start(targets));
+    // A new start supersedes the running walk; the superseded result never publishes.
+    const std::vector superseded{entry(few)};
+    TEST_CHECK(service.start(superseded));
     pumpUntil([&] { return !service.busy(); });
-    TEST_CHECK(service.snapshot().files == 1000 && !service.snapshot().partial());
+    drain();
+    TEST_CHECK(service.snapshot().files == 3 && !service.snapshot().partial());
     TEST_CHECK(changes > 0);
     const int finished = changes;
     drain();

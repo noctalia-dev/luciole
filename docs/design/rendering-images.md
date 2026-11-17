@@ -46,7 +46,7 @@ Video generation probes duration, samples the keyframe nearest 10% (keyframe-onl
 
 Layout requests physical pixels, including display scale. Grid thumbnails cannot replace the larger preview request. Keep an already ready image visible until a higher-resolution replacement uploads, preserve aspect ratio, and retain source dimensions separately from decoded/output dimensions. Source revisions must invalidate same-size edits without flushing unrelated images.
 
-Preview and Properties share [asynchronous metadata](../../src/thumbnails/preview_metadata.h). The preview presents essential content facts; Properties can expose technical and permission information. Recursive folder totals are a separate explicit Properties service, never a side effect of selecting an entry.
+Preview and Properties share [asynchronous metadata](../../src/thumbnails/preview_metadata.h). The preview presents essential content facts; Properties can expose technical and permission information. Selecting a single folder starts the shared [folder totals service](../../src/fs/folder_totals.h) for that selection: the preview shows its size and its file and folder counts, a new selection supersedes the running walk, and a running walk never marks the page busy. Properties keeps the explicit inspection card with its Stop button and detailed partial-result notes.
 
 ## Shared video decoration
 

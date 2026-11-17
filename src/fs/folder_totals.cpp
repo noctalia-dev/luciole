@@ -76,9 +76,11 @@ luciole::FolderTotalsService::~FolderTotalsService() {
 }
 bool luciole::FolderTotalsService::start(std::span<const DirectoryEntry> entries) {
   const auto state = m_state;
-  if (state->running || entries.empty()) {
+  if (entries.empty()) {
     return false;
   }
+  // A start while a traversal runs supersedes it: clear() below invalidates the old completion through the serial
+  // and cancels the old worker, so only the newest walk can publish.
   clear();
   std::vector<DirectoryEntry> roots(entries.begin(), entries.begin() + std::min<std::size_t>(4096, entries.size()));
   state->snapshot.phase = FolderTotalsPhase::Running;
@@ -99,10 +101,10 @@ bool luciole::FolderTotalsService::start(std::span<const DirectoryEntry> entries
         });
       },
       [state, serial = state->serial](auto reply) {
-        state->running = false;
         if (!state->alive || state->serial != serial) {
           return;
         }
+        state->running = false;
         state->stopTimer();
         state->poll(false);
         if (!reply) {
@@ -130,6 +132,7 @@ void luciole::FolderTotalsService::cancel() {
 void luciole::FolderTotalsService::clear() {
   ++m_state->serial;
   m_state->cancel.cancel();
+  m_state->running = false;
   m_state->stopTimer();
   m_state->snapshot = {};
 }

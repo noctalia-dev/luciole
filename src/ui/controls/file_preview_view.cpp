@@ -13,10 +13,42 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 
 namespace {
   // Type icon shown in place of a preview that is loading or cannot render.
   constexpr float kFallbackIconSize = 96.0F;
+
+  // One compact contents line for a selected folder; Properties keeps the detailed inspection notes.
+  std::string folderContentsLine(const luciole::FolderTotalsSnapshot& totals) {
+    const char* prefix = totals.phase == luciole::FolderTotalsPhase::Running
+        ? (totals.cancelRequested ? "Stopping…" : "Calculating…")
+        : totals.partial() ? "Partial result"
+                           : "";
+    std::string line = prefix;
+    if (!line.empty()) {
+      line += " · ";
+    }
+    if (totals.overflow) {
+      line += "size overflow";
+    } else if (totals.bytes == 0 && totals.partial()) {
+      line += "size unknown";
+    } else {
+      const luciole::GString size(g_format_size_full(totals.bytes, G_FORMAT_SIZE_IEC_UNITS));
+      line += totals.bytes < 1024 ? std::string(size.get()) : std::format("{} ({} bytes)", size.get(), totals.bytes);
+    }
+    std::format_to(
+        std::back_inserter(line), " . {} {} . {} {}", totals.files, totals.files == 1 ? "file" : "files",
+        totals.folders, totals.folders == 1 ? "folder" : "folders"
+    );
+    if (totals.links != 0) {
+      std::format_to(std::back_inserter(line), " . {} {}", totals.links, totals.links == 1 ? "link" : "links");
+    }
+    if (totals.other != 0) {
+      std::format_to(std::back_inserter(line), " . {} other", totals.other);
+    }
+    return line;
+  }
 } // namespace
 
 FilePreviewView::FilePreviewView(
@@ -170,6 +202,9 @@ void FilePreviewView::sync(
     if (entry->size && entry->type != luciole::FileType::Directory) {
       const luciole::GString size(g_format_size_full(*entry->size, G_FORMAT_SIZE_IEC_UNITS));
       metadata.push_back({"File size", size.get()});
+    }
+    if (snapshot.totals.phase != luciole::FolderTotalsPhase::Idle) {
+      metadata.push_back({"Contents", folderContentsLine(snapshot.totals)});
     }
     if (entry->modifiedSeconds && *entry->modifiedSeconds <= G_MAXINT64) {
       const std::unique_ptr<GDateTime, decltype(&g_date_time_unref)> date(
