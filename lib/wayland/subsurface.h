@@ -32,6 +32,7 @@ public:
 
   void setPosition(std::int32_t x, std::int32_t y);
   void setStacking(SubsurfaceStacking stacking);
+  void uiScaleChanged() override;
 
 private:
   void applyStacking();

@@ -150,6 +150,8 @@ public:
   void duplicateFrom(BrowserPage& source);
   void open(const luciole::Location& location);
   void setWorkspaceRequest(std::function<void(WorkspaceCommand, std::optional<luciole::Location>)> callback);
+  void setUiScaleCallback(std::function<void(double)> callback) { m_uiScaleCallback = std::move(callback); }
+  void uiScaleChanged(float pointerRatio);
   void configurationChanged();
   void setHasOther(std::function<bool()> callback);
   void setPopupAvailable(std::function<bool()> callback);
@@ -375,6 +377,7 @@ private:
   RectNode* m_dialogShadow = nullptr;
   std::optional<std::pair<int, int>> m_dialogPosition;
   bool m_dialogResizePending = false;
+  bool m_dialogScaleChanged = false;
   luciole::PinService& m_pins;
   luciole::DriveMonitor& m_drives;
   luciole::FileLauncher m_launcher;
@@ -417,7 +420,14 @@ private:
       m_locationBar,
       m_programs
   };
-  SettingsController m_settingsController{*this, m_preferences, m_thumbnails, [this] { m_thumbnails.clearCache(); }};
+  SettingsController m_settingsController{
+      *this, m_preferences, m_thumbnails, [this] { m_thumbnails.clearCache(); },
+      [this](double scale) {
+        if (m_uiScaleCallback) {
+          m_uiScaleCallback(scale);
+        }
+      }
+  };
   AboutController m_aboutController{*this, m_launcher};
   ShortcutsController m_shortcutsController{*this};
   ApplicationChooserController m_applicationChooser{*this, m_launcher, m_icons};
@@ -452,6 +462,7 @@ private:
   std::optional<InputDispatcher::TabFocusSnapshot> m_stashedFocus;
   std::optional<luciole::BrowseViewport> m_inactiveViewport;
   std::function<void(WorkspaceCommand, std::optional<luciole::Location>)> m_workspaceRequest;
+  std::function<void(double)> m_uiScaleCallback;
   bool m_visible = false, m_active = false;
   bool m_pendingProviderRefresh = false;
   luciole::TabId m_workspaceId;

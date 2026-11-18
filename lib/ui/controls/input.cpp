@@ -950,10 +950,11 @@ void Input::rebuildCursorStopsFull(Renderer& renderer) {
 }
 
 void Input::rebuildCursorStops(Renderer& renderer) {
-  if (!m_textMetricsDirty) {
+  if (!m_textMetricsDirty && m_stopsRenderScale == renderer.renderScale()) {
     return;
   }
   rebuildCursorStopsFull(renderer);
+  m_stopsRenderScale = renderer.renderScale();
   m_textMetricsDirty = false;
 }
 
@@ -1041,10 +1042,9 @@ void Input::updateLabelVisibleSlice(Renderer& renderer) {
   if (slice != m_labelVisibleSlice) {
     m_labelVisibleSlice = slice;
     m_label->setText(m_labelVisibleSlice);
-    m_label->measure(renderer);
-    const float h = m_controlHeight;
-    m_cachedLabelY = std::round((h - m_label->height()) * 0.5F);
   }
+  m_label->measure(renderer);
+  m_cachedLabelY = std::round((m_controlHeight - m_label->height()) * 0.5F);
 }
 
 void Input::syncLabelScrollPosition() {

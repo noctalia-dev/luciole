@@ -14,6 +14,7 @@ struct zwp_text_input_v3;
 class TextInputService {
 public:
   TextInputService();
+  void setUiScale(double scale) noexcept { m_uiScale = scale; }
   ~TextInputService();
 
   TextInputService(const TextInputService&) = delete;
@@ -32,6 +33,8 @@ public:
   // Only inside an edit callback: the caller forwards that edit to a different client on this surface.
   bool transferFocusedClient(wl_surface* surface, TextInputClient* from, TextInputClient* to);
   void notifyClientStateChanged(TextInputClient* client, TextInputChangeCause cause);
+  // Resends the active client's state, e.g. after a relayout moved its cursor rectangle.
+  void refreshActiveState() { commitActiveState(TextInputChangeCause::Other); }
   void onKeyboardFocusSurface(wl_surface* surface, bool entered);
 
   void handleEnter(wl_surface* surface);
@@ -66,6 +69,7 @@ private:
   void commitProtocolState();
   void deactivateClient(TextInputClient* client);
 
+  double m_uiScale = 1.0;
   zwp_text_input_manager_v3* m_manager = nullptr;
   wl_seat* m_seat = nullptr;
   zwp_text_input_v3* m_textInput = nullptr;

@@ -143,8 +143,9 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, S
     luciole::initializeLibrary();
     Style::setCornerRadiusScale(static_cast<float>(config.settings().browser.cornerRadiusScale));
     GlibPollSource glib;
+    const auto uiScale = config.settings().browser.uiScale;
     TextInputService textInput;
-    WaylandConnection connection;
+    WaylandConnection connection(WaylandConnection::Purpose::Primary, uiScale);
     if (!connection.connect()) {
       throw std::runtime_error("could not connect to Wayland: " + connection.describeDisplayError());
     }

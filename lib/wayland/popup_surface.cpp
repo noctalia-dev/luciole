@@ -12,6 +12,20 @@ namespace {
 
   constexpr Logger kLog("wayland");
 
+  PopupSurfaceConfig surfaceConfig(const WaylandConnection& connection, PopupSurfaceConfig config) {
+    const auto anchorRight = connection.uiToSurface(static_cast<double>(config.anchorX) + config.anchorWidth);
+    const auto anchorBottom = connection.uiToSurface(static_cast<double>(config.anchorY) + config.anchorHeight);
+    config.anchorX = connection.uiToSurface(config.anchorX);
+    config.anchorY = connection.uiToSurface(config.anchorY);
+    config.anchorWidth = std::max(1, anchorRight - config.anchorX);
+    config.anchorHeight = std::max(1, anchorBottom - config.anchorY);
+    config.width = connection.uiToSurfaceExtent(config.width);
+    config.height = connection.uiToSurfaceExtent(config.height);
+    config.offsetX = connection.uiToSurface(config.offsetX);
+    config.offsetY = connection.uiToSurface(config.offsetY);
+    return config;
+  }
+
   const xdg_surface_listener kXdgSurfaceListener = {
       .configure = &PopupSurface::handleXdgSurfaceConfigure,
   };
@@ -104,11 +118,7 @@ bool PopupSurface::initialize(const PopupParentAttach& attachToParent, wl_output
 
   m_connection.registerSurfaceOutput(m_surface, output);
 
-  m_config = config;
-  m_config.anchorWidth = std::max(m_config.anchorWidth, 1);
-  m_config.anchorHeight = std::max(m_config.anchorHeight, 1);
-  m_config.width = std::max(m_config.width, 1U);
-  m_config.height = std::max(m_config.height, 1U);
+  m_config = surfaceConfig(m_connection, config);
 
   m_pendingWidth = m_config.width;
   m_pendingHeight = m_config.height;
@@ -171,12 +181,12 @@ bool PopupSurface::resize(std::uint32_t width, std::uint32_t height, bool commit
     return false;
   }
 
-  width = std::max(width, 1U);
-  height = std::max(height, 1U);
+  width = m_connection.uiToSurfaceExtent(width);
+  height = m_connection.uiToSurfaceExtent(height);
   if (m_config.width == width
       && m_config.height == height
-      && Surface::width() == width
-      && Surface::height() == height) {
+      && surfaceWidth() == width
+      && surfaceHeight() == height) {
     return true;
   }
 
@@ -205,20 +215,26 @@ bool PopupSurface::resize(std::uint32_t width, std::uint32_t height, bool commit
   return true;
 }
 
+bool PopupSurface::hasSize(std::uint32_t width, std::uint32_t height) const noexcept {
+  return surfaceWidth() == m_connection.uiToSurfaceExtent(width)
+      && surfaceHeight() == m_connection.uiToSurfaceExtent(height);
+}
+
 bool PopupSurface::repositionAnchor(const PopupSurfaceConfig& anchorConfig, bool commit) {
   if (m_popup == nullptr) {
     return false;
   }
 
-  m_config.anchorX = anchorConfig.anchorX;
-  m_config.anchorY = anchorConfig.anchorY;
-  m_config.anchorWidth = std::max(anchorConfig.anchorWidth, 1);
-  m_config.anchorHeight = std::max(anchorConfig.anchorHeight, 1);
+  const auto config = surfaceConfig(m_connection, anchorConfig);
+  m_config.anchorX = config.anchorX;
+  m_config.anchorY = config.anchorY;
+  m_config.anchorWidth = config.anchorWidth;
+  m_config.anchorHeight = config.anchorHeight;
   m_config.anchor = anchorConfig.anchor;
   m_config.gravity = anchorConfig.gravity;
   m_config.constraintAdjustment = anchorConfig.constraintAdjustment;
-  m_config.offsetX = anchorConfig.offsetX;
-  m_config.offsetY = anchorConfig.offsetY;
+  m_config.offsetX = config.offsetX;
+  m_config.offsetY = config.offsetY;
 
   if (xdg_popup_get_version(m_popup) >= XDG_POPUP_REPOSITION_SINCE_VERSION) {
     xdg_positioner* positioner = createPositioner(m_connection.xdgWmBase(), m_config);
@@ -293,11 +309,7 @@ bool PopupSurface::initializeAsChild(xdg_surface* parentXdgSurface, wl_output* o
 
   m_connection.registerSurfaceOutput(m_surface, output);
 
-  m_config = config;
-  m_config.anchorWidth = std::max(m_config.anchorWidth, 1);
-  m_config.anchorHeight = std::max(m_config.anchorHeight, 1);
-  m_config.width = std::max(m_config.width, 1U);
-  m_config.height = std::max(m_config.height, 1U);
+  m_config = surfaceConfig(m_connection, config);
 
   m_pendingWidth = m_config.width;
   m_pendingHeight = m_config.height;

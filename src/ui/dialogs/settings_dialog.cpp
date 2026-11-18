@@ -110,8 +110,9 @@ SettingsDialog::SettingsDialog(
   addTerminal();
   section("Appearance", "paint");
   card("Window");
-  addFraction(P::BackgroundOpacity, "Background opacity", 1.0, 0.01);
-  addFraction(P::CornerRadiusScale, "Corner roundness", 2.0, 0.05, {}, [](double value) {
+  addFraction(P::UiScale, "UI scale", luciole::kMinUiScale, luciole::kMaxUiScale, 0.05);
+  addFraction(P::BackgroundOpacity, "Background opacity", 0.0, 1.0, 0.01);
+  addFraction(P::CornerRadiusScale, "Corner roundness", 0.0, 2.0, 0.05, {}, [](double value) {
     Style::setCornerRadiusScale(static_cast<float>(value));
   });
   addBool(P::AlwaysShowTabBar, "Always show tab bar");
@@ -267,8 +268,8 @@ void SettingsDialog::selectPage(std::size_t selected) {
   m_body->requestScrollToOffset(0);
   m_navigationScroll->requestScrollIntoView(m_navButtons[selected]);
 }
-void SettingsDialog::setCompact(bool compact) {
-  const float width = compact ? 152.0F : 192.0F;
+void SettingsDialog::setDialogWidth(float dialogWidth) {
+  const float width = dialogWidth < 720.0F ? std::clamp(dialogWidth * 0.3F, 80.0F, 152.0F) : 192.0F;
   m_navigation->setMinWidth(width);
   m_navigation->setMaxWidth(width);
 }
@@ -394,13 +395,13 @@ void SettingsDialog::addNumber(
 }
 
 void SettingsDialog::addFraction(
-    luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step, std::string subtitle,
-    std::function<void(double)> onPreview
+    luciole::PreferenceKey<double> key, const std::string& title, double minimum, double maximum, double step,
+    std::string subtitle, std::function<void(double)> onPreview
 ) {
   Label* percent = nullptr;
   auto slider = std::make_unique<Slider>();
   auto* control = slider.get();
-  control->setRange(0.0, maximum);
+  control->setRange(minimum, maximum);
   control->setStep(step);
   control->setFlexGrow(1.0F);
   const auto showPercent = [](Label* label, double value) {

@@ -34,6 +34,7 @@ switch_to_new_tab = true
 confirm_permanent_deletion = true
 restore_last_window = false
 compact_menus = true
+ui_scale = 1.0
 background_opacity = 1.0
 corner_radius_scale = 1.0
 sort_by = "name"
@@ -74,6 +75,7 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `always_show_tab_bar` | `true` | Keep the tab bar visible when a window has only one tab |
 | `always_show_status_bar` | `false` | Keep the status pill visible when idle, showing the item count and free space |
 | `compact_menus` | `true` | Reduce the row height and padding in context menus without shrinking their text |
+| `ui_scale` | `1.0` | UI size multiplier from `0.5` (50%) to `2.5` (250%) |
 | `background_opacity` | `1.0` | Number from `0` (clear) to `1` (opaque) for the window background; tabs, toolbar, sidebar and file area share it. Menus and dialogs stay opaque |
 | `corner_radius_scale` | `1.0` | Number from `0` (square) to `2` (extra rounded) scaling every corner radius, like Noctalia's setting of the same name. Open windows, menus and dialogs update live |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |

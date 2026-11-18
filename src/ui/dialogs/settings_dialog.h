@@ -21,7 +21,7 @@ public:
       const std::string& error, bool clearingThumbnails = false
   );
   void reveal(const Node* node);
-  void setCompact(bool compact);
+  void setDialogWidth(float dialogWidth);
   // The page list; initial keyboard focus goes here rather than to the header actions.
   Node* navigation() const;
 
@@ -41,10 +41,10 @@ private:
       luciole::PreferenceKey<int> key, const std::string& title, const std::vector<int>& values,
       std::string suffix = "px"
   );
-  // A 0 to `maximum` slider shown as a percentage. `onPreview` runs for every
+  // A `minimum` to `maximum` slider shown as a percentage. `onPreview` runs for every
   // value while the user drags, before the override is persisted on release.
   void addFraction(
-      luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step,
+      luciole::PreferenceKey<double> key, const std::string& title, double minimum, double maximum, double step,
       std::string subtitle = {}, std::function<void(double)> onPreview = nullptr
   );
   template <class T>

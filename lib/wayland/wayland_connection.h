@@ -117,7 +117,7 @@ public:
     Sibling,
   };
 
-  explicit WaylandConnection(Purpose purpose = Purpose::Primary);
+  explicit WaylandConnection(Purpose purpose = Purpose::Primary, double uiScale = 1.0);
   ~WaylandConnection();
 
   WaylandConnection(const WaylandConnection&) = delete;
@@ -129,6 +129,13 @@ public:
   bool connect();
   bool
   connectUntil(std::chrono::steady_clock::time_point deadline, WaylandConnection* eventConnection, std::string& error);
+
+  // UI units are independent of both Wayland surface units and the output's buffer scale.
+  double uiScale() const noexcept { return m_uiScale; }
+  void setUiScale(double scale) noexcept;
+  double surfaceToUi(double value) const noexcept { return value / m_uiScale; }
+  std::int32_t uiToSurface(double value) const noexcept;
+  std::uint32_t uiToSurfaceExtent(std::uint32_t extent) const noexcept;
 
   // Delegate setters
   void setOutputChangeCallback(ChangeCallback callback);
@@ -247,6 +254,7 @@ private:
   void logStartupSummary() const;
 
   Purpose m_purpose = Purpose::Primary;
+  double m_uiScale;
   wl_display* m_display = nullptr;
   wl_registry* m_registry = nullptr;
   wl_compositor* m_compositor = nullptr;

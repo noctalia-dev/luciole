@@ -61,8 +61,11 @@ public:
   void clearCompletions();
   // Completes the edited location for a Tab press with `modifiers` that the window handles.
   bool completeOnTab(std::uint32_t modifiers);
-  // Forgets a first click on the empty location bar.
-  void cancelBlankClick() { m_blankLocationClick.reset(); }
+  // Forgets pending first clicks on a breadcrumb or the empty location bar.
+  void cancelBlankClick() {
+    m_lastBreadcrumb.reset();
+    m_blankLocationClick.reset();
+  }
 
   // Pointer hooks in BrowserPage::pointer() for the page surface.
   // Ends a pending double click on movement and closes completions on a press outside them.

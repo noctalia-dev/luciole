@@ -506,6 +506,40 @@ void BrowserPage::windowFocusChanged(bool entered) {
   m_popupDispatcher.setTextInputContext(m_popupSurface->wlSurface(), &m_textInput, true, m_surface->wlSurface());
 }
 
+void BrowserPage::uiScaleChanged(float pointerRatio) {
+  m_savedSettings.uiScale = m_connection.uiScale();
+  m_pointerX *= pointerRatio;
+  m_pointerY *= pointerRatio;
+  if (m_visible) {
+    captureViewAnchor();
+  }
+  if (m_list) {
+    m_list->cancelPointerGesture();
+  }
+  m_listAdapter.onPointerCancel();
+  m_gridAdapter.onPointerCancel();
+  m_dragDrop.cancelDrag();
+  m_dragDrop.clearExternalDrop();
+  m_locationBar.cancelBlankClick();
+  if (m_root) {
+    m_locationBar.clearCompletions();
+    m_detailsHeader.cancelGesture();
+  }
+  if (m_popupSurface) {
+    if (m_dialogTier) {
+      m_dialogDropdown.closeSelectDropdown();
+      m_popupDispatcher.pointerLeave();
+      m_batchRename.pointer(0, 0, false);
+      m_dialogTop.reset();
+      m_dialogPosition.reset();
+      m_dialogScaleChanged = true;
+      m_popupSurface->uiScaleChanged();
+    } else {
+      closePopup();
+    }
+  }
+}
+
 void BrowserPage::configurationChanged() {
   m_operations.parentConfigured();
   m_dragDrop.clearExternalDrop();
@@ -2679,6 +2713,7 @@ void BrowserPage::closePopup() {
   m_dialogShadow = nullptr;
   m_dialogPosition.reset();
   m_dialogResizePending = false;
+  m_dialogScaleChanged = false;
   m_popupDispatcher.setFocusChangeCallback({});
   m_activePopup.release();
   m_menuController.menuClosed();
@@ -2702,9 +2737,10 @@ std::uint32_t BrowserPage::popupSerial() { return m_popupSerial != 0 ? m_popupSe
 
 float BrowserPage::popupMaxHeight() const {
   const auto* output = m_connection.findOutputByWl(m_connection.outputForSurface(m_surface->wlSurface()));
-  const auto height = output != nullptr && output->hasUsableGeometry() ? output->effectiveLogicalHeight()
-                                                                       : static_cast<std::int32_t>(m_surface->height());
-  return std::max(120.0F, static_cast<float>(height) - 32.0F);
+  const float height = output != nullptr && output->hasUsableGeometry()
+      ? static_cast<float>(m_connection.surfaceToUi(output->effectiveLogicalHeight()))
+      : m_surface->height();
+  return std::max(120.0F, height - 32.0F);
 }
 
 luciole::WaylandTextClipboard& BrowserPage::clipboard() { return m_clipboard; }
@@ -2888,8 +2924,9 @@ void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width, Popu
 }
 
 void BrowserPage::layoutDialogFrame() {
+  const bool scaleChanged = std::exchange(m_dialogScaleChanged, false);
   const auto chrome = dialogGeometry(*m_activePopup.root());
-  if (chrome.surfaceWidth != m_popupSurface->width() || chrome.surfaceHeight != m_popupSurface->height()) {
+  if (scaleChanged || !m_popupSurface->hasSize(chrome.surfaceWidth, chrome.surfaceHeight)) {
     (void)m_popupSurface->resize(chrome.surfaceWidth, chrome.surfaceHeight, false);
     popup_chrome::setContentInputRegion(*m_popupSurface, chrome);
     m_dialogResizePending = true;
@@ -2898,7 +2935,7 @@ void BrowserPage::layoutDialogFrame() {
     m_dialogShadow->setFrameSize(chrome.contentWidth, chrome.contentHeight);
   }
   const auto position = dialogPosition(chrome);
-  if (m_dialogPosition != position) {
+  if (scaleChanged || m_dialogPosition != position) {
     m_dialogPosition = position;
     (void)m_popupSurface->repositionAnchor(
         {.anchorX = position.first,
@@ -2960,8 +2997,8 @@ void BrowserPage::openPopup(
   m_popupSurface->setConfigureCallback([this](std::uint32_t, std::uint32_t) {
     if (std::exchange(m_dialogResizePending, false)
         && m_dialogPosition
-        && (m_popupSurface->configuredX() != m_dialogPosition->first
-            || m_popupSurface->configuredY() != m_dialogPosition->second)) {
+        && (m_popupSurface->configuredX() != m_connection.uiToSurface(m_dialogPosition->first)
+            || m_popupSurface->configuredY() != m_connection.uiToSurface(m_dialogPosition->second))) {
       // A parent resize can constrain the first position against its old geometry.
       // Retry the requested anchor once after receiving that configure.
       m_dialogPosition.reset();

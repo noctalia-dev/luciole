@@ -43,11 +43,13 @@ public:
   // buffer. Committing here with the previous buffer still attached makes the compositor scale
   // that stale buffer to the new geometry (visible as a stretched popup on NVIDIA).
   bool resize(std::uint32_t width, std::uint32_t height, bool commit = true);
+  bool hasSize(std::uint32_t width, std::uint32_t height) const noexcept;
   bool repositionAnchor(const PopupSurfaceConfig& anchorConfig, bool commit = true);
 
   void setDismissedCallback(std::function<void()> callback);
 
   xdg_surface* xdgSurface() const noexcept { return m_xdgSurface; }
+  // The compositor's configured position is in Wayland surface units.
   std::int32_t configuredX() const noexcept { return m_configuredX; }
   std::int32_t configuredY() const noexcept { return m_configuredY; }
 

@@ -48,6 +48,6 @@ private:
   std::optional<std::array<int, 4>> m_anchor;
   std::optional<std::uint64_t> m_pendingDetails;
   bool m_reopen = false;
-  std::pair<std::uint32_t, std::uint32_t> m_parentSize;
+  std::pair<float, float> m_parentSize;
   bool m_dirty = true;
 };

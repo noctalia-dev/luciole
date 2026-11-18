@@ -233,6 +233,7 @@ private:
   // single-line text whose stops are out of byte order.
   std::vector<TextCharSpan> m_charSpans;
   float m_stopsBuiltForWidth = -1.0F;
+  float m_stopsRenderScale = 0.0F;
   bool m_textMetricsDirty = true;
   float m_cachedLabelY = 0.0F;
   std::string m_labelVisibleSlice;

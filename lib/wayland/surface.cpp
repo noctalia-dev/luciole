@@ -9,6 +9,7 @@
 #include "render/scene/node.h"
 #include "util/sys_utils.h"
 #include "viewporter-client-protocol.h"
+#include "wayland/text_input_service.h"
 #include "wayland/wayland_connection.h"
 
 #include <algorithm>
@@ -143,8 +144,8 @@ namespace {
     kLog.debug(
         "blur-trace {} name={} self={} wl={} phase={} running={} logical={}x{} buffer={}x{} scale={:.3F}", event,
         surfaceTraceName(surface), static_cast<const void*>(&surface), static_cast<const void*>(surface.wlSurface()),
-        uiPhaseName(currentUiPhase()), surface.isRunning(), surface.width(), surface.height(),
-        surface.bufferWidthFor(surface.width()), surface.bufferHeightFor(surface.height()),
+        uiPhaseName(currentUiPhase()), surface.isRunning(), surface.surfaceWidth(), surface.surfaceHeight(),
+        surface.bufferWidthFor(surface.surfaceWidth()), surface.bufferHeightFor(surface.surfaceHeight()),
         surface.effectiveBufferScale()
     );
   }
@@ -158,17 +159,18 @@ namespace {
     const int right = bounds.x + bounds.width;
     const int bottom = bounds.y + bounds.height;
     const bool fullSurface = !rects.empty()
-        && surface.width() > 0
-        && surface.height() > 0
+        && surface.surfaceWidth() > 0
+        && surface.surfaceHeight() > 0
         && bounds.x <= 0
         && bounds.y <= 0
-        && right >= static_cast<int>(surface.width())
-        && bottom >= static_cast<int>(surface.height());
+        && right >= static_cast<int>(surface.surfaceWidth())
+        && bottom >= static_cast<int>(surface.surfaceHeight());
     kLog.debug(
         "blur-trace {} name={} self={} wl={} phase={} logical={}x{} scale={:.3F} rects={} bounds={}:{}+{}x{} "
         "full_surface={} sample={}",
         event, surfaceTraceName(surface), static_cast<const void*>(&surface),
-        static_cast<const void*>(surface.wlSurface()), uiPhaseName(currentUiPhase()), surface.width(), surface.height(),
+        static_cast<const void*>(surface.wlSurface()), uiPhaseName(currentUiPhase()), surface.surfaceWidth(),
+        surface.surfaceHeight(),
         surface.effectiveBufferScale(), rects.size(), bounds.x, bounds.y, bounds.width, bounds.height, fullSurface,
         rectListPreview(rects)
     );
@@ -321,6 +323,14 @@ bool Surface::isRunning() const noexcept { return m_running; }
 
 void Surface::setDebugName(std::string name) { m_debugName = std::move(name); }
 
+float Surface::width() const noexcept { return static_cast<float>(m_connection.surfaceToUi(m_width)); }
+
+float Surface::height() const noexcept { return static_cast<float>(m_connection.surfaceToUi(m_height)); }
+
+float Surface::renderScale() const noexcept {
+  return effectiveBufferScale() * static_cast<float>(m_connection.uiScale());
+}
+
 float Surface::effectiveBufferScale() const noexcept {
   if (m_fractionalScale != nullptr && m_viewport != nullptr) {
     if (m_preferredScaleNumerator > 0) {
@@ -339,7 +349,7 @@ void Surface::setConfiguredScaleNumerator(std::uint32_t numerator) noexcept {
     return;
   }
   m_configuredScaleNumerator = numerator;
-  m_renderTarget.setContentScale(effectiveBufferScale());
+  m_renderTarget.setContentScale(renderScale());
 }
 
 void Surface::updateOutputScale(std::int32_t bufferScale, std::uint32_t configuredScaleNumerator) {
@@ -353,7 +363,7 @@ void Surface::updateOutputScale(std::int32_t bufferScale, std::uint32_t configur
   m_bufferScale = nextBufferScale;
   m_configuredScaleNumerator = nextConfiguredScaleNumerator;
   m_preferredScaleNumerator = 0;
-  m_renderTarget.setContentScale(effectiveBufferScale());
+  m_renderTarget.setContentScale(renderScale());
 
   if (m_configured && std::abs(effectiveBufferScale() - previousScale) > 0.0001F) {
     onScaleChanged();
@@ -440,7 +450,7 @@ bool Surface::createWlSurface() {
 
   if (m_renderContext != nullptr) {
     m_renderTarget.create(m_surface, *m_renderContext);
-    m_renderTarget.setContentScale(effectiveBufferScale());
+    m_renderTarget.setContentScale(renderScale());
   }
   return true;
 }
@@ -452,7 +462,7 @@ void Surface::onConfigure(std::uint32_t width, std::uint32_t height) {
   traceSurfaceEvent(*this, "configure");
 
   const float resizeMs = elapsedMs([this] {
-    m_renderTarget.setContentScale(effectiveBufferScale());
+    m_renderTarget.setContentScale(renderScale());
     applySurfaceScaleState();
     resizeRenderTarget();
   });
@@ -527,7 +537,7 @@ void Surface::setRenderContext(RenderContext* ctx) {
 
   if (m_surface != nullptr && m_renderContext != nullptr) {
     m_renderTarget.create(m_surface, *m_renderContext);
-    m_renderTarget.setContentScale(effectiveBufferScale());
+    m_renderTarget.setContentScale(renderScale());
     resizeRenderTarget();
   }
 }
@@ -597,7 +607,7 @@ void Surface::resizeRenderTarget() {
   const auto bufferWidth = bufferWidthFor(m_width);
   const auto bufferHeight = bufferHeightFor(m_height);
 
-  m_renderTarget.setLogicalSize(m_width, m_height);
+  m_renderTarget.setLogicalSize(width(), height());
   if (m_renderTarget.bufferWidth() == bufferWidth
       && m_renderTarget.bufferHeight() == bufferHeight
       && m_renderTarget.isReady()) {
@@ -619,7 +629,7 @@ void Surface::onPreferredFractionalScale(std::uint32_t numerator) {
       m_width, m_height, bufferWidthFor(m_width), bufferHeightFor(m_height)
   );
   // Seed target scale before first configure so the first frame is sharp.
-  m_renderTarget.setContentScale(effectiveBufferScale());
+  m_renderTarget.setContentScale(renderScale());
   if (!m_configured) {
     return;
   }
@@ -628,7 +638,7 @@ void Surface::onPreferredFractionalScale(std::uint32_t numerator) {
 }
 
 void Surface::onScaleChanged() {
-  m_renderTarget.setContentScale(effectiveBufferScale());
+  m_renderTarget.setContentScale(renderScale());
   applySurfaceScaleState();
   resizeRenderTarget();
   requestLayout();
@@ -636,6 +646,15 @@ void Surface::onScaleChanged() {
   if (m_scaleChangedCallback) {
     m_scaleChangedCallback(effectiveBufferScale());
   }
+}
+
+void Surface::uiScaleChanged() {
+  // UI zoom changes layout units and rasterization, not the Wayland buffer size.
+  m_renderTarget.setContentScale(renderScale());
+  m_renderTarget.setLogicalSize(width(), height());
+  m_textInputRefreshPending = true;
+  requestLayout();
+  requestRedraw();
 }
 
 void Surface::setInputRegion(const std::vector<InputRect>& rects) {
@@ -649,7 +668,13 @@ void Surface::setInputRegion(const std::vector<InputRect>& rects) {
   }
 
   for (const auto& r : rects) {
-    wl_region_add(region, r.x, r.y, r.width, r.height);
+    const auto x = m_connection.uiToSurface(r.x);
+    const auto y = m_connection.uiToSurface(r.y);
+    const auto right = m_connection.uiToSurface(static_cast<double>(r.x) + r.width);
+    const auto bottom = m_connection.uiToSurface(static_cast<double>(r.y) + r.height);
+    if (right > x && bottom > y) {
+      wl_region_add(region, x, y, right - x, bottom - y);
+    }
   }
 
   wl_surface_set_input_region(m_surface, region);
@@ -1272,6 +1297,13 @@ void Surface::preparePendingFrame() {
       callbackMs, "surface prepareFrame callback took {:.1F}ms ({}, {}x{} logical)", callbackMs,
       static_cast<const void*>(this), m_width, m_height
   );
+
+  if (needsLayout && std::exchange(m_textInputRefreshPending, false)) {
+    // The cursor rectangle sent to the input method follows the new layout and UI scale.
+    if (auto* textInput = m_connection.textInputService()) {
+      textInput->refreshActiveState();
+    }
+  }
 }
 
 void Surface::kickFrameLoop() {

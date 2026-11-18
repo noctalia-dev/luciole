@@ -67,6 +67,30 @@ namespace {
     }
   }
 
+  void testUiScale() {
+    Fixture fixture;
+    using luciole::AtomicWriteState;
+    using luciole::BrowserPreference;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.uiScale == 1.0);
+    fixture.write("config.toml", "[browser]\nui_scale = 0.5\n");
+    TEST_CHECK(service.reload() && service.settings().browser.uiScale == 0.5);
+    const std::array edit{luciole::OverrideEdit{BrowserPreference::UiScale, 2.5}};
+    TEST_CHECK(service.saveOverrides(edit) == AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.uiScale == 2.5);
+    const std::array invalidEdit{luciole::OverrideEdit{BrowserPreference::UiScale, 2.51}};
+    TEST_CHECK(service.saveOverrides(invalidEdit) == AtomicWriteState::NotCommitted);
+    TEST_CHECK(service.reload() && service.settings().browser.uiScale == 2.5);
+    const std::array reset{luciole::OverrideEdit{BrowserPreference::UiScale, std::nullopt}};
+    TEST_CHECK(service.saveOverrides(reset) == AtomicWriteState::Durable);
+    TEST_CHECK(service.reload() && service.settings().browser.uiScale == 0.5);
+    for (const auto* value : {"0.49", "2.51", "nan", "true", "'1'"}) {
+      fixture.write("config.toml", std::format("[browser]\nui_scale = {}\n", value));
+      TEST_CHECK(!service.reload() && service.settings().browser.uiScale == 0.5);
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
   void testCornerRadiusScale() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -1212,6 +1236,7 @@ namespace {
 int main() {
   try {
     testBackgroundOpacity();
+    testUiScale();
     testCornerRadiusScale();
     testTerminalCommand();
     testSchemaAndDiagnostics();

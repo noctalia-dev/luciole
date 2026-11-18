@@ -121,6 +121,7 @@ public:
   void requestUpdate();
   void requestUpdateOnly();
   void requestLayout();
+  virtual void uiScaleChanged();
   void requestRedraw();
   void requestFrameTick();
   void renderNow();
@@ -136,8 +137,11 @@ public:
   RenderTarget& renderTarget() noexcept { return m_renderTarget; }
   wl_surface* wlSurface() const noexcept { return m_surface; }
   const std::string& debugName() const noexcept { return m_debugName; }
-  std::uint32_t width() const noexcept { return m_width; }
-  std::uint32_t height() const noexcept { return m_height; }
+  // Layout and input use UI units. Role configure and viewport use surface units.
+  float width() const noexcept;
+  float height() const noexcept;
+  std::uint32_t surfaceWidth() const noexcept { return m_width; }
+  std::uint32_t surfaceHeight() const noexcept { return m_height; }
   std::int32_t bufferScale() const noexcept { return m_bufferScale; }
   float effectiveBufferScale() const noexcept;
   std::uint32_t bufferWidthFor(std::uint32_t logicalWidth) const noexcept;
@@ -192,6 +196,7 @@ private:
   void renderQueuedFrame();
   bool ensureRenderTargetReady();
   void resizeRenderTarget();
+  float renderScale() const noexcept;
 
   RenderContext* m_renderContext = nullptr;
   RenderTarget m_renderTarget;
@@ -213,6 +218,7 @@ private:
   std::optional<std::chrono::steady_clock::time_point> m_lastFrameAt;
   bool m_updateRequested = false;
   bool m_layoutRequested = false;
+  bool m_textInputRefreshPending = false;
   bool m_redrawRequested = false;
   bool m_running = false;
   bool m_opaque = false;

@@ -212,7 +212,7 @@ void OperationsController::layoutDialog() {
         static_cast<std::uint32_t>(std::min(484.0F, static_cast<float>(m_page.surface().width()) - 32.0F));
     const auto height = static_cast<std::uint32_t>(popupHeight(m_count));
     auto* popup = m_page.popupSurface();
-    const bool resized = popup->width() != width || popup->height() != height;
+    const bool resized = !popup->hasSize(width, height);
     if (resized) {
       (void)popup->resize(width, height, false);
     }

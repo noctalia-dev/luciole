@@ -112,10 +112,12 @@ void AboutController::open() {
       m_scroll = nullptr;
       m_message = nullptr;
       m_logo = nullptr;
+      m_logoPixels = 0;
     });
     m_scroll = scroll;
     m_message = message;
     m_logo = logo;
+    m_logoPixels = 0;
   }
 }
 
@@ -125,14 +127,17 @@ void AboutController::layoutDialog() {
   }
   auto& renderer = m_page.popupSurface()->renderTarget().renderer();
   const auto pixels = static_cast<int>(std::ceil(kLogoSize * std::max(1.0F, renderer.renderScale())));
+  if (pixels == m_logoPixels) {
+    return;
+  }
   const std::span svg(reinterpret_cast<const std::uint8_t*>(luciole::kAppIconSvg), sizeof(luciole::kAppIconSvg) - 1);
   if (const auto image = luciole::rasterizeSvg(svg, pixels, false, luciole::kMaxImagePixels)) {
     m_logo->setSourceRaw(
         renderer, image->rgba.data(), image->rgba.size(), image->width, image->height, image->width * 4,
         PixmapFormat::RGBA
     );
+    m_logoPixels = pixels;
   }
-  m_logo = nullptr;
 }
 
 void AboutController::launcherChanged(const std::string& error) {

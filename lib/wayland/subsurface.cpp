@@ -61,7 +61,7 @@ bool Subsurface::initialize(wl_surface* parentSurface, wl_output* output) {
     throw std::runtime_error("failed to create subsurface");
   }
 
-  wl_subsurface_set_position(m_subsurface, m_config.x, m_config.y);
+  wl_subsurface_set_position(m_subsurface, m_connection.uiToSurface(m_config.x), m_connection.uiToSurface(m_config.y));
   applyStacking();
   if (m_config.desynchronized) {
     wl_subsurface_set_desync(m_subsurface);
@@ -72,7 +72,7 @@ bool Subsurface::initialize(wl_surface* parentSurface, wl_output* output) {
   wl_surface_commit(m_parentSurface);
 
   setRunning(true);
-  onConfigure(m_config.width, m_config.height);
+  onConfigure(m_connection.uiToSurfaceExtent(m_config.width), m_connection.uiToSurfaceExtent(m_config.height));
 
   wl_surface_commit(m_parentSurface);
   return true;
@@ -87,8 +87,20 @@ void Subsurface::setPosition(std::int32_t x, std::int32_t y) {
   if (m_subsurface == nullptr || m_parentSurface == nullptr) {
     return;
   }
-  wl_subsurface_set_position(m_subsurface, x, y);
+  wl_subsurface_set_position(m_subsurface, m_connection.uiToSurface(x), m_connection.uiToSurface(y));
   wl_surface_commit(m_parentSurface);
+}
+
+void Subsurface::uiScaleChanged() {
+  if (m_subsurface != nullptr && m_parentSurface != nullptr) {
+    wl_subsurface_set_position(
+        m_subsurface, m_connection.uiToSurface(m_config.x), m_connection.uiToSurface(m_config.y)
+    );
+    onConfigure(m_connection.uiToSurfaceExtent(m_config.width), m_connection.uiToSurfaceExtent(m_config.height));
+    wl_surface_commit(m_parentSurface);
+  }
+
+  Surface::uiScaleChanged();
 }
 
 void Subsurface::setStacking(SubsurfaceStacking stacking) {

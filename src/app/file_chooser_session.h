@@ -54,6 +54,7 @@ public:
   // True when the event belonged to the open filter or choice dropdown, or to the focused name field.
   bool pointer(const PointerEvent& event);
   bool keyboard(const KeyboardEvent& event);
+  void closeDropdown() { m_dropdown.closeSelectDropdown(); }
   // The window closed without an answer: the request is cancelled.
   void windowClosed();
 

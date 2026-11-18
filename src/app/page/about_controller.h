@@ -29,6 +29,7 @@ private:
   PageContext& m_page;
   luciole::FileLauncher& m_launcher;
   Image* m_logo = nullptr;
+  int m_logoPixels = 0;
   ScrollView* m_scroll = nullptr;
   Label* m_message = nullptr;
 };

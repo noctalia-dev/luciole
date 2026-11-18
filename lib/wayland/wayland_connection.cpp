@@ -15,9 +15,11 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <poll.h>
 #include <ranges>
 #include <stdexcept>
@@ -546,7 +548,8 @@ namespace {
 
 } // namespace
 
-WaylandConnection::WaylandConnection(Purpose purpose) : m_purpose(purpose) {
+WaylandConnection::WaylandConnection(Purpose purpose, double uiScale)
+    : m_purpose(purpose), m_uiScale(std::isfinite(uiScale) && uiScale > 0.0 ? uiScale : 1.0) {
   m_seatHandler.setKeyboardFocusCallback([this](wl_surface* surface, bool entered) {
     const std::weak_ptr<int> alive = m_aliveToken;
     if (m_textInputService != nullptr) {
@@ -664,6 +667,26 @@ void WaylandConnection::setOutputLifecycleCallbacks(
   m_outputRemovedCallback = std::move(removed);
 }
 
+void WaylandConnection::setUiScale(double scale) noexcept {
+  if (std::isfinite(scale) && scale > 0.0) {
+    m_uiScale = scale;
+    if (m_textInputService) {
+      m_textInputService->setUiScale(scale);
+    }
+  }
+}
+
+std::int32_t WaylandConnection::uiToSurface(double value) const noexcept {
+  return static_cast<std::int32_t>(std::clamp(
+      std::round(value * m_uiScale), static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<double>(std::numeric_limits<std::int32_t>::max())
+  ));
+}
+
+std::uint32_t WaylandConnection::uiToSurfaceExtent(std::uint32_t extent) const noexcept {
+  return static_cast<std::uint32_t>(std::max(1, uiToSurface(extent)));
+}
+
 void WaylandConnection::setPointerEventCallback(WaylandSeat::PointerEventCallback callback) {
   m_pointerEventCallback = std::move(callback);
   m_seatHandler.setPointerEventCallback([this](const PointerEvent& event) {
@@ -673,7 +696,10 @@ void WaylandConnection::setPointerEventCallback(WaylandSeat::PointerEventCallbac
       m_lastPointerOutputAt = std::chrono::steady_clock::now();
     }
     if (m_pointerEventCallback) {
-      m_pointerEventCallback(event);
+      auto scaled = event;
+      scaled.sx = surfaceToUi(event.sx);
+      scaled.sy = surfaceToUi(event.sy);
+      m_pointerEventCallback(scaled);
     }
   });
 }
@@ -745,8 +771,8 @@ wl_surface* WaylandConnection::lastPointerSurface() const noexcept { return m_se
 wl_surface* WaylandConnection::lastKeyboardSurface() const noexcept { return m_seatHandler.lastKeyboardSurface(); }
 std::uint32_t WaylandConnection::keyboardModifiers() const noexcept { return m_seatHandler.keyboardModifiers(); }
 bool WaylandConnection::hasPointerPosition() const noexcept { return m_seatHandler.hasPointerPosition(); }
-double WaylandConnection::lastPointerX() const noexcept { return m_seatHandler.lastPointerX(); }
-double WaylandConnection::lastPointerY() const noexcept { return m_seatHandler.lastPointerY(); }
+double WaylandConnection::lastPointerX() const noexcept { return surfaceToUi(m_seatHandler.lastPointerX()); }
+double WaylandConnection::lastPointerY() const noexcept { return surfaceToUi(m_seatHandler.lastPointerY()); }
 WaylandSeat::InputSource WaylandConnection::lastInputSource() const noexcept { return m_seatHandler.lastInputSource(); }
 std::string WaylandConnection::currentKeyboardLayoutName() const { return m_seatHandler.currentLayoutName(); }
 std::vector<std::string> WaylandConnection::keyboardLayoutNames() const { return m_seatHandler.layoutNames(); }
@@ -788,6 +814,10 @@ void WaylandConnection::setKeyboardLayoutChangeCallback(WaylandSeat::KeyboardLay
 
 void WaylandConnection::setTextInputService(TextInputService* textInputService) {
   m_textInputService = textInputService;
+  if (m_textInputService) {
+    m_textInputService->setUiScale(m_uiScale);
+  }
+
   bindTextInputService();
 }
 

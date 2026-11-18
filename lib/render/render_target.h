@@ -82,8 +82,8 @@ public:
 
   std::uint32_t bufferWidth() const noexcept { return m_bufferWidth; }
   std::uint32_t bufferHeight() const noexcept { return m_bufferHeight; }
-  std::uint32_t logicalWidth() const noexcept { return m_logicalWidth; }
-  std::uint32_t logicalHeight() const noexcept { return m_logicalHeight; }
+  float logicalWidth() const noexcept { return m_logicalWidth; }
+  float logicalHeight() const noexcept { return m_logicalHeight; }
   bool isReady() const noexcept;
   RenderSurfaceTarget* surfaceTarget() noexcept { return m_surfaceTarget.get(); }
   const RenderSurfaceTarget* surfaceTarget() const noexcept { return m_surfaceTarget.get(); }
@@ -99,7 +99,7 @@ public:
   void setContentScale(float scale) noexcept;
   float contentScale() const noexcept { return m_contentScale; }
 
-  void setLogicalSize(std::uint32_t w, std::uint32_t h) noexcept {
+  void setLogicalSize(float w, float h) noexcept {
     m_logicalWidth = w;
     m_logicalHeight = h;
   }
@@ -110,6 +110,6 @@ private:
   float m_contentScale = 1.0F;
   std::uint32_t m_bufferWidth = 0;
   std::uint32_t m_bufferHeight = 0;
-  std::uint32_t m_logicalWidth = 0;
-  std::uint32_t m_logicalHeight = 0;
+  float m_logicalWidth = 0.0F;
+  float m_logicalHeight = 0.0F;
 };

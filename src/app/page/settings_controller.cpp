@@ -17,10 +17,10 @@
 
 SettingsController::SettingsController(
     PageContext& page, luciole::ViewPreferenceWriter& preferences, luciole::ThumbnailService& thumbnails,
-    std::function<void()> clearThumbnails
+    std::function<void()> clearThumbnails, std::function<void(double)> setUiScale
 )
-    : m_page(page), m_preferences(preferences), m_thumbnails(thumbnails),
-      m_clearThumbnails(std::move(clearThumbnails)) {}
+    : m_page(page), m_preferences(preferences), m_thumbnails(thumbnails), m_clearThumbnails(std::move(clearThumbnails)),
+      m_setUiScale(std::move(setUiScale)) {}
 
 void SettingsController::preferencesChanged(const std::string& error) {
   m_error = error;
@@ -44,7 +44,7 @@ void SettingsController::onFrame() {
 
 void SettingsController::layoutDialog(float width) {
   if (m_view) {
-    m_view->setCompact(width < 720.0F);
+    m_view->setDialogWidth(width);
   }
 }
 
@@ -69,17 +69,29 @@ void SettingsController::toggle() {
   }
   auto root = std::make_unique<SettingsDialog>(
       [this](luciole::OverrideEdit edit) {
+        if (edit.preference() == luciole::BrowserPreference::UiScale.id() && m_setUiScale) {
+          const auto& inherited = m_preferences.inheritedSettings();
+          const double fallback = inherited ? inherited->browser.uiScale : luciole::BrowserSettings{}.uiScale;
+          m_setUiScale(edit.value(luciole::BrowserPreference::UiScale).value_or(fallback));
+        }
         m_preferences.submit({std::move(edit)});
         if (auto* surface = m_page.popupSurface()) {
           surface->requestLayout();
         }
       },
-      [this] { m_preferences.resetAll(); }, [this] { m_page.dismissPopup(); }, [this] { m_clearThumbnails(); }
+      [this] {
+        if (m_setUiScale) {
+          const auto& inherited = m_preferences.inheritedSettings();
+          m_setUiScale(inherited ? inherited->browser.uiScale : luciole::BrowserSettings{}.uiScale);
+        }
+        m_preferences.resetAll();
+      },
+      [this] { m_page.dismissPopup(); }, [this] { m_clearThumbnails(); }
   );
   root->setPopupContext(&m_page.dialogDropdown());
   m_view = root.get();
   sync();
-  m_view->setCompact(m_page.dialogWidth(DialogWidth::Large) < 720.0F);
+  m_view->setDialogWidth(m_page.dialogWidth(DialogWidth::Large));
   m_page.showDialog(std::move(root), DialogWidth::Large);
   if (!m_page.popupSurface()) {
     m_view = nullptr;

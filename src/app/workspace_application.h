@@ -46,7 +46,7 @@ class WorkspaceApplication {
     std::vector<std::pair<luciole::TabId, Button*>> buttons;
     std::map<luciole::TabId, std::pair<Button*, ColorRole>> closeButtons;
     luciole::TabId revealedTab = 0;
-    std::uint32_t revealedTabWidth = 0;
+    float revealedTabWidth = 0.0F;
     std::vector<std::pair<luciole::TabId, std::string>> labels;
     std::vector<luciole::TabId> mounted;
     luciole::TabId chromeOwner = 0;
@@ -92,6 +92,7 @@ public:
   void pointer(const PointerEvent& event);
 
 private:
+  void applyUiScale(double scale);
   void clearExternalDrops();
   static void dispatch(InputDispatcher& dispatcher, const PointerEvent& event);
   luciole::WindowId newWindow(std::unique_ptr<FileChooserSession> chooser = nullptr);

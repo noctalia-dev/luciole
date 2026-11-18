@@ -67,7 +67,7 @@ namespace {
   }
 
   float snapToBufferPixel(float value, float scale) {
-    const float safeScale = std::max(1.0F, scale);
+    const float safeScale = scale > 0.0F ? scale : 1.0F;
     return std::round(value * safeScale) / safeScale;
   }
 

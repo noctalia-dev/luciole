@@ -32,6 +32,7 @@ public:
 
   void setClosedCallback(std::function<void()> callback);
   void setMinSize(std::uint32_t minWidth, std::uint32_t minHeight);
+  void uiScaleChanged() override;
   void beginMove(std::uint32_t serial);
   void beginResize(std::uint32_t serial, std::uint32_t edges);
   void minimize();
@@ -77,6 +78,8 @@ private:
   std::uint32_t m_pendingHeight = 0;
   std::int32_t m_lastToplevelWidth = 0;
   std::int32_t m_lastToplevelHeight = 0;
+  std::uint32_t m_minWidth = 0;
+  std::uint32_t m_minHeight = 0;
   bool m_maximized = false, m_fullscreen = false, m_activated = false;
   bool m_pendingMaximized = false, m_pendingFullscreen = false, m_pendingActivated = false;
 };

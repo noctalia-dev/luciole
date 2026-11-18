@@ -15,6 +15,9 @@
 #include <vector>
 
 namespace luciole {
+  inline constexpr double kMinUiScale = 0.5;
+  inline constexpr double kMaxUiScale = 2.5;
+
   struct BrowserSettings {
     SortOptions sort;
     ActivationMode activationMode = ActivationMode::DoubleClick;
@@ -29,6 +32,7 @@ namespace luciole {
     bool alwaysShowTabBar = true;
     bool alwaysShowStatusBar = false;
     bool compactMenus = true;
+    double uiScale = 1.0;
     double backgroundOpacity = 1.0; // 0 (clear) to 1 (opaque) for the window background.
     double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
     BrowsePresentation presentation;
@@ -77,6 +81,7 @@ namespace luciole {
     AlwaysShowTabBar,
     AlwaysShowStatusBar,
     CompactMenus,
+    UiScale,
     BackgroundOpacity,
     CornerRadiusScale,
     SortBy,
@@ -158,6 +163,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
     static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
     static constexpr PreferenceKey<bool> CompactMenus{Id::CompactMenus};
+    static constexpr PreferenceKey<double> UiScale{Id::UiScale};
     static constexpr PreferenceKey<double> BackgroundOpacity{Id::BackgroundOpacity};
     static constexpr PreferenceKey<double> CornerRadiusScale{Id::CornerRadiusScale};
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};

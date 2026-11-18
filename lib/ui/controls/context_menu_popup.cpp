@@ -55,7 +55,7 @@ void ContextMenuPopup::open(ContextMenuPopupRequest request) {
         measureScale = out->configuredScale();
       }
     }
-    ScaledRenderer measureRenderer(m_renderContext, measureScale);
+    ScaledRenderer measureRenderer(m_renderContext, measureScale * static_cast<float>(m_wayland.uiScale()));
     menuWidth = ContextMenuControl::preferredWidth(measureRenderer, request.entries, contentScale);
     if (request.maxMenuWidth > 0.0F) {
       menuWidth = std::min(menuWidth, request.maxMenuWidth);
@@ -127,8 +127,7 @@ void ContextMenuPopup::open(ContextMenuPopupRequest request) {
     self->m_renderContext.makeCurrent(self->m_surface->renderTarget());
 
     const bool needsSceneBuild = self->m_sceneRoot == nullptr
-        || static_cast<std::uint32_t>(std::round(self->m_sceneRoot->width())) != width
-        || static_cast<std::uint32_t>(std::round(self->m_sceneRoot->height())) != height;
+        || self->m_sceneRoot->width() != width || self->m_sceneRoot->height() != height;
     if (!needsSceneBuild && !needsLayout) {
       return;
     }
@@ -303,8 +302,8 @@ bool ContextMenuPopup::onPointerEvent(const PointerEvent& event) {
       && m_surface != nullptr
       && event.surface != nullptr
       && event.surface == m_pointerParentSurface) {
-    localX -= static_cast<float>(m_surface->configuredX());
-    localY -= static_cast<float>(m_surface->configuredY());
+    localX -= static_cast<float>(m_wayland.surfaceToUi(m_surface->configuredX()));
+    localY -= static_cast<float>(m_wayland.surfaceToUi(m_surface->configuredY()));
     mapped = true;
   }
 
@@ -474,6 +473,10 @@ xdg_surface* ContextMenuPopup::xdgSurface() const noexcept {
   return m_surface != nullptr ? m_surface->xdgSurface() : nullptr;
 }
 
-std::uint32_t ContextMenuPopup::width() const noexcept { return m_surface != nullptr ? m_surface->width() : 0; }
+std::uint32_t ContextMenuPopup::width() const noexcept {
+  return m_surface != nullptr ? static_cast<std::uint32_t>(std::lround(m_surface->width())) : 0;
+}
 
-std::uint32_t ContextMenuPopup::height() const noexcept { return m_surface != nullptr ? m_surface->height() : 0; }
+std::uint32_t ContextMenuPopup::height() const noexcept {
+  return m_surface != nullptr ? static_cast<std::uint32_t>(std::lround(m_surface->height())) : 0;
+}

@@ -63,6 +63,7 @@ WorkspaceApplication::WorkspaceApplication(
       // Live-radius bindings update open widgets; controls built afterwards pick it up directly.
       Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
     }
+    applyUiScale(m_defaults.uiScale);
     for (auto& [id, page] : m_pages) {
       (void)id;
       page->preferencesChanged(error);
@@ -76,6 +77,8 @@ WorkspaceApplication::WorkspaceApplication(
   });
   m_clipboard.setDropCallbacks(
       [this](wl_surface* surface, float x, float y) {
+        x = static_cast<float>(m_connection.surfaceToUi(x));
+        y = static_cast<float>(m_connection.surfaceToUi(y));
         clearExternalDrops();
         const std::vector<luciole::Bookmark>* pins = nullptr;
         for (const auto& [id, page] : m_pages) {
@@ -175,6 +178,43 @@ WorkspaceApplication::WorkspaceApplication(
 }
 
 SharedTextureCache& WorkspaceApplication::imageTextures() { return m_icons.textures(); }
+
+void WorkspaceApplication::applyUiScale(double scale) {
+  const double previousScale = m_connection.uiScale();
+  if (!std::isfinite(scale) || scale <= 0.0 || scale == previousScale) {
+    return;
+  }
+
+  m_defaults.uiScale = scale;
+  m_connection.setUiScale(scale);
+  const auto pointerRatio = static_cast<float>(previousScale / scale);
+  for (auto& [id, host] : m_hosts) {
+    (void)id;
+    if (host->closed) {
+      continue;
+    }
+    if (host->chooser) {
+      host->chooser->closeDropdown();
+    }
+    if (host->tooltip) {
+      host->tooltip->dismiss();
+    }
+    host->dispatcher.pointerLeave();
+    host->pointerPage = 0;
+    host->previewDragWidth.reset();
+    host->pressedTab.reset();
+    host->tabDrag = false;
+    host->resizing = false;
+    host->pointerX *= pointerRatio;
+    host->pointerY *= pointerRatio;
+    host->surface.uiScaleChanged();
+  }
+
+  for (auto& [id, page] : m_pages) {
+    (void)id;
+    page->uiScaleChanged(pointerRatio);
+  }
+}
 
 WorkspaceApplication::~WorkspaceApplication() {
   m_lifetime.reset();
@@ -969,6 +1009,14 @@ luciole::TabId WorkspaceApplication::createPage(
       m_connection, m_renderer, m_input, settings, m_clipboard, host.surface, host.dispatcher, m_animations, m_pins,
       m_drives, m_icons, m_thumbnails, m_preferences, m_hub, id
   );
+  page->setUiScaleCallback([this](double scale) {
+    const std::weak_ptr<int> lifetime = m_lifetime;
+    DeferredCall::callLater([this, lifetime, scale] {
+      if (!lifetime.expired()) {
+        applyUiScale(scale);
+      }
+    });
+  });
   page->setHasOther([this, id] {
     const auto owner = m_model.owner(id);
     return owner && m_model.other(*owner).has_value();

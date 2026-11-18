@@ -20,7 +20,7 @@ class SettingsController final {
 public:
   SettingsController(
       PageContext& page, luciole::ViewPreferenceWriter& preferences, luciole::ThumbnailService& thumbnails,
-      std::function<void()> clearThumbnails
+      std::function<void()> clearThumbnails, std::function<void(double)> setUiScale
   );
 
   // Opens the Settings dialog, or closes it when it is already open.
@@ -49,6 +49,7 @@ private:
   luciole::ViewPreferenceWriter& m_preferences;
   luciole::ThumbnailService& m_thumbnails;
   std::function<void()> m_clearThumbnails;
+  std::function<void(double)> m_setUiScale;
   SettingsDialog* m_view = nullptr;
   std::optional<luciole::Settings> m_pending;
   std::string m_error;

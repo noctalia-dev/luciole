@@ -56,8 +56,8 @@ bool ToplevelSurface::initialize(wl_output* output, const ToplevelSurfaceConfig&
   }
   setBufferScale(bufferScale);
 
-  m_pendingWidth = std::max<std::uint32_t>(1, config.width);
-  m_pendingHeight = std::max<std::uint32_t>(1, config.height);
+  m_pendingWidth = m_connection.uiToSurfaceExtent(config.width);
+  m_pendingHeight = m_connection.uiToSurfaceExtent(config.height);
   m_lastToplevelWidth = 0;
   m_lastToplevelHeight = 0;
   m_maximized = m_fullscreen = m_activated = false;
@@ -84,11 +84,7 @@ bool ToplevelSurface::initialize(wl_output* output, const ToplevelSurfaceConfig&
   if (!config.appId.empty()) {
     xdg_toplevel_set_app_id(m_toplevel, config.appId.c_str());
   }
-  if (config.minWidth > 0 || config.minHeight > 0) {
-    xdg_toplevel_set_min_size(
-        m_toplevel, static_cast<std::int32_t>(config.minWidth), static_cast<std::int32_t>(config.minHeight)
-    );
-  }
+  setMinSize(config.minWidth, config.minHeight);
 
   const auto alive = m_alive;
   setRunning(true);
@@ -125,9 +121,19 @@ bool ToplevelSurface::initialize(wl_output* output, const ToplevelSurfaceConfig&
 void ToplevelSurface::setClosedCallback(std::function<void()> callback) { m_closedCallback = std::move(callback); }
 
 void ToplevelSurface::setMinSize(std::uint32_t minWidth, std::uint32_t minHeight) {
+  m_minWidth = minWidth;
+  m_minHeight = minHeight;
   if (m_toplevel != nullptr) {
-    xdg_toplevel_set_min_size(m_toplevel, static_cast<std::int32_t>(minWidth), static_cast<std::int32_t>(minHeight));
+    xdg_toplevel_set_min_size(
+        m_toplevel, minWidth > 0 ? static_cast<std::int32_t>(m_connection.uiToSurfaceExtent(minWidth)) : 0,
+        minHeight > 0 ? static_cast<std::int32_t>(m_connection.uiToSurfaceExtent(minHeight)) : 0
+    );
   }
+}
+
+void ToplevelSurface::uiScaleChanged() {
+  setMinSize(m_minWidth, m_minHeight);
+  Surface::uiScaleChanged();
 }
 
 void ToplevelSurface::beginMove(std::uint32_t serial) {
@@ -178,7 +184,9 @@ void ToplevelSurface::setTitle(const std::string& title) {
 
 void ToplevelSurface::showWindowMenu(std::uint32_t serial, std::int32_t x, std::int32_t y) {
   if (m_toplevel != nullptr && m_connection.seat() != nullptr && serial != 0) {
-    xdg_toplevel_show_window_menu(m_toplevel, m_connection.seat(), serial, x, y);
+    xdg_toplevel_show_window_menu(
+        m_toplevel, m_connection.seat(), serial, m_connection.uiToSurface(x), m_connection.uiToSurface(y)
+    );
   }
 }
 

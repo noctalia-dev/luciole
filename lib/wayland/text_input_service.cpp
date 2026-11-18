@@ -4,6 +4,7 @@
 #include "text-input-unstable-v3-client-protocol.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <utility>
 
@@ -93,8 +94,11 @@ namespace {
     return state.sendSurroundingText && state.surroundingText.size() <= kMaxSurroundingTextBytes;
   }
 
-  std::int32_t clampProtocolInt(std::int32_t value) {
-    return std::clamp(value, std::numeric_limits<std::int32_t>::min(), std::numeric_limits<std::int32_t>::max());
+  std::int32_t scaleProtocolInt(std::int32_t value, double scale) {
+    return static_cast<std::int32_t>(std::clamp(
+        std::round(value * scale), static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+        static_cast<double>(std::numeric_limits<std::int32_t>::max())
+    ));
   }
 
 } // namespace
@@ -361,10 +365,10 @@ void TextInputService::commitActiveState(TextInputChangeCause cause) {
   signature.anchor = sendSurrounding ? state.anchor : 0;
   signature.contentHint = contentHintFor(state, m_textInputVersion);
   signature.contentPurpose = contentPurposeFor(state.purpose);
-  signature.rectX = clampProtocolInt(state.cursorRectX);
-  signature.rectY = clampProtocolInt(state.cursorRectY);
-  signature.rectWidth = std::max<std::int32_t>(1, state.cursorRectWidth);
-  signature.rectHeight = std::max<std::int32_t>(1, state.cursorRectHeight);
+  signature.rectX = scaleProtocolInt(state.cursorRectX, m_uiScale);
+  signature.rectY = scaleProtocolInt(state.cursorRectY, m_uiScale);
+  signature.rectWidth = std::max(1, scaleProtocolInt(state.cursorRectWidth, m_uiScale));
+  signature.rectHeight = std::max(1, scaleProtocolInt(state.cursorRectHeight, m_uiScale));
 
   // Repeated preedit events can leave the protocol state unchanged. Avoid
   // feeding those events back into a commit/done loop with the input method.
