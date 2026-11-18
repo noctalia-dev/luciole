@@ -2147,7 +2147,12 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
-  const bool showEmptyTrash = !choosing() && snapshot.location && snapshot.location->isTrash();
+  const bool trashRoot = snapshot.location == luciole::Location::trash();
+  if (trashRoot && browser().searchQuery().empty() && snapshot.status == luciole::DirectoryStatus::Ready) {
+    m_trashEmpty = snapshot.entries.empty();
+  }
+  const bool showEmptyTrash =
+      !choosing() && snapshot.location && snapshot.location->isTrash() && !(trashRoot && m_trashEmpty);
   m_trashBar->setVisible(showEmptyTrash);
   m_trashBar->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
