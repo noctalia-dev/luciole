@@ -2147,19 +2147,14 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
-  const bool trashRoot = snapshot.location == luciole::Location::trash();
-  if (trashRoot && browser().searchQuery().empty() && snapshot.status == luciole::DirectoryStatus::Ready) {
-    m_trashEmpty = snapshot.entries.empty();
-  }
-  const bool showEmptyTrash =
-      !choosing() && snapshot.location && snapshot.location->isTrash() && !(trashRoot && m_trashEmpty);
+  const bool showEmptyTrash = !choosing() && snapshot.location && snapshot.location->isTrash();
   m_trashBar->setVisible(showEmptyTrash);
   m_trashBar->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
   const std::string emptyTrashLabel(luciole::ActionRegistry::definition(Action::EmptyTrash).label);
   m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
   m_emptyTrashButton->setTooltip(
-      emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
+      emptyTrashState.enabled ? "" : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
   );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
