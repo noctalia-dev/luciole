@@ -335,7 +335,7 @@ namespace {
   }
   void restore(const OperationJob& job, JobActivity& activity, bool details) {
     const auto& service = job.service<luciole::RestoreService>();
-    activity.title = "Restore from Trash";
+    activity.title = service.moving() ? "Move out of Trash" : "Restore from Trash";
     if (job.running()) {
       activity.state = ActivityState::Working;
       progress(activity, service.completed(), service.total());
@@ -357,9 +357,10 @@ namespace {
       if (details) {
         report.add(
             result.displayName,
-            result.outcome == luciole::RestoreOutcome::Restored          ? "Restored"
-                : result.outcome == luciole::RestoreOutcome::Unconfirmed ? "Restoration unconfirmed"
-                                                                         : "Not restored",
+            result.outcome == luciole::RestoreOutcome::Restored ? (service.moving() ? "Moved" : "Restored")
+                : result.outcome == luciole::RestoreOutcome::Unconfirmed
+                ? (service.moving() ? "Move unconfirmed" : "Restoration unconfirmed")
+                : (service.moving() ? "Not moved" : "Not restored"),
             result.error
         );
       }

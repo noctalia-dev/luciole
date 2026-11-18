@@ -33,18 +33,21 @@ namespace {
 } // namespace
 
 std::expected<LoadedImageFile, std::string>
-luciole::rasterizeSvg(const std::string& path, int targetSize, bool centerSquareCrop) {
+luciole::rasterizeSvg(const std::string& path, int targetSize, bool centerSquareCrop, std::string_view stylesheet) {
   auto bytes = readEncodedImageFile(path);
   if (!bytes) {
     return std::unexpected(bytes.error());
   }
+  const std::string_view content(reinterpret_cast<const char*>(bytes->data()), bytes->size());
   return rasterizeSvg(
-      *bytes, targetSize, centerSquareCrop, static_cast<std::uint64_t>(kMaxSvgSourceSide * kMaxSvgSourceSide)
+      *bytes, targetSize, centerSquareCrop, static_cast<std::uint64_t>(kMaxSvgSourceSide * kMaxSvgSourceSide),
+      content.contains("current-color-scheme") ? stylesheet : std::string_view()
   );
 }
 
 std::expected<LoadedImageFile, std::string> luciole::rasterizeSvg(
-    std::span<const std::uint8_t> bytes, int targetSize, bool centerSquareCrop, std::uint64_t maxSourcePixels
+    std::span<const std::uint8_t> bytes, int targetSize, bool centerSquareCrop, std::uint64_t maxSourcePixels,
+    std::string_view stylesheet
 ) {
   if (bytes.empty() || bytes.size() > kMaxEncodedImageBytes || !maxSourcePixels) {
     return std::unexpected("invalid SVG decode input");
@@ -53,6 +56,14 @@ std::expected<LoadedImageFile, std::string> luciole::rasterizeSvg(
   const GioPtr<RsvgHandle> svg(rsvg_handle_new_from_data(bytes.data(), bytes.size(), &error));
   if (!svg) {
     const std::string message = error != nullptr ? error->message : "invalid SVG";
+    g_clear_error(&error);
+    return std::unexpected(message);
+  }
+  if (!stylesheet.empty()
+      && !rsvg_handle_set_stylesheet(
+          svg.get(), reinterpret_cast<const guint8*>(stylesheet.data()), stylesheet.size(), &error
+      )) {
+    const std::string message = error != nullptr ? error->message : "invalid SVG stylesheet";
     g_clear_error(&error);
     return std::unexpected(message);
   }

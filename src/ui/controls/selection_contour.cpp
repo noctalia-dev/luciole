@@ -141,6 +141,11 @@ SelectionContour::SelectionContour() : m_radius(cornerRadius()) {
   m_outline->setAlphaMaskTint(true);
   m_outline->setMonochromeTint(true);
   m_paletteConn = paletteChanged().connect([this] { markLayoutDirty(); });
+  m_radiusConn = Style::cornerRadiusChanged().connect([this] {
+    m_radius = cornerRadius();
+    m_dirty = true;
+    markLayoutDirty();
+  });
 }
 SelectionContour::~SelectionContour() { releaseTextures(); }
 void SelectionContour::releaseTextures() {

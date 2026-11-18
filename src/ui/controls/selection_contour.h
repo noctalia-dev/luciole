@@ -30,7 +30,7 @@ private:
   std::vector<std::uint8_t> m_selected;
   std::size_t m_columns = 1;
   float m_columnStride = 0, m_rowStride = 0;
-  // Read once, like the cell backgrounds built with this contour, so outline and backgrounds always match.
+  // Tracks the corner roundness setting alongside the cell backgrounds built from this contour.
   float m_radius;
   float m_rasterWidth = 0, m_rasterHeight = 0, m_rasterScale = 0;
   bool m_dirty = true;
@@ -39,4 +39,5 @@ private:
   TextureManager* m_textures = nullptr;
   TextureHandle m_fillTexture{}, m_outlineTexture{};
   Signal<>::ScopedConnection m_paletteConn;
+  Signal<>::ScopedConnection m_radiusConn;
 };

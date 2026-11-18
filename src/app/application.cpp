@@ -9,6 +9,7 @@
 #include "browser/location_presentation.h"
 #include "clipboard/text_clipboard.h"
 #include "config/settings.h"
+#include "core/files/file_watcher.h"
 #include "core/input/key_symbols.h"
 #include "core/input/keybind_matcher.h"
 #include "core/log.h"
@@ -21,6 +22,7 @@
 #include "render/gl_shared_context.h"
 #include "render/render_context.h"
 #include "render/scene/input_dispatcher.h"
+#include "render/text/system_font.h"
 #include "system/icon_theme_poll_source.h"
 #include "ui/controls/input.h"
 #include "ui/controls/permission_editor.h"
@@ -95,6 +97,16 @@ namespace {
     return luciole::resolveLocationText(*text, luciole::Location::fromPath(cwd.get()));
   }
 
+  // Applies the system (GTK) font family and size to all text; true if it changed.
+  bool applySystemFont(RenderContext& renderer) {
+    if (!text::refreshSystemFont()) {
+      return false;
+    }
+    renderer.setTextFontFamily(text::resolveFontFamily(""));
+    renderer.setTextScale(text::currentSystemFont().textScale(Style::fontSizeBody));
+    return true;
+  }
+
 } // namespace
 
 int luciole::runApplication(const std::optional<std::string>& initialLocation, StartupMode mode) {
@@ -164,6 +176,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, S
     graphics.initialize(connection.display());
     RenderContext renderer;
     renderer.initialize(graphics);
+    applySystemFont(renderer);
     startupTrace("graphics-ready");
     WorkspaceApplication application(connection, renderer, textInput, clipboard, config.settings().browser);
     application.imageTextures().initialize(&graphics);
@@ -208,8 +221,21 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, S
     KeyRepeatPollSource repeat(connection);
     IconThemePollSource icons;
     icons.setChangeCallback([&application] { application.iconsChanged(); });
+    FileWatcher fontFiles;
+    for (const auto& file : text::systemFontWatchFiles()) {
+      fontFiles.watch(
+          file,
+          [&application, &renderer] {
+            if (applySystemFont(renderer)) {
+              application.fontChanged();
+            }
+          },
+          FileWatcher::WatchTrigger::WriteCompleted
+      );
+    }
+    FileWatchPollSource fontWatch(fontFiles);
     MainLoop loop(
-        connection, {&deferred, &timers, &repeat, &glib, &icons, &application.imageTextures()},
+        connection, {&deferred, &timers, &repeat, &glib, &icons, &fontWatch, &application.imageTextures()},
         [&application, &fileManager, &instance, &chooser] {
           const bool running = application.running();
           if ((fileManager && fileManager->awaitingRequest()) || (chooser && chooser->awaitingRequest())) {

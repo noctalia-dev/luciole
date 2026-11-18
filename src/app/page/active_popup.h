@@ -21,6 +21,7 @@ public:
     BatchRename,
     FileRename,
     PlaceRename,
+    PlaceIcon,
     Properties,
     About,
     KeyboardShortcuts,

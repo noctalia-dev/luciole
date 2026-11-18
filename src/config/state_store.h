@@ -14,6 +14,8 @@ namespace luciole {
   struct Bookmark {
     std::string label;
     Location location;
+    // Private Luciole override; the GTK bookmark format has no icon field.
+    std::string iconName;
     bool operator==(const Bookmark&) const = default;
   };
 
@@ -43,7 +45,8 @@ namespace luciole {
   class StateStore {
   public:
     static constexpr std::size_t bookmarkLimit = 256;
-    static constexpr std::size_t placesLimit = bookmarkLimit + 11; // Home, eight XDG directories, Trash and root.
+    static constexpr std::size_t placesLimit =
+        bookmarkLimit + 12; // Home, eight XDG directories, Trash, Network and root.
     explicit StateStore(std::filesystem::path path);
     static std::filesystem::path pathFromEnvironment();
     bool load(); // Failure preserves the last valid snapshot and the file.

@@ -108,6 +108,7 @@ BrowserPage::BrowserPage(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );
   browser().setViewDefaults(settings.viewMode, settings.gridIconSize);
+  m_listIconSize = settings.listIconSize;
   m_preview.setChangedCallback([this] {
     m_surface->requestLayout();
     if (m_popupSurface) {
@@ -169,7 +170,7 @@ BrowserPage::BrowserPage(
       if (const auto* entry = browser().model().entry(id)) {
         request.targets.push_back({id, entry->location()});
       }
-      dispatchAction(Action::Open, request);
+      dispatchAction(m_connection.keyboardModifiers() == KeyMod::Alt ? Action::Properties : Action::Open, request);
     });
     adapter->setContextCallback([this](std::optional<luciole::EntryId> id, float x, float y) {
       m_menuController.openFileMenu(id, x, y);
@@ -233,6 +234,14 @@ BrowserPage::~BrowserPage() {
 void BrowserPage::iconThemeChanged() {
   m_browserDirty = true;
   m_surface->requestUpdate();
+}
+
+void BrowserPage::fontChanged() {
+  m_browserDirty = true;
+  m_surface->requestLayout();
+  if (m_popupSurface) {
+    m_popupSurface->requestLayout();
+  }
 }
 
 bool BrowserPage::initialize(const std::optional<std::string>& initialLocation) {
@@ -330,6 +339,42 @@ void BrowserPage::thumbnailsChanged() {
   m_surface->requestLayout();
 }
 
+void BrowserPage::leaveDrive(const luciole::Location& root) {
+  const auto inside = [&](const luciole::Location& location) {
+    return location == root || location.uri().starts_with(root.uri() + (root.uri().ends_with('/') ? "" : "/"));
+  };
+  const auto affected = [&](const luciole::BrowserController& controller) {
+    const auto& location = controller.model().snapshot().location;
+    return location
+        && (inside(*location)
+            || (controller.searchRecursive()
+                && !controller.searchQuery().empty()
+                && root.uri().starts_with(location->uri() + (location->uri().ends_with('/') ? "" : "/"))));
+  };
+  if (affected(m_browser)
+      || std::ranges::any_of(m_miller.columns(), [&](const auto& column) { return affected(*column->browser); })) {
+    m_preview.clear();
+    m_retiringPreview = root;
+    m_previewController.hidePane();
+    m_miller.clear();
+    m_miller.collectRetired();
+    auto destination = luciole::Location::fromPath(g_get_home_dir());
+    m_browser.open(inside(destination) ? luciole::Location::fromPath("/") : destination);
+  }
+  m_browser.releaseLocation(root);
+  for (const auto& column : m_miller.columns()) {
+    column->browser->releaseLocation(root);
+  }
+  if (m_sidebar.hasPlaces()) {
+    m_sidebar.places().releaseLocation(root);
+  }
+  m_thumbnails.releaseLocation(root);
+}
+
+bool BrowserPage::driveReadersBusy(const luciole::Location& root) const {
+  return m_thumbnails.readingLocation(root) || (m_retiringPreview == root && m_preview.busy());
+}
+
 void BrowserPage::transfersFinished(const std::vector<luciole::TransferResult>& results) {
   const auto refresh = [&](luciole::BrowserController& controller) {
     const auto& current = controller.model().snapshot().location;
@@ -356,6 +401,7 @@ luciole::BrowserSettings BrowserPage::options() const {
   auto value = m_savedSettings;
   value.viewMode = m_viewMode;
   value.gridIconSize = static_cast<int>(gridIconSize());
+  value.listIconSize = m_listIconSize;
   value.columns = m_detailsHeader.columnVisibility();
   value.columnOrder = m_detailsHeader.columnOrder();
   value.columnWidths = m_detailsHeader.columnWidths();
@@ -387,6 +433,10 @@ void BrowserPage::placesChanged() {
 }
 
 void BrowserPage::driveUsageChanged() {
+  // Background tabs build their scene on first mount, and new drive rows read the current usage then.
+  if (!m_root) {
+    return;
+  }
   m_sidebar.updateDriveUsage();
   m_surface->requestUpdate();
 }
@@ -473,9 +523,9 @@ void BrowserPage::windowFocusChanged(bool entered) {
     return;
   }
   if (!entered) {
-    m_settingsController.closeSelectDropdown();
     m_popupDispatcher.pointerLeave();
-    // A grabbed menu also takes focus from the parent; its compositor dismissal owns that lifetime.
+    // Grabbing menus and dialog dropdowns take keyboard focus from the parent when they map (KWin, Hyprland), so
+    // this leave is often their own; the compositor dismisses them when focus really moves to another client.
     return;
   }
   m_popupDispatcher.setTextInputContext(m_popupSurface->wlSurface(), &m_textInput, true, m_surface->wlSurface());
@@ -507,7 +557,7 @@ void BrowserPage::setForeignDrop(
 bool BrowserPage::popupOwns(wl_surface* surface) const {
   return (m_popupSurface && m_popupSurface->wlSurface() == surface)
       || m_submenus.owns(surface)
-      || m_settingsController.dropdownOwns(surface);
+      || m_dialogDropdown.owns(surface);
 }
 
 bool BrowserPage::popup() const { return m_popupSurface != nullptr; }
@@ -603,7 +653,11 @@ void BrowserPage::prepare(LayoutRect bounds, bool active, bool roundCorner) {
   stampFocusKeys(*m_sidebar.bundle());
   // Panes are part of the flush content plane; the split view marks the active pane with the window's top bar.
   m_body->clearBorder();
-  m_body->setRadii(roundCorner ? Radii(workspaceRadius(), 0, 0, 0) : Radii(0, 0, 0, 0));
+  if (roundCorner) {
+    m_body->setStyleRadii(Radii(Style::radiusXl, 0, 0, 0));
+  } else {
+    m_body->setRadii(Radii(0, 0, 0, 0));
+  }
   if (active && !m_active) {
     m_active = true;
     // A press or Tab that activated the pane already focused inside it; otherwise bring back its last focus.
@@ -735,7 +789,7 @@ void BrowserPage::outputChanged(wl_output* output) {
 }
 
 void BrowserPage::pointer(const PointerEvent& event) {
-  if (m_settingsController.dropdownPointer(event)) {
+  if (m_dialogDropdown.pointer(event)) {
     return;
   }
   if (m_popupSurface != nullptr && event.type == PointerEvent::Type::Button && event.pressed) {
@@ -766,6 +820,10 @@ void BrowserPage::pointer(const PointerEvent& event) {
     // Dialog coordinates: the dialog sits inside its shadow frame on the popup surface.
     const auto* content = m_activePopup.root();
     m_batchRename.pointer(
+        x - content->x(), y - content->y(),
+        event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
+    );
+    m_renameController.placeIconPointer(
         x - content->x(), y - content->y(),
         event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
     );
@@ -1046,6 +1104,9 @@ void BrowserPage::keyboard(const KeyboardEvent& event) {
       return;
     }
     if (m_previewController.quickPreviewKey(event)) {
+      return;
+    }
+    if (m_dialogDropdown.key(event)) {
       return;
     }
     if (m_settingsController.key(event)) {
@@ -1454,7 +1515,7 @@ void BrowserPage::runAction(
        [](BrowserPage& page, const Call& call) {
          const auto& folder = *call.request.folder;
          page.m_sidebar.pinFolders(
-             {{luciole::locationBreadcrumbs(folder).back().label, folder}}, page.m_pins.bookmarks().size()
+             {{luciole::locationBreadcrumbs(folder).back().label, folder, {}}}, page.m_pins.bookmarks().size()
          );
        }},
       {Action::UnpinCurrent, [](BrowserPage& page, const Call& call) { page.m_pins.remove(*call.request.folder); }},
@@ -1602,7 +1663,7 @@ void BrowserPage::pinTargets(const std::vector<luciole::DirectoryEntry>& targets
   std::vector<luciole::Bookmark> pins;
   for (const auto& target : targets) {
     if (auto location = target.location(); !m_pins.contains(location)) {
-      pins.push_back({target.displayName(), std::move(location)});
+      pins.push_back({target.displayName(), std::move(location), {}});
     }
   }
   m_sidebar.pinFolders(std::move(pins), m_pins.bookmarks().size());
@@ -1774,6 +1835,10 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
     m_zoomScroll = 0;
     browser().setDefaultIconSize(settings.gridIconSize);
   }
+  if (m_settingsController.open() && (force || before.listIconSize != settings.listIconSize)) {
+    m_listIconSize = settings.listIconSize;
+    m_zoomScroll = 0;
+  }
   if (m_settingsController.open() && (force || before.sort != settings.sort)) {
     applySort(settings.sort);
   }
@@ -1912,7 +1977,11 @@ float BrowserPage::gridHeight() const {
   const bool context = !browser().searchQuery().empty() || (location && location->isTrash());
   return m_viewMode == luciole::ViewMode::Grid
       ? luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, context).height
-      : luciole::fileRowHeight(m_savedSettings.presentation, context);
+      : luciole::fileRowHeight(
+            m_savedSettings.presentation, context,
+            m_viewMode == luciole::ViewMode::Miller ? luciole::millerRowIconSize(m_savedSettings.presentation)
+                                                    : luciole::fileRowIconSize(m_listIconSize)
+        );
 }
 
 float BrowserPage::gridIconSize() const { return static_cast<float>(luciole::kGridIconSizes[m_gridZoom]); }
@@ -1933,11 +2002,56 @@ void BrowserPage::changeGridZoom(int requested) {
   m_surface->requestUpdate();
 }
 
+void BrowserPage::changeListIconSize(int size) {
+  if (size == m_listIconSize) {
+    return;
+  }
+  captureViewAnchor();
+  m_listAdapter.onPointerCancel();
+  m_gridAdapter.onPointerCancel();
+  m_listIconSize = size;
+  m_preferences.saveListIconSize(size);
+  m_browserDirty = true;
+  m_surface->requestUpdate();
+}
+
+int BrowserPage::zoomStep() const {
+  if (m_viewMode == luciole::ViewMode::Grid) {
+    return static_cast<int>(m_gridZoom);
+  }
+  const auto size = static_cast<int>(luciole::fileRowIconSize(m_listIconSize));
+  return static_cast<int>(std::ranges::find(luciole::kListIconSizes, size) - luciole::kListIconSizes.begin());
+}
+
+void BrowserPage::changeZoomStep(int requested) {
+  if (m_viewMode == luciole::ViewMode::Grid) {
+    changeGridZoom(requested);
+    return;
+  }
+  const auto step = std::clamp(requested, 0, static_cast<int>(luciole::kListIconSizes.size()) - 1);
+  // Staying on the default size keeps the list on automatic sizing.
+  if (step != zoomStep()) {
+    changeListIconSize(luciole::kListIconSizes[static_cast<std::size_t>(step)]);
+  }
+}
+
+void BrowserPage::resetZoom() {
+  if (m_viewMode == luciole::ViewMode::Grid) {
+    changeGridZoom(
+        static_cast<int>(
+            std::ranges::find(luciole::kGridIconSizes, luciole::kDefaultGridIconSize) - luciole::kGridIconSizes.begin()
+        )
+    );
+    return;
+  }
+  changeListIconSize(0);
+}
+
 bool BrowserPage::zoomFromKey(const KeyboardEvent& event) {
-  if (m_viewMode != luciole::ViewMode::Grid || m_list == nullptr) {
+  if ((m_viewMode != luciole::ViewMode::Grid && m_viewMode != luciole::ViewMode::List) || m_list == nullptr) {
     return false;
   }
-  int zoom = static_cast<int>(m_gridZoom);
+  int zoom = zoomStep();
   const bool ctrl = event.modifiers == KeyMod::Ctrl;
   const bool ctrlShift = event.modifiers == (KeyMod::Ctrl | KeyMod::Shift);
   if (!ctrl && !ctrlShift) {
@@ -1948,19 +2062,19 @@ bool BrowserPage::zoomFromKey(const KeyboardEvent& event) {
   } else if (ctrl && (event.sym == XKB_KEY_minus || event.sym == XKB_KEY_KP_Subtract)) {
     --zoom;
   } else if (ctrl && (event.sym == XKB_KEY_0 || event.sym == XKB_KEY_KP_0)) {
-    zoom = static_cast<int>(
-        std::ranges::find(luciole::kGridIconSizes, luciole::kDefaultGridIconSize) - luciole::kGridIconSizes.begin()
-    );
+    m_zoomScroll = 0;
+    resetZoom();
+    return true;
   } else {
     return false;
   }
   m_zoomScroll = 0;
-  changeGridZoom(zoom);
+  changeZoomStep(zoom);
   return true;
 }
 
 bool BrowserPage::zoomFromScroll(const PointerEvent& event) {
-  if (m_viewMode != luciole::ViewMode::Grid
+  if ((m_viewMode != luciole::ViewMode::Grid && m_viewMode != luciole::ViewMode::List)
       || m_list == nullptr
       || !m_list->visible()
       || m_connection.keyboardModifiers() != KeyMod::Ctrl
@@ -1986,7 +2100,7 @@ bool BrowserPage::zoomFromScroll(const PointerEvent& event) {
   m_zoomScroll = std::clamp(m_zoomScroll - steps, -limit, limit);
   const auto delta = static_cast<int>(m_zoomScroll);
   m_zoomScroll -= delta;
-  changeGridZoom(static_cast<int>(m_gridZoom) + delta);
+  changeZoomStep(zoomStep() + delta);
   return true;
 }
 
@@ -2021,6 +2135,7 @@ void BrowserPage::syncBrowser() {
   m_list->setCellHeight(gridHeight());
   m_list->setMinCellWidth(luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, false).minWidth);
   m_gridAdapter.setGridIconSize(gridIconSize());
+  m_listAdapter.setListIconSize(m_listIconSize);
   for (auto* adapter : {&m_listAdapter, &m_gridAdapter}) {
     adapter->setPresentation(m_savedSettings.presentation, snapshot.metadata.filesystem.readOnly);
   }
@@ -2216,7 +2331,7 @@ void BrowserPage::prepareFrame(bool, bool layout) {
   m_renameController.onFrame();
   if (m_browserDirty) {
     m_browserDirty = false;
-    m_renameController.syncPlaceRename();
+    m_renameController.syncPlaceEditors();
     syncBrowser();
     layout = true;
   }
@@ -2387,10 +2502,22 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
       {
           .acceptedButtons = InputArea::buttonMask(BTN_LEFT) | InputArea::buttonMask(BTN_RIGHT),
           .flexGrow = 1.0F,
+          .onLeave = [this] { m_titlebarMove.cancel(); },
+          .onMotion =
+              [this](const InputArea::PointerData& data) {
+                if (const auto serial = m_titlebarMove.motion(data.localX, data.localY)) {
+                  m_surface->beginMove(*serial);
+                }
+              },
+          // InputArea reports releases through onPress too.
           .onPress =
               [this](const InputArea::PointerData& data) {
+                if (!data.pressed) {
+                  m_titlebarMove.cancel();
+                  return;
+                }
                 if (data.button == BTN_LEFT) {
-                  m_surface->beginMove(data.serial);
+                  m_titlebarMove.press(data.serial, data.localX, data.localY);
                 } else {
                   m_surface->showWindowMenu(data.serial, static_cast<int>(data.sceneX), static_cast<int>(data.sceneY));
                 }
@@ -2406,11 +2533,21 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
        .fill = colorSpecFromRole(ColorRole::SurfaceContainer),
        .height = 48.0F},
       std::move(title),
-      ui::button({.glyph = "minus", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->minimize(); }}),
       ui::button(
-          {.glyph = "square", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->toggleMaximized(); }}
+          {.glyph = "minus",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] { m_surface->minimize(); }}
       ),
-      ui::button({.glyph = "x", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->close(); }})
+      ui::button(
+          {.glyph = "square",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] { m_surface->toggleMaximized(); }}
+      ),
+      ui::button({.glyph = "x", .glyphSize = Style::baseGlyphSize, .variant = ButtonVariant::Ghost, .onClick = [this] {
+                    m_surface->close();
+                  }})
   );
 }
 
@@ -2422,6 +2559,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_back,
                .glyph = "arrow-left",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Back (Alt+Left)",
                .onClick = [this] { dispatchAction(Action::Back); }}
@@ -2429,6 +2567,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_forward,
                .glyph = "arrow-right",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Forward (Alt+Right)",
                .onClick = [this] { dispatchAction(Action::Forward); }}
@@ -2436,6 +2575,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_up,
                .glyph = "arrow-up",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Parent folder (Alt+Up)",
                .onClick = [this] { dispatchAction(Action::Up); }}
@@ -2447,6 +2587,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_newFolderButton,
                .glyph = "folder-plus",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "New Folder… (Ctrl+Shift+N)",
                .visible = choosing(),
@@ -2456,6 +2597,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_sortButton,
                .glyph = "arrows-sort",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Sort files",
                .onClick = [this] { m_menuController.openSortMenu(sceneRect(*m_sortButton)); }}
@@ -2477,6 +2619,8 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
                .selectedIndex = m_viewMode == luciole::ViewMode::Grid ? 0U
                    : m_viewMode == luciole::ViewMode::List            ? 1U
                                                                       : 2U,
+               // The segments are glyph-only, so the font size is the glyph size.
+               .fontSize = Style::baseGlyphSize,
                .compact = true,
                .onChange =
                    [this](std::size_t index) {
@@ -2489,6 +2633,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_menuButton,
                .glyph = "dots-vertical",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .visible = !choosing(),
                .onClick = [this] { m_menuController.openMenu(); }}
@@ -2543,7 +2688,7 @@ std::unique_ptr<Flex> BrowserPage::buildFilePane() {
     if (const auto* entry = browser().model().entry(id)) {
       request.targets.push_back({id, entry->location()});
     }
-    dispatchAction(Action::Open, request);
+    dispatchAction(m_connection.keyboardModifiers() == KeyMod::Alt ? Action::Properties : Action::Open, request);
   };
   miller->context = [this](std::optional<luciole::EntryId> entry, float x, float y) {
     m_menuController.openFileMenu(entry, x, y);
@@ -2577,6 +2722,7 @@ void BrowserPage::closePopup() {
   if (!m_previewController.bounds() || !previewVisible()) {
     m_preview.clear();
   }
+  m_dialogDropdown.reset();
   m_activePopup.close();
   m_popupDispatcher.setSceneRoot(nullptr);
   m_popupDispatcher.setTextInputContext(nullptr, nullptr);
@@ -2602,6 +2748,8 @@ PopupSurface* BrowserPage::popupSurface() { return m_popupSurface.get(); }
 InputDispatcher& BrowserPage::popupDispatcher() { return m_popupDispatcher; }
 
 ActivePopup& BrowserPage::activePopup() { return m_activePopup; }
+
+DialogDropdown& BrowserPage::dialogDropdown() { return m_dialogDropdown; }
 
 ContextMenuControl* BrowserPage::contextMenu() { return m_menuController.menu(); }
 
@@ -2707,6 +2855,10 @@ float BrowserPage::dialogWidth(DialogWidth width) const {
 popup_chrome::Geometry BrowserPage::dialogGeometry(Flex& content) {
   auto& renderer = (m_popupSurface ? m_popupSurface->renderTarget() : m_surface->renderTarget()).renderer();
   const float width = dialogWidth(*m_dialogTier);
+  // A width change moves an open dropdown's anchor.
+  if (width != content.width()) {
+    m_dialogDropdown.closeSelectDropdown();
+  }
   m_settingsController.layoutDialog(width);
   m_propertiesController.layoutDialog(width);
   LayoutConstraints constraints;
@@ -2858,6 +3010,7 @@ void BrowserPage::openPopup(
         {0, 0, static_cast<float>(m_popupSurface->width()), static_cast<float>(m_popupSurface->height())}
     );
     m_batchRename.syncTooltip(m_popupSurface->renderTarget().renderer());
+    m_renameController.syncPlaceIconTooltip(m_popupSurface->renderTarget().renderer());
   });
   m_popupSurface->setConfigureCallback([this](std::uint32_t, std::uint32_t) {
     if (std::exchange(m_dialogResizePending, false)

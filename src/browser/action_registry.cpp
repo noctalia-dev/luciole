@@ -52,9 +52,13 @@ namespace {
     }
     return clipboard(c, r);
   }
+  State trashItems(const C& c, const R& r, bool restore);
   State fileClipboard(const C& c, const R& r, bool cut) {
     if (!c.clipboardAvailable) {
       return unavailable("The application clipboard is unavailable.");
+    }
+    if (cut && r.folder && r.folder->isTrash()) {
+      return trashItems(c, r, false);
     }
     if (!all(c, r, [&](const DirectoryEntry& entry) {
           const auto location = entry.location();
@@ -107,8 +111,8 @@ namespace {
     if (!all(c, r, [](const DirectoryEntry& entry) { return entry.location().nativePath().has_value(); })) {
       return unavailable("This operation currently supports native files only.");
     }
-    if (!rename && (!native(r) || !c.query.empty() || !ready(c))) {
-      return unavailable("Open the containing native folder before moving items to Trash.");
+    if (!rename && (!ready(c) || r.targets.size() > 4096)) {
+      return unavailable("Select at most 4096 native items from an available listing.");
     }
     if (!all(c, r, [&](const DirectoryEntry& entry) {
           return (rename ? entry.access.rename : entry.access.trash).value_or(true);
@@ -703,6 +707,16 @@ bool luciole::chooserAction(BrowserAction action) {
     return false;
   }
   return false;
+}
+
+std::vector<luciole::BrowserAction> luciole::itemMenuDeletionActions(bool inTrash, bool showPermanentDeletion) {
+  if (inTrash) {
+    return {A::Restore, A::DeletePermanently};
+  }
+  if (showPermanentDeletion) {
+    return {A::Trash, A::DeletePermanently};
+  }
+  return {A::Trash};
 }
 
 luciole::ActionState

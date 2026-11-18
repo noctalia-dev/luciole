@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
     GlibPollSource glib;
     auto launcher = std::make_unique<luciole::FileLauncher>();
     const bool destroy = std::string_view(argv[1]) == "destroy";
-    const bool expectError = std::string_view(argv[1]) == "error";
+    const bool expectError = std::string_view(argv[1]) == "error" || std::string_view(argv[1]) == "no-handler";
     const bool sequential = std::string_view(argv[1]) == "sequential";
     const std::string_view mode(argv[1]);
     const bool catalog = mode == "catalog", changeDefault = mode == "default", defaultError = mode == "default-error";
@@ -207,6 +207,16 @@ int main(int argc, char** argv) {
       }
     });
     const auto deadline = g_get_monotonic_time() + 5000000;
+    if (mode == "remote") {
+      launcher->open(luciole::Location::fromUri("sftp://fixture.invalid/private.txt"));
+      while (launcher->busy()) {
+        (void)g_main_context_iteration(nullptr, false);
+        TEST_CHECK(g_get_monotonic_time() < deadline);
+        g_usleep(1000);
+      }
+      TEST_CHECK(callbacks == 1 && errors == 0);
+      return 0;
+    }
     if (mode.starts_with("terminal-")) {
       launcher->setTerminalCommand(
           mode == "terminal-setting"       ? "foot"

@@ -44,6 +44,8 @@ namespace luciole {
       m_readOnly = readOnly;
     }
     void setGridIconSize(float size) { m_gridIconSize = size; }
+    // List rows only; 0 keeps the default size.
+    void setListIconSize(int size) { m_listIconSize = size; }
     void setDetailsColumns(DetailsColumns columns) { m_columns = columns; }
     void setDetailsColumnOrder(DetailsColumnOrder order) { m_columnOrder = order; }
     void setColumnActive(bool active) { m_columnActive = active; }
@@ -62,11 +64,12 @@ namespace luciole {
     std::optional<EntryId> m_pressed;
     std::optional<EntryId> m_expanderPress;
     std::optional<EntryId> m_lastClick;
+    std::uint32_t m_pressModifiers = 0, m_lastClickModifiers = 0;
     std::chrono::steady_clock::time_point m_lastClickTime;
     std::function<void(EntryId)> m_activate;
     ActivationMode m_activationMode = ActivationMode::DoubleClick;
     bool m_dragged = false;
-    bool m_plainClick = false;
+    bool m_activationClick = false;
     bool m_collapseSelectionOnClick = false;
     bool m_toggleSelectionOnClick = false;
     std::function<void(std::optional<EntryId>, float, float)> m_context;
@@ -74,7 +77,8 @@ namespace luciole {
     std::function<void()> m_cancelDrag;
     BrowsePresentation m_presentation;
     std::optional<bool> m_readOnly;
-    float m_gridIconSize = 48.0F;
+    float m_gridIconSize = static_cast<float>(kDefaultGridIconSize);
+    int m_listIconSize = 0;
     DetailsColumns m_columns;
     DetailsColumnOrder m_columnOrder = kDefaultDetailsColumnOrder;
     std::vector<EntryId> m_areaRows;

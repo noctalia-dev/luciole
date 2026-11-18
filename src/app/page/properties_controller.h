@@ -1,6 +1,7 @@
 #pragma once
 
 #include "browser/selection_details.h"
+#include "fs/cancel_token.h"
 #include "thumbnails/preview_metadata.h"
 
 #include <cstddef>
@@ -8,6 +9,7 @@
 #include <vector>
 
 namespace luciole {
+  class FileIcon;
   class FileIconCache;
   struct DirectoryEntry;
 } // namespace luciole
@@ -84,6 +86,9 @@ private:
   bool m_multiple = false;
   FileMetadataView* m_metadataView = nullptr;
   FolderTotalsView* m_folderTotals = nullptr;
+  // The header icon, and the GIO lookup that fills it for entries without an icon.
+  luciole::FileIcon* m_identityIcon = nullptr;
+  luciole::CancelToken m_iconQuery;
   // Location, size and similar entry facts that lead the Details table.
   luciole::MetadataFields m_basicFields;
   float m_metadataWidth = 0;

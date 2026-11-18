@@ -12,7 +12,7 @@ namespace luciole {
   struct TreeRowInfo;
   struct BrowseViewport {
     ViewMode mode = ViewMode::Grid;
-    int iconSize = 48;
+    int iconSize = kDefaultGridIconSize;
     float vertical = 0;
     float horizontal = 0;
     float withinRow = 0;
@@ -73,6 +73,7 @@ namespace luciole {
     // Returns true when the callback was deferred. Retired browsing contexts discard it.
     bool whenMetadataReady(std::vector<EntryId> ids, std::function<void()> callback, std::uint8_t details = 0);
     void setExpandableFolders(bool enabled);
+    void releaseLocation(const Location& root);
     bool expandableFolders() const { return m_tree != nullptr; }
     bool toggleFolder(EntryId id);
     bool treeKey(bool expand);

@@ -229,6 +229,9 @@ namespace {
           P::ConfirmPermanentDeletion, "confirm_permanent_deletion",
           [](S& s) -> auto& { return s.confirmPermanentDeletion; }
       ),
+      describe(
+          P::ShowPermanentDeletion, "show_permanent_deletion", [](S& s) -> auto& { return s.showPermanentDeletion; }
+      ),
       describe(P::SwitchToNewTab, "switch_to_new_tab", [](S& s) -> auto& { return s.switchToNewTab; }),
       describe(P::RestoreLastWindow, "restore_last_window", [](S& s) -> auto& { return s.restoreLastWindow; }),
       describe(P::ShowHidden, "show_hidden", [](S& s) -> auto& { return s.showHidden; }),
@@ -253,6 +256,11 @@ namespace {
           {[](int value) { return std::ranges::contains(luciole::kGridIconSizes, value); },
            "expected integer icon size 32, 48, 64, 80, 96, 128, 160, 192, or 256"}
       ),
+      describe(
+          P::ListIconSize, "list_icon_size", [](S& s) -> auto& { return s.listIconSize; },
+          {[](int value) { return value == 0 || std::ranges::contains(luciole::kListIconSizes, value); },
+           "expected 0 or integer icon size 16, 20, 24, 28, 32, 40, 48, or 64"}
+      ),
       describe(P::Density, "density", [](S& s) -> auto& { return s.presentation.density; }, {kDensities}),
       describe(
           P::FilenameTruncation, "filename_truncation", [](S& s) -> auto& { return s.presentation.filenameTruncation; },
@@ -273,6 +281,7 @@ namespace {
       describe(P::ShowSidebar, "show_sidebar", [](S& s) -> auto& { return s.showSidebar; }),
       describe(P::SidebarTree, "sidebar_tree", [](S& s) -> auto& { return s.sidebarTree; }),
       describe(P::ShowDrives, "show_drives", [](S& s) -> auto& { return s.showDrives; }),
+      describe(P::ShowNetwork, "show_network", [](S& s) -> auto& { return s.showNetwork; }),
       describe(P::ExpandableFolders, "expandable_folders", [](S& s) -> auto& { return s.expandableFolders; }),
       describe(P::ShowPreview, "show_preview", [](S& s) -> auto& { return s.showPreview; }),
       describe(P::ChooserShowPreview, "chooser_show_preview", [](S& s) -> auto& { return s.chooserShowPreview; }),

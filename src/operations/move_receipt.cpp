@@ -5,6 +5,7 @@
 #include "fs/posix_fd.h"
 #include "operations/copy_history_tree.h"
 #include "operations/copy_receipt.h"
+#include "operations/history_mount.h"
 #include "operations/history_revisions.h"
 #include "operations/move_history_internal.h"
 #include "operations/transfer_copy.h"
@@ -21,7 +22,28 @@
 #include <unistd.h>
 #include <utility>
 
+bool luciole::MoveFolder::usesMount(const HistoryMount& mount) const {
+  return (m_from && mount.contains(m_from->get()))
+      || (m_target && mount.contains(m_target->get()))
+      || (m_item && m_item->usesMount(mount));
+}
+
+bool luciole::MoveEffect::usesMount(const HistoryMount& mount) const {
+  return mount.contains(m_identity->from.get())
+      || mount.contains(m_identity->to.get())
+      || mount.contains(m_identity->item.get())
+      || (m_identity->root && mount.contains(m_identity->root->parent.get()))
+      || (m_previous && m_previous->usesMount(mount))
+      || (m_retained && m_retained->usesMount(mount));
+}
+
+bool luciole::MoveReceipt::usesMount(const HistoryMount& mount) const {
+  return std::ranges::any_of(m_effects, [&](const auto& effect) { return effect->usesMount(mount); })
+      || std::ranges::any_of(m_folders, [&](const auto& folder) { return folder->usesMount(mount); });
+}
+
 namespace {
+  std::atomic<std::size_t> pendingMoveCleanup = 0;
   std::shared_ptr<const luciole::MoveIdentity> ownIdentity(
       luciole::Fd from, luciole::Fd to, luciole::Fd item, std::shared_ptr<luciole::HistoryRevisions> revisions,
       std::shared_ptr<const luciole::MoveHistoryRoot> root
@@ -35,7 +57,10 @@ namespace {
           if (std::this_thread::get_id() == worker) {
             return;
           }
-          luciole::detail::runInThread([owned = std::move(owned)] mutable { owned.reset(); }, [] {});
+          ++pendingMoveCleanup;
+          luciole::detail::runInThread(
+              [owned = std::move(owned)] mutable { owned.reset(); }, [] { --pendingMoveCleanup; }
+          );
         }
     );
   }
@@ -99,6 +124,8 @@ namespace {
     }
   }
 } // namespace
+
+bool luciole::MoveReceipt::cleanupPending() { return pendingMoveCleanup != 0; }
 
 luciole::MoveEffect::MoveEffect(
     Location source, Location destination, std::shared_ptr<const MoveIdentity> identity, struct stat revision,

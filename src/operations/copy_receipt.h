@@ -15,6 +15,7 @@
 namespace luciole {
   struct CopyStorage;
   class HistoryRevisions;
+  class HistoryMount;
   namespace transfer {
     struct Tree;
   }
@@ -34,6 +35,7 @@ namespace luciole {
     std::shared_ptr<const CopyEffect> published(int from, int retentionParent = -1) const;
     bool replacing() const { return m_previous != nullptr; }
     std::vector<Location> retainForRecovery() const;
+    bool usesMount(const HistoryMount& mount) const;
 
   private:
     friend class CopiedMoveEffect;
@@ -91,6 +93,7 @@ namespace luciole {
     virtual CopyReplayResult reverse(const CancelToken& token, std::atomic<std::size_t>& completed) const;
     virtual std::vector<TransferResult> unconfirmed(const FileError& error) const;
     virtual std::size_t size() const { return m_effects.size(); }
+    virtual bool usesMount(const HistoryMount& mount) const;
     TransferAction action() const { return m_action; }
     static bool cleanupPending();
     static std::vector<FileError> takeCleanupErrors();

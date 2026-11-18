@@ -17,6 +17,9 @@
 
 namespace {
   using P = luciole::BrowserPreference;
+  // Like Noctalia's settings rows: every row is at least one control tall, so toggle, slider, dropdown and stepper
+  // rows share one height whatever their control measures; descriptions grow a row past it.
+  constexpr float kRowPaddingV = 2.0F;
   std::vector<int> widths(int minimum, int maximum, bool automatic = false) {
     std::vector<int> result;
     if (automatic) {
@@ -100,6 +103,7 @@ SettingsDialog::SettingsDialog(
        {"Select names", luciole::TypingMode::Typeahead}}
   );
   addBool(P::ConfirmPermanentDeletion, "Confirm permanent deletion");
+  addBool(P::ShowPermanentDeletion, "Show Delete Permanently in context menus");
   addBool(P::SwitchToNewTab, "Switch to new folder tabs");
   addBool(P::RestoreLastWindow, "Restore tabs from last closed window");
   card("Terminal");
@@ -107,7 +111,9 @@ SettingsDialog::SettingsDialog(
   section("Appearance", "paint");
   card("Window");
   addFraction(P::BackgroundOpacity, "Background opacity", 1.0, 0.01);
-  addFraction(P::CornerRadiusScale, "Corner roundness", 2.0, 0.05, "Applies to open windows after restart");
+  addFraction(P::CornerRadiusScale, "Corner roundness", 2.0, 0.05, {}, [](double value) {
+    Style::setCornerRadiusScale(static_cast<float>(value));
+  });
   addBool(P::AlwaysShowTabBar, "Always show tab bar");
   addBool(P::AlwaysShowStatusBar, "Always show status bar");
   addBool(P::CompactMenus, "Compact context menus");
@@ -115,6 +121,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::ShowSidebar, "Show sidebar");
   addBool(P::SidebarTree, "Show folder tree");
   addBool(P::ShowDrives, "Show drives");
+  addBool(P::ShowNetwork, "Show Network");
   addNumber(P::SidebarWidth, "Sidebar width", widths(luciole::kMinSidebarWidth, luciole::kMaxSidebarWidth));
   card("Preview");
   addBool(P::ShowPreview, "Show preview");
@@ -211,7 +218,7 @@ SettingsDialog::SettingsDialog(
   addNumber(P::ThumbnailCacheMib, "Disk cache limit", {16, 8192}, "MiB");
   m_section->addChild(
       ui::row(
-          {.align = FlexAlign::Center, .gap = 8.0F, .paddingV = 6.0F},
+          {.align = FlexAlign::Center, .gap = 8.0F, .paddingV = kRowPaddingV, .minHeight = Style::controlHeight},
           ui::label({.text = "Cached thumbnails", .fontWeight = FontWeight::SemiBold, .flexGrow = 1.0F}),
           ui::button(
               {.out = &m_clearThumbnails,
@@ -288,7 +295,10 @@ void SettingsDialog::addRow(
     );
   }
   m_section->addChild(
-      ui::row({.align = FlexAlign::Center, .gap = 8.0F, .paddingV = 6.0F}, std::move(copy), std::move(control))
+      ui::row(
+          {.align = FlexAlign::Center, .gap = 8.0F, .paddingV = kRowPaddingV, .minHeight = Style::controlHeight},
+          std::move(copy), std::move(control)
+      )
   );
   m_rows[key.id()] = [this, key, show = std::move(show)] { show(luciole::preferenceValue(m_current, key)); };
 }
@@ -385,7 +395,8 @@ void SettingsDialog::addNumber(
 }
 
 void SettingsDialog::addFraction(
-    luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step, std::string subtitle
+    luciole::PreferenceKey<double> key, const std::string& title, double maximum, double step, std::string subtitle,
+    std::function<void(double)> onPreview
 ) {
   Label* percent = nullptr;
   auto slider = std::make_unique<Slider>();
@@ -400,7 +411,12 @@ void SettingsDialog::addFraction(
       {.align = FlexAlign::Center, .gap = Style::spaceSm, .width = 180.0F}, std::move(slider),
       ui::label({.out = &percent, .fontSize = Style::fontSizeCaption, .minWidth = 36.0F})
   );
-  control->setOnValueChanged([percent, showPercent](double value) { showPercent(percent, value); });
+  control->setOnValueChanged([percent, showPercent, onPreview = std::move(onPreview)](double value) {
+    showPercent(percent, value);
+    if (onPreview) {
+      onPreview(value);
+    }
+  });
   // Whole percents, so a snapped 0.6000000000000001 matches an inherited 0.6.
   control->setOnDragEnd([this, key, control] {
     send(key, std::optional(std::round(control->value() * 100.0) / 100.0));

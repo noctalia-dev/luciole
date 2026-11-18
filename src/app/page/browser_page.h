@@ -8,6 +8,7 @@
 #include "app/page/batch_rename_controller.h"
 #include "app/page/create_controller.h"
 #include "app/page/details_header_controller.h"
+#include "app/page/dialog_dropdown.h"
 #include "app/page/drag_drop_controller.h"
 #include "app/page/file_keyboard_controller.h"
 #include "app/page/location_bar_controller.h"
@@ -26,6 +27,7 @@
 #include "app/page/submenu_controller.h"
 #include "app/page/transfer_controller.h"
 #include "app/page/trash_controller.h"
+#include "app/window_move_gesture.h"
 #include "app/workspace_command.h"
 #include "app/workspace_layout.h"
 #include "browser/action_registry.h"
@@ -103,6 +105,8 @@ public:
   ~BrowserPage();
 
   void iconThemeChanged();
+  // The system font changed: rebuild the file views and lay out the window and its popup again.
+  void fontChanged();
 
   bool initialize(const std::optional<std::string>& initialLocation);
 
@@ -120,6 +124,8 @@ public:
   }
   void reviewOperation(luciole::JobId id, bool retry);
   void transfersFinished(const std::vector<luciole::TransferResult>& results) override;
+  void leaveDrive(const luciole::Location& root) override;
+  bool driveReadersBusy(const luciole::Location& root) const override;
   // The shared thumbnail service changed.
   void thumbnailsChanged();
 
@@ -279,6 +285,11 @@ private:
   void applySort(luciole::SortOptions options);
   void changeSort(luciole::SortOptions options);
   void changeGridZoom(int requested);
+  void changeListIconSize(int size);
+  // The current view's step in its icon sizes; only Grid and List views zoom.
+  int zoomStep() const;
+  void changeZoomStep(int requested);
+  void resetZoom();
   bool zoomFromKey(const KeyboardEvent& event);
   bool zoomFromScroll(const PointerEvent& event);
   void toggleHidden();
@@ -322,6 +333,7 @@ private:
   PopupSurface* popupSurface() override;
   InputDispatcher& popupDispatcher() override;
   ActivePopup& activePopup() override;
+  DialogDropdown& dialogDropdown() override;
   ContextMenuControl* contextMenu() override;
   std::uint32_t popupSerial() override;
   float popupMaxHeight() const override;
@@ -349,6 +361,7 @@ private:
   luciole::FileIconCache& m_icons;
   luciole::ThumbnailService& m_thumbnails;
   luciole::PreviewService m_preview{m_thumbnails};
+  std::optional<luciole::Location> m_retiringPreview;
   bool m_thumbnailClearing = false;
   std::string m_thumbnailError;
   std::uint64_t m_thumbnailRevision = 0;
@@ -376,6 +389,7 @@ private:
   Flex* m_filePane = nullptr;
   OperationHub& m_hub;
   PageJobs m_jobs;
+  DialogDropdown m_dialogDropdown{*this, m_connection, m_renderer};
   TrashController m_trashController{*this};
   RenameController m_renameController{*this, m_pins};
   PropertiesController m_propertiesController{*this, m_icons};
@@ -395,6 +409,7 @@ private:
   MenuController m_menuController{
       *this,
       m_pins,
+      m_preferences,
       m_transferController,
       m_terminal,
       m_siblingCompletion,
@@ -406,9 +421,7 @@ private:
       m_locationBar,
       m_programs
   };
-  SettingsController m_settingsController{*this,        m_preferences, m_thumbnails,
-                                          m_connection, m_renderer,    [this] {
-        m_thumbnails.clearCache(); }};
+  SettingsController m_settingsController{*this, m_preferences, m_thumbnails, [this] { m_thumbnails.clearCache(); }};
   AboutController m_aboutController{*this, m_launcher};
   ShortcutsController m_shortcutsController{*this};
   ApplicationChooserController m_applicationChooser{*this, m_launcher, m_icons};
@@ -422,6 +435,7 @@ private:
   FileKeyboardController m_fileKeys{*this, m_textInput, m_miller, m_menuController, m_locationBar, m_statusBar};
   StatusBarController m_statusBar{*this, m_pins, m_settingsController, m_fileKeys};
   std::size_t m_gridZoom = 1;
+  int m_listIconSize = 0;
   double m_zoomScroll = 0;
   luciole::ViewMode m_viewMode;
   luciole::WaylandTextClipboard& m_clipboard;
@@ -453,6 +467,7 @@ private:
   ChooserHooks m_chooser;
 
   Flex* m_titlebar = nullptr;
+  WindowMoveGesture m_titlebarMove;
   Flex* m_paneContentFrame = nullptr;
   VirtualGridView* m_list = nullptr;
   Segmented* m_viewSwitch = nullptr;

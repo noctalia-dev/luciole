@@ -24,6 +24,7 @@ namespace luciole {
   };
   class CopyEffect;
   class HistoryRevisions;
+  class HistoryMount;
   using MoveParents = std::map<std::string, int>;
   class MoveReceipt;
   struct MoveReplayResult {
@@ -39,6 +40,7 @@ namespace luciole {
         std::shared_ptr<HistoryRevisions> revisions = {}, const std::shared_ptr<const MoveHistoryRoot>& root = {}
     );
     std::vector<Location> retainForRecovery() const;
+    bool usesMount(const HistoryMount& mount) const;
 
   private:
     friend class MoveReceipt;
@@ -67,6 +69,7 @@ namespace luciole {
     bool encloses(const Location& location) const;
     bool hasContents() const { return m_trees != nullptr; }
     const Location& destination() const { return m_destination; }
+    bool usesMount(const HistoryMount& mount) const;
     const std::shared_ptr<const MoveHistoryRoot>& retentionRoot() const;
     std::vector<Location> retainForRecovery() const;
 
@@ -108,6 +111,8 @@ namespace luciole {
     virtual MoveReplayResult reverse(const CancelToken& token, std::atomic<std::size_t>& completed) const;
     virtual std::vector<TransferResult> unconfirmed(const FileError& error) const;
     virtual std::size_t size() const { return m_effects.size() + m_folders.size(); }
+    virtual bool usesMount(const HistoryMount& mount) const;
+    static bool cleanupPending();
 
   private:
     friend class CopiedMoveReceipt;

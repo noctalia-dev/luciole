@@ -18,6 +18,8 @@ namespace luciole {
     ~DirectoryTree();
     void setRoot(DirectorySnapshot snapshot);
     void clear();
+    // Collapse branches on a drive before explicit removal, including branches below a different root.
+    void releaseLocation(const Location& root);
     bool toggle(EntryId id);
     bool expand(EntryId id);
     bool collapse(EntryId id);

@@ -51,7 +51,7 @@ namespace {
       }
     };
     if (state.bookmarks.size() > luciole::StateStore::placesLimit) {
-      add("bookmarks", "at most 267 Places rows are supported");
+      add("bookmarks", "at most 268 Places rows are supported");
     }
     std::unordered_set<std::string> uris;
     for (std::size_t i = 0; i < state.bookmarks.size(); ++i) {
@@ -207,11 +207,17 @@ namespace {
           decoder.issue(*bookmarks->get(i), key, "expected a bookmark table");
           continue;
         }
-        decoder.unknownKeys(*bookmark, key + ".", {"label", "uri"}, "unknown state field");
+        decoder.unknownKeys(*bookmark, key + ".", {"label", "uri", "icon"}, "unknown state field");
         auto label = decoder.text(*bookmark, "label", key + ".label");
         auto location = decoder.location(*bookmark, "uri", key + ".uri");
+        auto icon =
+            bookmark->contains("icon") ? decoder.text(*bookmark, "icon", key + ".icon") : std::optional<std::string>{};
         if (label && location) {
-          state.bookmarks.push_back({.label = std::move(*label), .location = std::move(*location)});
+          state.bookmarks.push_back(
+              {.label = std::move(*label),
+               .location = std::move(*location),
+               .iconName = icon ? std::move(*icon) : std::string{}}
+          );
         }
       }
     }
@@ -233,7 +239,11 @@ namespace {
   std::string formatState(const luciole::SessionState& state) {
     toml::array bookmarks;
     for (const auto& bookmark : state.bookmarks) {
-      bookmarks.push_back(toml::table{{"label", bookmark.label}, {"uri", bookmark.location.uri()}});
+      toml::table row{{"label", bookmark.label}, {"uri", bookmark.location.uri()}};
+      if (!bookmark.iconName.empty()) {
+        row.insert("icon", bookmark.iconName);
+      }
+      bookmarks.push_back(std::move(row));
     }
     toml::array windows;
     for (const auto& window : state.windows) {

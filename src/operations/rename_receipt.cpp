@@ -2,6 +2,7 @@
 
 #include "fs/file_error.h"
 #include "fs/posix_fd.h"
+#include "operations/history_mount.h"
 
 #include <cerrno>
 #include <fcntl.h>
@@ -15,6 +16,10 @@ struct luciole::RenameIdentity {
   Fd parent, item;
   struct stat stamp;
 };
+
+bool luciole::RenameReceipt::usesMount(const HistoryMount& mount) const {
+  return mount.contains(m_identity->parent.get()) || mount.contains(m_identity->item.get());
+}
 
 namespace {
   std::pair<std::string, std::string> names(const luciole::Location& source, const luciole::Location& destination) {

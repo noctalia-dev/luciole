@@ -36,7 +36,7 @@ namespace {
       {"Return to the file list", "Escape"},
       {"Next / previous control", "Tab / Shift+Tab"},
       {"Search files", "Ctrl+K"},
-      {"Grid icon size", "Ctrl+Plus / Ctrl+Minus / Ctrl+0"},
+      {"Icon size", "Ctrl+Plus / Ctrl+Minus / Ctrl+0"},
   });
 
   constexpr auto kWindows = std::to_array<Shortcut>({

@@ -8,6 +8,7 @@
 #include "clipboard/text_clipboard.h"
 #include "config/settings.h"
 #include "core/ui_phase.h"
+#include "fs/file_query.h"
 #include "fs/gio_ptr.h"
 #include "operations/permission_service.h"
 #include "platform/desktop_integration.h"
@@ -45,13 +46,16 @@ namespace {
     return std::max(1.0F, dialogWidth - Style::spaceMd * 4 - Style::scrollbarWidth - Style::scrollbarGap);
   }
 
-  // Names the targets above the tabs, so every tab shows what it applies to.
-  std::unique_ptr<Flex>
-  identityRow(const std::vector<luciole::DirectoryEntry>& targets, luciole::FileIconCache& icons, float width) {
+  // Names the targets above the tabs, so every tab shows what it applies to; `out` receives the icon.
+  std::unique_ptr<Flex> identityRow(
+      const std::vector<luciole::DirectoryEntry>& targets, luciole::FileIconCache& icons, float width,
+      luciole::FileIcon** out
+  ) {
     const auto isFolder = [](const luciole::DirectoryEntry& entry) {
       return entry.type == luciole::FileType::Directory;
     };
     auto icon = std::make_unique<luciole::FileIcon>(icons, 48.0F);
+    *out = icon.get();
     std::string title;
     std::string caption;
     if (targets.size() == 1) {
@@ -607,10 +611,11 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
     scroll->requestScrollToOffset(0);
     m_page.popupSurface()->requestLayout();
   };
+  luciole::FileIcon* identity = nullptr;
   auto root = ui::column(
       {.align = FlexAlign::Stretch},
       luciole::dialogHeader("Properties", "file-info", [this] { m_page.dismissPopup(); }),
-      identityRow(targets, m_icons, width),
+      identityRow(targets, m_icons, width, &identity),
       ui::row(
           {.justify = FlexJustify::Center, .visible = editable, .participatesInLayout = editable},
           ui::segmented(
@@ -712,6 +717,17 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
   m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.popupSurface()) {
     m_page.activePopup().bind(ActivePopup::Kind::Properties, [this] { close(); });
+    m_identityIcon = identity;
+    // Entries without an icon, such as Places rows, get it from GIO.
+    if (!multiple && !targets.front().icon) {
+      m_iconQuery = luciole::CancelToken{};
+      luciole::queryFileIcon(targets.front().location(), m_iconQuery, [this, identity](auto reply) {
+        if (reply && identity == m_identityIcon) {
+          identity->bind(*reply, colorSpecFromRole(ColorRole::OnSurface));
+          m_page.popupSurface()->requestLayout();
+        }
+      });
+    }
     // Start on the tabs rather than the header's close button.
     if (editable) {
       m_page.popupDispatcher().setFocus(m_page.popupDispatcher().firstTabFocusUnder(tabs));
@@ -769,6 +785,8 @@ void PropertiesController::show(const std::vector<luciole::DirectoryEntry>& targ
 void PropertiesController::close() {
   m_metadata.clear();
   m_selectionMetadata.clear();
+  m_iconQuery.cancel();
+  m_identityIcon = nullptr;
   m_multiple = false;
   m_metadataView = nullptr;
   m_folderTotals = nullptr;

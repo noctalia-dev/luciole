@@ -76,6 +76,12 @@ namespace {
   // one, up to the maximum, so a large folder republishes only a few times.
   constexpr std::chrono::milliseconds kSniffPublishInterval{100};
   constexpr std::chrono::milliseconds kMaxSniffPublishInterval{1600};
+  // Following a link can block without end on an unresponsive network or FUSE mount, and cancellation cannot
+  // interrupt it. The link passes of every session share these workers, so hung targets hold at most this many of
+  // GIO's pool threads.
+  constexpr std::size_t kLinkWorkers = 2;
+  // Beyond this many waiting passes the oldest is dropped, and its links keep the kind they were published with.
+  constexpr std::size_t kMaxWaitingLinkPasses = 64;
   constexpr std::string_view kEntryLimitMessage = "Tree entry limit reached. Open this folder to see all items.";
 
   void closeEnumerator(GFileEnumerator* enumerator) {
@@ -94,6 +100,45 @@ namespace {
   struct NameHash {
     using is_transparent = void;
     std::size_t operator()(std::string_view name) const { return std::hash<std::string_view>{}(name); }
+  };
+
+  // Bounds the link passes that run at once; later passes wait for a free worker. Main thread only.
+  class LinkWorkers {
+  public:
+    // Returns false when its pass is no longer wanted. A started pass calls finished() once its worker returns.
+    using Start = std::move_only_function<bool()>;
+
+    static LinkWorkers& shared() {
+      static LinkWorkers workers;
+      return workers;
+    }
+
+    void run(Start start) {
+      if (m_waiting.size() >= kMaxWaitingLinkPasses) {
+        m_waiting.pop_front();
+      }
+      m_waiting.push_back(std::move(start));
+      startWaiting();
+    }
+
+    void finished() {
+      --m_running;
+      startWaiting();
+    }
+
+  private:
+    void startWaiting() {
+      while (m_running < kLinkWorkers && !m_waiting.empty()) {
+        auto start = std::move(m_waiting.front());
+        m_waiting.pop_front();
+        if (start()) {
+          ++m_running;
+        }
+      }
+    }
+
+    std::size_t m_running = 0;
+    std::deque<Start> m_waiting;
   };
 
   // Session IDs by child name. Published entries already carry both, so the table indexes them (4 bytes a slot)
@@ -254,6 +299,10 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     std::shared_ptr<const std::vector<std::string>> sniff = std::make_shared<const std::vector<std::string>>();
     std::size_t sniffed = 0;
     std::chrono::milliseconds sniffInterval = kSniffPublishInterval;
+    // A native listing's symlinks by index, and the indices of those that lead to folders.
+    std::shared_ptr<const std::vector<std::pair<std::size_t, std::string>>> links =
+        std::make_shared<const std::vector<std::pair<std::size_t, std::string>>>();
+    std::unordered_set<std::size_t> directoryLinks;
     // Identities of this scan's entries by name; the published entries replace State::identities, and this table
     // is dropped then.
     std::unordered_map<std::string, std::uint64_t> identities;
@@ -285,6 +334,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   std::unordered_set<std::string> unsniffed;
   std::uint64_t nextId = 1;
   IdResolver resolveId;
+  LinkTargetCheck linksToDirectory;
+  // Names of the published links that lead to folders. A rescan keeps them there until its own pass checks again.
+  std::unordered_set<std::string, NameHash, std::equal_to<>> directoryLinkNames;
   guint timer = 0;
   bool dirty = false;
   bool entriesAccessInvalidated = false;
@@ -843,6 +895,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       keepSniffedTypes(listing);
     }
     scan->entries = std::move(listing.entries);
+    collectLinks();
     const auto listedScan = scan;
     if (listing.limited) {
       complete(FileError{FileErrorKind::Unsupported, std::string(kEntryLimitMessage)});
@@ -853,6 +906,114 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       unsniffed = {scan->sniff->begin(), scan->sniff->end()};
       sniffContents();
     }
+    if (scan && scan == listedScan && !snapshot.error && !scan->links->empty()) {
+      resolveLinks();
+    }
+  }
+
+  // The listing never follows links. Until resolveLinks() checks them, a link keeps its published target kind.
+  void collectLinks() {
+    auto links = std::make_shared<std::vector<std::pair<std::size_t, std::string>>>();
+    const auto add = [&](std::size_t index, std::string_view name) {
+      links->emplace_back(index, name);
+      const bool known = directoryLinkNames.contains(name);
+      if (known) {
+        scan->directoryLinks.insert(index);
+      }
+      return known;
+    };
+    if (scan->catalogue) {
+      for (std::size_t i = 0; i < scan->catalogue->items.size(); ++i) {
+        if (scan->catalogue->items[i].symlink) {
+          add(i, scan->catalogue->brief(i).name);
+        }
+      }
+    } else {
+      for (std::size_t i = 0; i < scan->entries.size(); ++i) {
+        auto& entry = scan->entries[i];
+        if (entry.symlink) {
+          entry.linksToDirectory = add(i, entry.name);
+        }
+      }
+    }
+    scan->links = std::move(links);
+  }
+
+  // Follows the published links on a shared link worker; see kLinkWorkers.
+  void resolveLinks() {
+    LinkWorkers::shared().run([weak = weak_from_this(), listed = scan] {
+      const auto state = weak.lock();
+      if (!state || state->scan != listed || g_cancellable_is_cancelled(listed->cancellable.get()) != FALSE) {
+        return false;
+      }
+      state->followLinks();
+      return true;
+    });
+  }
+
+  void followLinks() {
+    struct Job {
+      std::string folder;
+      std::shared_ptr<const std::vector<std::pair<std::size_t, std::string>>> links;
+      LinkTargetCheck linksToDirectory;
+      std::unordered_set<std::size_t> directoryLinks;
+      bool complete = false;
+    };
+    auto* task = g_task_new(
+        nullptr, scan->cancellable.get(),
+        [](GObject*, GAsyncResult* result, gpointer data) {
+          const std::unique_ptr<Request> request(static_cast<Request*>(data));
+          LinkWorkers::shared().finished();
+          auto& job = *static_cast<Job*>(g_task_get_task_data(G_TASK(result)));
+          if (const auto state = request->state.lock(); state && state->scan == request->scan && job.complete) {
+            state->linksFollowed(std::move(job.directoryLinks));
+          }
+        },
+        new Request{.state = weak_from_this(), .scan = scan}
+    );
+    g_task_set_task_data(
+        task,
+        new Job{
+            .folder = scan->path,
+            .links = scan->links,
+            .linksToDirectory = linksToDirectory,
+            .directoryLinks = {},
+            .complete = false
+        },
+        [](gpointer data) { delete static_cast<Job*>(data); }
+    );
+    g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
+      auto& job = *static_cast<Job*>(data);
+      const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
+      job.complete = true;
+      for (const auto& [index, name] : *job.links) {
+        if (g_cancellable_is_cancelled(cancellable) != FALSE) {
+          job.complete = false;
+          break;
+        }
+        if (job.linksToDirectory(std::string(job.folder).append(separator).append(name))) {
+          job.directoryLinks.insert(index);
+        }
+      }
+      g_task_return_boolean(task, TRUE);
+    });
+    g_object_unref(task);
+  }
+
+  void linksFollowed(std::unordered_set<std::size_t> directoryLinks) {
+    directoryLinkNames.clear();
+    for (const auto& [index, name] : *scan->links) {
+      if (directoryLinks.contains(index)) {
+        directoryLinkNames.emplace(name);
+      }
+    }
+    if (directoryLinks == scan->directoryLinks) {
+      return;
+    }
+    scan->directoryLinks = std::move(directoryLinks);
+    snapshot.entries = snapshot.entries.withDirectoryLinks(scan->directoryLinks);
+    identities.rebase(snapshot.entries);
+    notify();
   }
 
   // Uncertain entries reuse the published type of an unchanged file; the others wait for sniffContents().
@@ -1115,6 +1276,10 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     const auto replaced = snapshot.entries.size();
     snapshot.entries =
         scan->catalogue ? DirectoryEntries(std::move(*scan->catalogue)) : DirectoryEntries(std::move(scan->entries));
+    // Native entries already carry the known link kinds; a catalogue keeps them in an overlay.
+    if (snapshot.entries.isCatalogue() && !scan->directoryLinks.empty()) {
+      snapshot.entries = snapshot.entries.withDirectoryLinks(scan->directoryLinks);
+    }
     unsniffed.clear();
     snapshot.contentTypesPending = !error && !scan->sniff->empty();
     const bool trim = std::max(replaced, snapshot.entries.size()) >= kHeapTrimEntries;
@@ -1155,10 +1320,15 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 };
 
-luciole::DirectorySession::DirectorySession(std::size_t entryLimit, IdResolver resolveId)
+luciole::DirectorySession::DirectorySession(
+    std::size_t entryLimit, IdResolver resolveId, LinkTargetCheck linksToDirectory
+)
     : m_state(std::make_shared<State>()) {
   m_state->entryLimit = entryLimit;
   m_state->resolveId = std::move(resolveId);
+  m_state->linksToDirectory = linksToDirectory ? std::move(linksToDirectory) : [](const std::string& path) {
+    return luciole::linksToDirectory(path);
+  };
 }
 
 luciole::DirectorySession::~DirectorySession() {
@@ -1170,6 +1340,7 @@ void luciole::DirectorySession::open(const Location& location) {
   const auto state = m_state;
   state->stop();
   state->identities.clear();
+  state->directoryLinkNames.clear();
   state->snapshot.location = location;
   state->snapshot.entries = {};
   state->entriesAccessInvalidated = false;

@@ -41,6 +41,8 @@ namespace luciole {
     bool busy() const;
     bool canCreate() const;
     const CreateSnapshot& snapshot() const;
+    // Hand optional history to its application owner without retaining descriptors in the report.
+    std::shared_ptr<const CreateReceipt> takeReceipt();
     void setChangedCallback(std::function<void()> callback);
 
   private:

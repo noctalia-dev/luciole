@@ -123,6 +123,8 @@ private:
   bool m_showSidebar = true;
   bool m_sidebarTree = false;
   bool m_showDrives = true;
+  bool m_showNetwork = true;
+  bool m_removingDrive = false;
   int m_sidebarStartWidth = luciole::kDefaultSidebarWidth;
   int m_sidebarStartVisibleWidth = luciole::kDefaultSidebarWidth;
   // Expires with this controller so drive callbacks that finish later do nothing.

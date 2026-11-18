@@ -37,17 +37,38 @@ def run_case(binary, mode, names):
         desktop = root / "data/applications/fixture.desktop"
         desktop.write_text(
             "[Desktop Entry]\nType=Application\nName=Private launch fixture\n"
-            f"Exec={sys.executable} {handler} {'%u' if mode == 'batch-single' else '%U'}\n"
+            f"Exec={sys.executable} {handler} {'%F' if mode == 'native-files' else '%u' if mode == 'batch-single' else '%U'}\n"
             + ("StartupNotify=true\n" if mode == "tokens" else "") +
             "MimeType=text/plain;\n" + ("NoDisplay=false\n" if mode in ("with", "other", "default", "default-error", "catalog", "batch", "batch-single", "grouped-open", "tokens", "activation-destroy", "mixed-catalog") else "NoDisplay=true\n")
         )
-        associations = "[Default Applications]\ntext/plain=fixture.desktop;\n"
-        mime_cache = "[MIME Cache]\ntext/plain=fixture.desktop;\n"
+        # A file manager may own file:// without being the MIME handler for documents (#21).
+        manager = root / "data/applications/file-manager.desktop"
+        manager.write_text(
+            "[Desktop Entry]\nType=Application\nName=Private file manager\nNoDisplay=true\n"
+            f"Exec={sys.executable} {root / 'wrong-handler.py'} %U\n"
+            "MimeType=inode/directory;x-scheme-handler/file;\n"
+        )
+        (root / "wrong-handler.py").write_text("raise SystemExit('document sent to the file manager')\n")
+        associations = (
+            "[Default Applications]\ntext/plain=fixture.desktop;\n"
+            "inode/directory=file-manager.desktop;\nx-scheme-handler/file=file-manager.desktop;\n"
+        )
+        mime_cache = (
+            "[MIME Cache]\ntext/plain=fixture.desktop;\n"
+            "inode/directory=file-manager.desktop;\nx-scheme-handler/file=file-manager.desktop;\n"
+        )
         if mode == "grouped-open":
             associations += "image/png=other.desktop;\n"
             mime_cache += "image/png=other.desktop;\n"
         (root / "config/mimeapps.list").write_text(associations)
         (root / "data/applications/mimeinfo.cache").write_text(mime_cache)
+        if mode == "remote":
+            (root / "config/mimeapps.list").write_text(associations + "x-scheme-handler/sftp=fixture.desktop;\n")
+            (root / "data/applications/mimeinfo.cache").write_text(mime_cache + "x-scheme-handler/sftp=fixture.desktop;\n")
+        if mode == "no-handler":
+            desktop.unlink()
+            (root / "config/mimeapps.list").write_text(associations.replace("text/plain=fixture.desktop;\n", ""))
+            (root / "data/applications/mimeinfo.cache").write_text(mime_cache.replace("text/plain=fixture.desktop;\n", ""))
         if mode in ("other", "default", "default-error", "catalog", "batch", "batch-single", "grouped-open", "tokens", "activation-destroy", "mixed-catalog"):
             for filename, title, arguments, extra in (
                 ("other.desktop", "Noctalia launch fixture Café", "%U", "MimeType=image/png;"),
@@ -105,9 +126,13 @@ def run_case(binary, mode, names):
             helper = bin_dir / "xdg-terminal-exec"
             helper.symlink_to(foot)
         paths = []
+        if mode == "symlink":
+            (root / "target.txt").write_text("private link target\n")
         for name in names:
             path = os.fsencode(root) + b"/" + name
-            if mode != "error":
+            if mode == "symlink":
+                os.symlink(b"target.txt", path)
+            elif mode != "error":
                 with open(path, "wb") as stream:
                     stream.write(
                         b"\x89PNG\r\n\x1a\n"
@@ -149,9 +174,9 @@ def run_case(binary, mode, names):
         )
         if result.returncode != 0:
             raise AssertionError((result.returncode, result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace")))
-        if mode in ("open", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
+        if mode in ("open", "native-files", "remote", "symlink", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
             deadline = time.monotonic() + 5
-            expected = sorted(path.hex() for path in paths)
+            expected = [b"sftp://fixture.invalid/private.txt".hex()] if mode == "remote" else sorted(path.hex() for path in paths)
             while True:
                 try:
                     actual = sorted(
@@ -163,6 +188,8 @@ def run_case(binary, mode, names):
                     actual = []
                 if actual == expected:
                     break
+                if refused.exists():
+                    raise AssertionError(("file scheme handler overrode the document MIME handler", result.stderr))
                 if time.monotonic() >= deadline:
                     raise AssertionError((actual, expected, result.stderr))
                 time.sleep(0.01)
@@ -193,8 +220,8 @@ def run_case(binary, mode, names):
             expected_default = "other.desktop" if mode == "default" else "fixture.desktop"
             if associations["Default Applications"].get("text/plain", "").rstrip(";") != expected_default:
                 raise AssertionError("unexpected persisted default application")
-        if mode == "error" and log.exists():
-            raise AssertionError("a missing file launched an application")
+        if mode in ("error", "no-handler") and log.exists():
+            raise AssertionError("a missing file or MIME association launched an application")
         if refused.exists():
             raise AssertionError("desktop dispatch escaped its fixture")
         # Debug diagnostics identify stages and requests, without recording file payloads.
@@ -209,9 +236,16 @@ def run_case(binary, mode, names):
 
 def main():
     binary = sys.argv[1]
+    if sys.argv[2:] == ["--no-handler"]:
+        # Run with filesystem isolation: Nix's GLib also searches profiles outside the XDG directories.
+        run_case(binary, "no-handler", [b"no-handler.txt"])
+        return
     for mode in ("terminal-setting", "terminal-env", "terminal-with", "terminal-auto", "terminal-missing"):
         run_case(binary, mode, [b"plain.txt", "space ' $() % café\n.txt".encode(), b"raw-\xff.txt"])
-    run_case(binary, "open", [b"plain.txt", "space ' $() <literal> café\n.txt".encode(), b"raw-\xff.txt"])
+    run_case(binary, "open", [b"plain.txt", "space ' $() <literal> café\n.txt".encode(), b"raw-\xff.txt", b"extensionless"])
+    run_case(binary, "native-files", [b"file-only.txt", "space café.txt".encode(), b"raw-\xff.txt"])
+    run_case(binary, "remote", [b"unused.txt"])
+    run_case(binary, "symlink", [b"linked-document"])
     run_case(binary, "sequential", [b"first.txt", b"second.txt", b"third.txt"])
     run_case(binary, "with", [b"explicit.txt", "space ' $() café\n.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "other", ["other space café.txt".encode(), b"other-raw-\xff.txt"])

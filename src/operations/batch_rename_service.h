@@ -12,6 +12,8 @@
 
 namespace luciole {
   struct BatchRenameReceipt;
+  class HistoryMount;
+  bool batchRenameUsesMount(const BatchRenameReceipt& receipt, const HistoryMount& mount);
   enum class BatchRenameMode { Numbering, Replace };
   struct BatchRenameOptions {
     BatchRenameMode mode = BatchRenameMode::Numbering;
@@ -58,6 +60,8 @@ namespace luciole {
     bool applying() const;
     std::size_t completed() const;
     const BatchRenameSnapshot& snapshot() const;
+    // Hand optional history to its application owner without retaining descriptors in the report.
+    std::shared_ptr<const BatchRenameReceipt> takeReceipt();
     void setChangedCallback(std::function<void()> callback);
 
   private:

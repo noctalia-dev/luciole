@@ -10,6 +10,7 @@
 namespace luciole {
   enum class CreateKind;
   struct CreationIdentity;
+  class HistoryMount;
   class CreateReceipt;
   struct CreateReplayResult {
     std::shared_ptr<const CreateReceipt> receipt;
@@ -25,6 +26,8 @@ namespace luciole {
     static std::shared_ptr<const CreateReceipt>
     capture(CreateKind kind, const Location& destination, int parent, int item, bool removed = false);
     CreateReplayResult reverse(const CancelToken& token) const;
+    bool usesMount(const HistoryMount& mount) const;
+    static bool cleanupPending();
 
   private:
     CreateKind m_kind;

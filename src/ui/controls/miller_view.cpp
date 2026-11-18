@@ -287,7 +287,7 @@ void MillerView::synchronize() {
     const auto& snapshot = model.snapshot();
     view.adapter->setPresentation(presentation, snapshot.metadata.filesystem.readOnly);
     const bool context = !column.browser->searchQuery().empty() || (snapshot.location && snapshot.location->isTrash());
-    const float rowHeight = luciole::fileRowHeight(presentation, context);
+    const float rowHeight = luciole::fileRowHeight(presentation, context, luciole::millerRowIconSize(presentation));
     if (rowHeight != view.rowHeight) {
       const auto anchor = view.grid->firstVisibleIndex();
       const float offset = view.grid->firstVisibleOffset();

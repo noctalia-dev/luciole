@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/transfer_types.h"
+#include "operations/history_mount.h"
 #include "operations/provider_move_receipt.h"
 #include "operations/provider_transfer.h"
 
@@ -797,6 +798,12 @@ struct luciole::ProviderCopyReceipt::State {
   std::uint64_t generation = 0;
   TransferAction action = TransferAction::Copy;
 };
+
+bool luciole::ProviderCopyReceipt::usesMount(const HistoryMount& mount) const {
+  return std::ranges::any_of(m_state->effects, [&](const auto& effect) {
+    return mount.contains(effect->m_storage->destination) || mount.contains(effect->m_storage->anchor);
+  });
+}
 luciole::ProviderCopyReceipt::ProviderCopyReceipt(std::shared_ptr<State> state, std::uint64_t generation)
     : CopyReceipt(state->action), m_state(std::move(state)), m_generation(generation) {}
 
@@ -965,6 +972,17 @@ struct luciole::ProviderMoveReceipt::State {
   std::vector<std::shared_ptr<const ProviderCopyEffect>> effects;
   std::uint64_t generation = 0;
 };
+
+bool luciole::ProviderMoveReceipt::usesMount(const HistoryMount& mount) const {
+  return std::ranges::any_of(m_state->effects, [&](const auto& effect) {
+    const auto& item = *effect->m_storage;
+    return mount.contains(item.destination)
+        || mount.contains(item.anchor)
+        || (item.origin && mount.contains(*item.origin))
+        || (item.peerAnchor && mount.contains(*item.peerAnchor))
+        || (item.mergeDestination && mount.contains(*item.mergeDestination));
+  });
+}
 luciole::ProviderMoveReceipt::ProviderMoveReceipt(std::shared_ptr<State> state, std::uint64_t generation, bool atOrigin)
     : m_state(std::move(state)), m_generation(generation), m_atOrigin(atOrigin) {}
 

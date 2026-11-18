@@ -196,6 +196,9 @@ bool luciole::CreateService::canCreate() const {
   return !busy() && (m_state->target != nullptr || m_state->linkSource != nullptr);
 }
 const luciole::CreateSnapshot& luciole::CreateService::snapshot() const { return m_state->snapshot; }
+std::shared_ptr<const luciole::CreateReceipt> luciole::CreateService::takeReceipt() {
+  return std::move(m_state->snapshot.receipt);
+}
 void luciole::CreateService::cancel() {
   m_state->token.cancel();
   m_state->target.reset();

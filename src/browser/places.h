@@ -30,6 +30,7 @@ namespace luciole {
     bool removeMany(const std::vector<Location>& locations);
     bool move(const Location& location, std::size_t position);
     bool rename(const Bookmark& expected, std::string label);
+    bool setIcon(const Bookmark& expected, std::string iconName);
     bool saveWindows(std::vector<SavedWindow> windows);
     bool contains(const Location& location) const;
     bool editable() const;

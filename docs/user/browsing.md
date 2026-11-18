@@ -2,7 +2,7 @@
 
 ## Navigation and search
 
-The location bar shows clickable folder breadcrumbs. Double-click a breadcrumb or unused space in the bar to edit the path; Ctrl+L also starts editing. Tab accepts a path completion when one is available. Home and its descendants use Home as the breadcrumb root; you can still navigate above it.
+The location bar shows clickable folder breadcrumbs. Double-click a breadcrumb or unused space in the bar to edit the path; Ctrl+L also starts editing. Path editing works with the tab bar hidden and in file chooser windows too. Tab accepts a path completion when one is available. Home and its descendants use Home as the breadcrumb root; you can still navigate above it.
 
 The mouse's Back and Forward side buttons navigate folder history, like the toolbar arrows or Alt+Left/Alt+Right. Each press navigates once; releasing the button does not navigate again. In split view, pressing a side button over a browsing pane focuses that pane and uses its own history. Over shared chrome, the active pane's history is used. Side buttons do not navigate behind an open dialog or during a captured drag, and do nothing when the corresponding history is empty.
 
@@ -34,7 +34,7 @@ The cursor ring marks the item the keyboard acts on and stays visible inside a m
 
 Enter an address such as `smb://server/share` in the location bar, or open a saved network place. If the location is not mounted, Luciole asks the installed GIO/GVfs provider to connect and then opens the folder. You can also open an SMB server address and activate one of its listed shares. The same mounted share becomes visible to other applications using that desktop session.
 
-The **Network** sidebar entry is always available, including when no servers are found. Discovery starts when you open Network or expand it in the optional sidebar tree; ordinary local startup does not start discovery. Open a discovered server and its share as usual. You can also enter `network:///` directly. Grid, List and Columns use the discovered destination when opening an entry; middle-click and Ctrl+Enter can open it in a new tab.
+The **Network** sidebar entry is shown by default, including when no servers are found. Drag it among Places or use Move up/Move down in its context menu to save its position. Settings → Appearance → Sidebar → Show Network hides or restores it in both sidebar modes; its context menu also offers Hide Network. Hiding the entry preserves its position and does not disable direct network addresses or existing network tabs. Discovery starts when you open Network or expand it in the optional sidebar tree; ordinary local startup does not start discovery. Open a discovered server and its share as usual. You can also enter `network:///` directly. Grid, List and Columns use the discovered destination when opening an entry; middle-click and Ctrl+Enter can open it in a new tab.
 
 Luciole discovers SMB computers using its built-in WS-Discovery client, with optional DNS-SD discovery through GVfs and Avahi. No external WS-Discovery helper is needed. Discovery runs in the background while Network is open; closing its last view stops Luciole's discovery workers. Server names may replace numeric addresses as metadata arrives. Refresh retries discovery. A reachable server may not advertise itself, and multicast filtering can prevent discovery. You can still enter its known address or use a saved network place. Discovery does not ask for credentials or open every share in the background. If nothing is discovered, Network remains available.
 
@@ -46,11 +46,11 @@ Network protocols require their installed GVfs backends and a session D-Bus conn
 
 [Undo/redo](file-operations.md#undo-and-redo) affects the most recent supported creation, rename or native copy/link/move in the running application, independently of the current folder or selection. When a text input is focused, its text-editing undo takes precedence.
 
-Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (Ctrl+3). Ctrl+wheel changes grid icon size. View, zoom, sort and hidden-file choices are saved as defaults for new browsing pages. Existing tabs and panes keep their own browsing state.
+Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (Ctrl+3). In Grid and List views, Ctrl+wheel (or Ctrl with a touchpad scroll), Ctrl+Plus and Ctrl+Minus change the icon size, and Ctrl+0 resets it. View, zoom, sort and hidden-file choices are saved as defaults for new browsing pages. Existing tabs and panes keep their own browsing state.
 
 List and Columns shorten overflowing filenames in the middle by default, keeping their beginning and ending visible. Settings → Views → Long filenames also offers Shorten at the end. Changes apply to open panes immediately. Grid keeps its two-line name wrapping.
 
-List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu.
+List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu. Shown hidden items always sort after visible ones; Folders first applies within each group.
 
 The background right-click menu also offers Sort. Changing the sort field, direction or Folders first shows the beginning of the new order, including in folders that need scrolling. Selected items stay selected. Sort changes made through list headings or Settings follow the same rule.
 
@@ -60,17 +60,23 @@ The floating status pill reports actions, search and selection. Settings → App
 
 Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
 
+Opening a local file uses the default application for its file type. Use Open With to choose another application or change that file type's default.
+
 ## Places and folder trees
 
-Places contains Home, available XDG user folders, Trash and your pinned folders. Pin or unpin a folder through its context menu, or drag a folder into Places. Drag rows to reorder them. Trash can move within the list but cannot be unpinned. Its context menu offers Empty Trash.
+Places contains Home, available XDG user folders, Trash, Network and your pinned folders. Pin or unpin a folder through its context menu, or drag a folder into Places. Drag rows to reorder them. Trash can move within the list but cannot be unpinned. Its context menu offers Empty Trash.
+
+Middle-click anywhere inside a Places or mounted-drive row to open that folder in a new tab, including the row's top and bottom edges. Dropping folders near Places row edges still inserts or reorders pins; the center remains the transfer target.
 
 Drop native files or folders onto the Trash row to move them to Trash. This works in both sidebar modes. Trash accepts moves only; Ctrl-copy, Alt action choices, remote files and deferred archive extraction cannot target it.
 
 Pinned folders use the shared GTK bookmark file, also used by Nemo and Nautilus. Adding, removing, renaming or reordering user bookmarks in Luciole updates that file; changes from another application appear automatically. Built-in Places keep their Luciole layout and are not automatically added to other applications' bookmarks. Old Luciole-only pins are not imported.
 
+Use a bookmark's context menu and choose **Change icon…** to select a Tabler icon. This icon is stored in Luciole's private state and does not change the shared GTK bookmark or its appearance in other applications. Choose **Reset to default** to restore the place's standard icon.
+
 Drives starts with File System (`/`), followed by the volumes and mounts GIO reports: removable media, extra partitions and network mounts, but not other system mounts such as `/home` or `/boot`. Mounted drives come before unmounted ones. In the Places list, each mounted drive shows a bar of its used space under its row; the bar turns red at 90% used. Unmounted drives and filesystems that do not report a size have no bar.
 
-The eject button and the drive's context menu remove a mounted drive the way GNOME Files does: Safely Remove powers off a USB disk plugged in during the session, Eject ejects removable media, and Unmount unmounts anything else. Removal never forces: while a program still has files open on the drive, nothing is unmounted and the status bar names the programs or Luciole's running file operations that keep it busy.
+The eject button and the drive's context menu remove a mounted drive the way GNOME Files does: Safely Remove powers off a USB disk plugged in during the session, Eject ejects removable media, and Unmount unmounts anything else. Open panes leave the drive first. Undo/Redo history that holds that mount is retired, and removal waits briefly for cleanup and cancelled preview/thumbnail reads. History belonging to other mounts stays available. Removal never forces: active operations or other programs with open files still prevent removal, and the status bar names the reported blockers.
 
 Settings → Appearance controls sidebar visibility, width, drive rows and the optional folder tree. The separate expandable-folder preference adds a tree within List view. Both tree options are off by default.
 

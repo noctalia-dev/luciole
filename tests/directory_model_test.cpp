@@ -228,6 +228,55 @@ namespace {
     TEST_CHECK(lazy.selection().selected.empty() && !lazy.selection().focused);
   }
 
+  // A catalogue learns its links' targets after publication; the name-sorted path that skips sorting still re-sorts.
+  void testCatalogueDirectoryLinks() {
+    luciole::BrowseCatalogue catalogue;
+    catalogue.folder = std::make_shared<const Location>(Location::fromPath("/tmp/luciole-model-fixture"));
+    const std::vector<std::pair<std::string, luciole::FileType>> items{
+        {"b-folder", luciole::FileType::Directory},
+        {"a-link", luciole::FileType::Symlink},
+        {"c-link", luciole::FileType::Symlink},
+        {"a-file", luciole::FileType::Regular}
+    };
+    for (std::size_t i = 0; i < items.size(); ++i) {
+      const auto& [name, type] = items[i];
+      catalogue.items.push_back(
+          {.id = i + 1,
+           .offset = static_cast<std::uint32_t>(catalogue.names.size()),
+           .length = static_cast<std::uint16_t>(name.size()),
+           .type = type,
+           .hidden = false,
+           .symlink = type == luciole::FileType::Symlink}
+      );
+      catalogue.names.append(name);
+      catalogue.names.push_back('\0');
+    }
+    auto data = snapshot({});
+    data.entries = luciole::DirectoryEntries(std::move(catalogue));
+    const auto listed = data.entries;
+    DirectoryModel model;
+    model.applySnapshot(data);
+    rows(model, {1, 4, 2, 3});
+    data.generation = 2;
+    // Only symlinks can lead to folders.
+    data.entries = listed.withDirectoryLinks({0, 2});
+    TEST_CHECK(data.entries.sameCatalogue(listed) && !data.entries.sameDirectoryLinks(listed));
+    TEST_CHECK(!data.entries.brief(0).linksToDirectory && data.entries.brief(2).linksToDirectory);
+    model.applySnapshot(data);
+    rows(model, {1, 3, 4, 2});
+    // Detailed facts never follow links, so they keep the catalogue's target kind.
+    auto fact = entry(3, "c-link", luciole::FileType::Symlink);
+    fact.symlink = true;
+    const auto linked = data.entries;
+    data.generation = 3;
+    data.entries = linked.withFacts({{2, fact}});
+    TEST_CHECK(data.entries.known(2)->linksToDirectory && data.entries.sameDirectoryLinks(linked));
+    TEST_CHECK(data.entries.withoutFacts().brief(2).linksToDirectory);
+    model.applySnapshot(data);
+    rows(model, {1, 3, 4, 2});
+    TEST_CHECK(!data.entries.withDirectoryLinks({}).known(2)->linksToDirectory);
+  }
+
   void testSortAndMetadata() {
     DirectoryModel model;
     auto data = snapshot(
@@ -240,6 +289,23 @@ namespace {
     rows(model, {30, 20, 10, 2, 1});
     model.setSort({.directoriesFirst = false});
     rows(model, {20, 1, 2, 10, 30});
+
+    // A link to a folder sorts with the folders; a file link stays with the files.
+    data.entries = {
+        entry(1, "b-folder", luciole::FileType::Directory), entry(2, "a-link", luciole::FileType::Symlink),
+        entry(3, "c-link", luciole::FileType::Symlink), entry(4, "a-file")
+    };
+    test::editEntries(data, [&](auto& entries) {
+      for (auto& item : entries) {
+        item.symlink = item.type == luciole::FileType::Symlink;
+      }
+      entries[2].linksToDirectory = true;
+    });
+    model.setSort({});
+    model.applySnapshot(data);
+    rows(model, {1, 3, 4, 2});
+    model.setSort({.directoriesFirst = false});
+    rows(model, {4, 2, 1, 3});
 
     data.entries = {entry(1, "a"), entry(2, "b"), entry(3, "c")};
     test::editEntries(data, [&](auto& entries) {
@@ -255,6 +321,25 @@ namespace {
       model.setSort({.field = field, .descending = true});
       rows(model, {2, 1, 3});
     }
+
+    data.entries = {
+        entry(1, "b.txt"), entry(2, "z-folder", luciole::FileType::Directory), entry(3, ".c.txt"),
+        entry(4, ".a-folder", luciole::FileType::Directory)
+    };
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].size = 1;
+      entries[2].size = 100;
+      entries[2].hidden = entries[3].hidden = true;
+    });
+    model.applySnapshot(data);
+    model.setFilter({.showHidden = true, .text = {}});
+    model.setSort({});
+    rows(model, {2, 1, 4, 3});
+    model.setSort({.descending = true, .directoriesFirst = false});
+    rows(model, {2, 1, 3, 4});
+    model.setSort({.field = SortField::Size, .descending = true, .directoriesFirst = false});
+    rows(model, {1, 2, 3, 4});
+    model.setFilter({.showHidden = false, .text = {}});
 
     // Collation ties must not let enumeration order determine action targets.
     data.entries = {entry(5, "same-b"), entry(4, "same-a")};
@@ -602,6 +687,32 @@ namespace {
     model.setFilter({.text = "absent"});
     rows(model, {});
     TEST_CHECK(model.snapshot().status == DirectoryStatus::Ready);
+    model.setSort({.descending = true});
+    model.setFilter({});
+    rows(model, {1, 2, 4});
+    model.setEntryFilter([](const auto& brief, const auto*) { return brief.id != 2; });
+    rows(model, {1, 4});
+    model.setFilter({.text = "STRASSE"});
+    rows(model, {1});
+    model.setEntryFilter({});
+    model.setFilter({});
+    rows(model, {1, 2, 4});
+    model.applySnapshot(snapshot({entry(5, "z"), entry(6, "a"), entry(7, "m")}, 2));
+    rows(model, {5, 7, 6});
+    model.setFilter({.text = "m"});
+    rows(model, {7});
+    model.setSort({});
+    model.setFilter({});
+    rows(model, {6, 7, 5});
+    model.setFilter({.text = "missing"});
+    model.applySnapshot(snapshot({entry(8, "alpha"), entry(9, "alpine"), entry(10, "beta")}, 3));
+    rows(model, {});
+    model.setFilter({.text = "alpha"});
+    rows(model, {8});
+    model.setFilter({.text = "alp"});
+    rows(model, {8, 9});
+    model.setFilter({});
+    rows(model, {8, 9, 10});
   }
 
   void testSelectionAndAnchors() {
@@ -838,6 +949,7 @@ int main() {
     std::setlocale(LC_ALL, "C");
     testPublishedEntryOwnership();
     testCatalogueProjectionAndPendingFacts();
+    testCatalogueDirectoryLinks();
     testSortAndMetadata();
     testExtendedMetadataSort();
     testTextSortRefresh();

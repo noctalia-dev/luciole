@@ -58,6 +58,7 @@ namespace {
          {P::SwitchToNewTab, true},
          {P::ConfirmPermanentDeletion, true},
          {P::SidebarTree, false},
+         {P::ShowNetwork, true},
          {P::ExpandableFolders, true}}
     );
     writer.submit(
@@ -71,6 +72,7 @@ namespace {
          {P::SwitchToNewTab, false},
          {P::ConfirmPermanentDeletion, false},
          {P::SidebarTree, true},
+         {P::ShowNetwork, false},
          {P::ExpandableFolders, false}}
     );
     writer.saveGridIconSize(96);
@@ -124,6 +126,7 @@ namespace {
         && loaded->browser.sidebarWidth == 280
         && !loaded->browser.showSidebar
         && loaded->browser.sidebarTree
+        && !loaded->browser.showNetwork
         && !loaded->browser.expandableFolders
         && loaded->browser.sort == finalSort
         && loaded->browser.columns == hiddenColumns

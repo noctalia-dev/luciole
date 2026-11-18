@@ -84,6 +84,9 @@ void luciole::RenameService::setChangedCallback(std::function<void()> callback) 
 bool luciole::RenameService::busy() const { return m_state->active; }
 bool luciole::RenameService::canRename() const { return !busy() && m_state->target != nullptr; }
 const luciole::RenameSnapshot& luciole::RenameService::snapshot() const { return m_state->snapshot; }
+std::shared_ptr<const luciole::RenameReceipt> luciole::RenameService::takeReceipt() {
+  return std::move(m_state->snapshot.receipt);
+}
 void luciole::RenameService::cancel() {
   m_state->token.cancel();
   m_state->target.reset();

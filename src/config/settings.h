@@ -20,6 +20,7 @@ namespace luciole {
     ActivationMode activationMode = ActivationMode::DoubleClick;
     TypingMode typingMode = TypingMode::Search;
     bool confirmPermanentDeletion = true;
+    bool showPermanentDeletion = false;
     bool switchToNewTab = true;
     bool restoreLastWindow = false;
     ViewMode viewMode = ViewMode::List;
@@ -32,10 +33,12 @@ namespace luciole {
     double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
+    int listIconSize = 0; // 0 keeps kDefaultListIconSize.
     int sidebarWidth = kDefaultSidebarWidth;
     bool showSidebar = true;
     bool sidebarTree = false;
     bool showDrives = true;
+    bool showNetwork = true;
     bool expandableFolders = false;
     bool showPreview = true;
     bool chooserShowPreview = false; // File picker windows keep their own preview visibility.
@@ -67,6 +70,7 @@ namespace luciole {
     ActivationMode,
     TypingMode,
     ConfirmPermanentDeletion,
+    ShowPermanentDeletion,
     SwitchToNewTab,
     RestoreLastWindow,
     ShowHidden,
@@ -81,6 +85,7 @@ namespace luciole {
     DirectoriesFirst,
     ViewMode,
     GridIconSize,
+    ListIconSize,
     Density,
     FilenameTruncation,
     ShowSizeCaption,
@@ -91,6 +96,7 @@ namespace luciole {
     ShowSidebar,
     SidebarTree,
     ShowDrives,
+    ShowNetwork,
     ExpandableFolders,
     ShowPreview,
     ChooserShowPreview,
@@ -146,6 +152,7 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::ActivationMode> ActivationMode{Id::ActivationMode};
     static constexpr PreferenceKey<luciole::TypingMode> TypingMode{Id::TypingMode};
     static constexpr PreferenceKey<bool> ConfirmPermanentDeletion{Id::ConfirmPermanentDeletion};
+    static constexpr PreferenceKey<bool> ShowPermanentDeletion{Id::ShowPermanentDeletion};
     static constexpr PreferenceKey<bool> SwitchToNewTab{Id::SwitchToNewTab};
     static constexpr PreferenceKey<bool> RestoreLastWindow{Id::RestoreLastWindow};
     static constexpr PreferenceKey<bool> ShowHidden{Id::ShowHidden};
@@ -160,6 +167,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
     static constexpr PreferenceKey<luciole::ViewMode> ViewMode{Id::ViewMode};
     static constexpr PreferenceKey<int> GridIconSize{Id::GridIconSize};
+    static constexpr PreferenceKey<int> ListIconSize{Id::ListIconSize};
     static constexpr PreferenceKey<luciole::ViewDensity> Density{Id::Density};
     static constexpr PreferenceKey<luciole::FilenameTruncation> FilenameTruncation{Id::FilenameTruncation};
     static constexpr PreferenceKey<bool> ShowSizeCaption{Id::ShowSizeCaption};
@@ -170,6 +178,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> ShowSidebar{Id::ShowSidebar};
     static constexpr PreferenceKey<bool> SidebarTree{Id::SidebarTree};
     static constexpr PreferenceKey<bool> ShowDrives{Id::ShowDrives};
+    static constexpr PreferenceKey<bool> ShowNetwork{Id::ShowNetwork};
     static constexpr PreferenceKey<bool> ExpandableFolders{Id::ExpandableFolders};
     static constexpr PreferenceKey<bool> ShowPreview{Id::ShowPreview};
     static constexpr PreferenceKey<bool> ChooserShowPreview{Id::ChooserShowPreview};

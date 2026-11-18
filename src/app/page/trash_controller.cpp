@@ -45,9 +45,7 @@ void TrashController::trashItems(const std::vector<luciole::DirectoryEntry>& tar
     sources.push_back(target.location());
   }
   const auto job = m_page.jobs().create<luciole::TrashService>();
-  if (!job->service<luciole::TrashService>().prepare(
-          *m_page.browser().model().snapshot().location, std::move(sources)
-      )) {
+  if (!job->service<luciole::TrashService>().prepare(std::move(sources))) {
     m_page.actionError("Another Trash operation is still finishing.");
   }
 }
@@ -68,7 +66,9 @@ void TrashController::restoreChanged(OperationJob& job) {
       return std::ranges::count(results, outcome, &luciole::RestoreResult::outcome);
     };
     const auto restored = count(luciole::RestoreOutcome::Restored);
-    std::string message = std::format("{} item{} restored", restored, restored == 1 ? "" : "s");
+    std::string message = std::format(
+        "{} item{} {}", restored, restored == 1 ? "" : "s", restore.moving() ? "moved out of Trash" : "restored"
+    );
     for (const auto& [outcome, label] :
          {std::pair{luciole::RestoreOutcome::Skipped, "skipped"}, std::pair{luciole::RestoreOutcome::Failed, "failed"},
           std::pair{luciole::RestoreOutcome::Cancelled, "cancelled"},

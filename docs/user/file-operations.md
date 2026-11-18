@@ -102,11 +102,13 @@ An undone created document's original data can continue using disk space while i
 
 You can drag native files and folders onto Trash in Places, including from another Luciole window or an application offering a move-capable file list. The drop moves the items to Trash and appears in File Operations. Copy-only offers, Ctrl-copy, Alt action choices, remote files and deferred archive extraction are rejected. A failed move never falls back to permanent deletion.
 
-Delete moves native selections to Trash. A failed trash operation does not silently become permanent deletion. The full Trash interface requires the system's GIO/GVfs provider and a session D-Bus connection, including browsing, restoration and Empty Trash. See the [required Trash runtime](../../PACKAGING.md#gvfs-and-trash) for packaging requirements.
+Delete or Move to Trash moves selected native items to Trash, including search results from different containing folders. Only the selected items are moved; the search stays active and refreshes after the operation. A failed trash operation does not silently become permanent deletion. The full Trash interface requires the system's GIO/GVfs provider and a session D-Bus connection, including browsing, restoration and Empty Trash. See the [required Trash runtime](../../PACKAGING.md#gvfs-and-trash) for packaging requirements.
 
 Shift+Delete permanently removes selected native files or folders, including folder contents. It asks for confirmation by default. Turn off Settings → General → Confirm permanent deletion to delete selected items immediately, including items already in Trash. Empty Trash always asks for confirmation. Symbolic links are removed themselves, leaving their targets intact. Permanent deletion bypasses Trash and cannot be undone.
 
 In Trash, Restore returns selected items to their recorded original locations and asks about conflicts. Delete Permanently removes selected trashed items, using the Confirm permanent deletion preference. Empty Trash is available from the Trash sidebar row's context menu and by right-clicking the Trash folder background. It stays disabled when Trash is empty or unavailable; the sidebar briefly checks the provider when its menu opens. Hidden contents still count. Its confirmation includes the measured contents and size. Cancel starts with its normal appearance; Enter cancels until you explicitly focus another control. Permanent deletion is irreversible.
+
+To move top-level items out of Trash to another local folder, drag them onto a folder or a destination in Places, or use Cut (Ctrl+X) and Paste (Ctrl+V). The original folder can be missing. File Operations reports the move and asks about existing names. Keep Both or Skip is available for folders; folder merging and replacement are unavailable. These moves use the Trash provider within the same filesystem. Remote destinations, moves across filesystems, Copy/Link actions and moving individual children inside a trashed folder remain unsupported. Cancellation stops remaining moves and retains completed effects. File Operations reports failures or unconfirmed outcomes. Trash moves have no Undo record.
 
 ## Archives
 
@@ -118,7 +120,7 @@ Opening and extracting archives validate members and enforce resource limits. An
 
 ## Properties and permissions
 
-Properties (Alt+Return) shows available file/media facts. Images can include pixel dimensions, videos can include codecs and duration, and PDFs can include page information. Installed providers determine which facts are available.
+Properties (Alt+Return) shows available file/media facts. Hold Alt while clicking an item to open its Properties: use a single click with single-click opening enabled, or a double-click with double-click opening enabled. This works in List, Grid and Columns; Alt-drag still offers the transfer action menu. Images can include pixel dimensions, videos can include codecs and duration, and PDFs can include page information. Installed providers determine which facts are available.
 
 For folders, Properties starts a separate cancellable recursive count/size calculation. Ordinary selection and the side preview do not traverse folders to calculate totals. Recursive totals are currently unavailable for non-native locations and Trash.
 

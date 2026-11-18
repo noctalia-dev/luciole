@@ -105,7 +105,7 @@ namespace luciole {
     static std::size_t sourceSlot(const std::vector<std::uint32_t>& slots, const DirectoryEntries& entries, EntryId id);
 
     void prepareSortKeys();
-    void rebuildProjection();
+    void rebuildProjection(bool resort = true);
     void reconcileSelection();
     void notify() const;
     bool canSelect() const;
@@ -116,7 +116,8 @@ namespace luciole {
     struct SortItem {
       EntryId id;
       std::uint32_t source;
-      FileType type;
+      bool directory; // A folder or a link to one, for Folders first.
+      bool hidden;
       const Presentation* presentation;
       const DirectoryEntry* entry;
     };
@@ -137,6 +138,8 @@ namespace luciole {
     // Indexed like m_snapshot.entries while a text sort field is prepared; points into m_alternateSortKeys.
     std::vector<const std::string*> m_alternateKeys;
     std::optional<SortField> m_preparedSortField;
+    std::vector<std::uint32_t> m_sortedSources;
+    FilterOptions m_sortedFilter;
     std::vector<EntryId> m_rows;
     std::unordered_map<EntryId, EntryId> m_treeParents;
     // Visible row of each source entry, kNoRow when filtered out.

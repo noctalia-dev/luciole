@@ -35,7 +35,12 @@ namespace luciole {
   public:
     // Optional consumer-owned IDs allow several immutable sessions to share one projection.
     using IdResolver = std::function<std::uint64_t(const DirectoryEntry&)>;
-    explicit DirectorySession(std::size_t entryLimit = 0, IdResolver resolveId = {});
+    // Whether the link at a local path leads to a folder. It runs on a worker thread and may block.
+    using LinkTargetCheck = std::function<bool(const std::string& path)>;
+    // An empty linksToDirectory asks the filesystem.
+    explicit DirectorySession(
+        std::size_t entryLimit = 0, IdResolver resolveId = {}, LinkTargetCheck linksToDirectory = {}
+    );
     ~DirectorySession();
     DirectorySession(const DirectorySession&) = delete;
     DirectorySession& operator=(const DirectorySession&) = delete;

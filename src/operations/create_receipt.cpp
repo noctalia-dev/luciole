@@ -5,8 +5,10 @@
 #include "fs/posix_fd.h"
 #include "operations/create_service.h"
 #include "operations/creation_stage.h"
+#include "operations/history_mount.h"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <fcntl.h>
 #include <linux/fs.h>
@@ -20,7 +22,12 @@ struct luciole::CreationIdentity {
   bool removed;
 };
 
+bool luciole::CreateReceipt::usesMount(const HistoryMount& mount) const {
+  return mount.contains(m_identity->parent.get()) || mount.contains(m_identity->item.get());
+}
+
 namespace {
+  std::atomic<std::size_t> pendingCreateCleanup = 0;
   using luciole::FileErrorKind;
   struct stat namedStamp(int parent, const std::string& name) {
     struct stat stamp{};
@@ -238,6 +245,8 @@ namespace {
   }
 } // namespace
 
+bool luciole::CreateReceipt::cleanupPending() { return pendingCreateCleanup != 0; }
+
 luciole::CreateReceipt::CreateReceipt(
     CreateKind kind, Location destination, std::shared_ptr<const CreationIdentity> identity
 )
@@ -261,7 +270,11 @@ luciole::CreateReceipt::capture(CreateKind kind, const Location& destination, in
   );
   std::shared_ptr<const CreationIdentity> proof(identity.release(), [](const CreationIdentity* retired) {
     // Final close can free a large unlinked document; keep that filesystem work off the UI thread.
-    detail::runInThread([owned = std::unique_ptr<const CreationIdentity>(retired)] mutable { owned.reset(); }, [] {});
+    ++pendingCreateCleanup;
+    detail::runInThread(
+        [owned = std::unique_ptr<const CreationIdentity>(retired)] mutable { owned.reset(); },
+        [] { --pendingCreateCleanup; }
+    );
   });
   return std::make_shared<const CreateReceipt>(kind, destination, std::move(proof));
 }

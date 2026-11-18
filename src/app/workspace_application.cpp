@@ -17,6 +17,7 @@
 #include "render/render_context.h"
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
+#include "system/icon_resolver.h"
 #include "ui/builders.h"
 #include "ui/controls/acl_editor.h"
 #include "ui/controls/bulk_acl_editor.h"
@@ -59,7 +60,7 @@ WorkspaceApplication::WorkspaceApplication(
   m_preferences.setChangedCallback([this](const std::string& error) {
     if (m_preferences.settings()) {
       m_defaults = m_preferences.settings()->browser;
-      // Controls built from now on (menus, dialogs, tooltips) take the new rounding; open windows on restart.
+      // Live-radius bindings update open widgets; controls built afterwards pick it up directly.
       Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
     }
     for (auto& [id, page] : m_pages) {
@@ -151,6 +152,12 @@ WorkspaceApplication::WorkspaceApplication(
     for (auto& [id, page] : m_pages) {
       (void)id;
       page->iconsReady();
+    }
+  });
+  updateIconColorScheme();
+  m_paletteConnection = paletteChanged().connect([this] {
+    if (updateIconColorScheme()) {
+      iconsChanged();
     }
   });
   m_thumbnails.setOptions(m_defaults.thumbnails);
@@ -337,11 +344,34 @@ void WorkspaceApplication::outputChanged(wl_output* output) {
 }
 
 void WorkspaceApplication::iconsChanged() {
+  updateIconColorScheme();
   m_icons.invalidate();
   for (auto& [id, page] : m_pages) {
     (void)id;
     page->iconThemeChanged();
   }
+}
+
+void WorkspaceApplication::fontChanged() {
+  for (auto& [id, page] : m_pages) {
+    (void)id;
+    page->fontChanged();
+  }
+  for (auto& [id, host] : m_hosts) {
+    (void)id;
+    host->surface.requestLayout();
+  }
+}
+
+bool WorkspaceApplication::updateIconColorScheme() {
+  auto roots = IconResolver::colorSchemeThemeRoots();
+  if (roots == m_iconColorSchemeRoots && (roots.empty() || palette == m_iconColorSchemePalette)) {
+    return false;
+  }
+  m_icons.setColorScheme(roots, iconColorSchemeStylesheet(palette));
+  m_iconColorSchemeRoots = std::move(roots);
+  m_iconColorSchemePalette = palette;
+  return true;
 }
 
 bool WorkspaceApplication::running() {
@@ -554,6 +584,10 @@ void WorkspaceApplication::keyboard(const KeyboardEvent& event) {
       }
       return;
     }
+    if (event.sym == XKB_KEY_Escape && host.stripMove.pending()) {
+      host.stripMove.cancel();
+      return;
+    }
     if (event.sym == XKB_KEY_Escape && host.pressedTab) {
       host.pressedTab.reset();
       host.tabDrag = false;
@@ -667,6 +701,9 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     }
     return;
   }
+  if (stripMovePointer(*host, event)) {
+    return;
+  }
   if (host->pressedTab) {
     if (event.type == PointerEvent::Type::Motion) {
       host->tabDrag |= std::abs(x - host->pressX) > 8 || std::abs(y - host->pressY) > 8;
@@ -728,7 +765,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
       return;
     }
   }
-  if (host->strip && host->strip->containsScenePoint(x, y)) {
+  if (host->strip && host->strip->visible() && host->strip->containsScenePoint(x, y)) {
     host->pointerPage = 0;
     for (const auto& [tab, button] : host->buttons) {
       if (host->tabScroll->containsScenePoint(x, y)
@@ -764,7 +801,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
         child |= x >= bx && x <= bx + button->width();
       }
       if (!child) {
-        host->surface.beginMove(event.serial);
+        host->stripMove.press(event.serial, x, y);
         return;
       }
     }
@@ -1309,6 +1346,24 @@ void WorkspaceApplication::saveWindows(std::vector<luciole::SavedWindow> windows
   }
 }
 
+bool WorkspaceApplication::stripMovePointer(Host& host, const PointerEvent& event) {
+  if (!host.stripMove.pending()) {
+    return false;
+  }
+  if (event.type == PointerEvent::Type::Motion) {
+    if (const auto serial = host.stripMove.motion(static_cast<float>(event.sx), static_cast<float>(event.sy))) {
+      host.surface.beginMove(*serial);
+    }
+    return true;
+  }
+  if (event.type == PointerEvent::Type::Button || event.type == PointerEvent::Type::Leave) {
+    host.stripMove.cancel();
+    // The press never reached the strip's controls, so neither does its release.
+    return event.type == PointerEvent::Type::Button && !event.pressed;
+  }
+  return false;
+}
+
 void WorkspaceApplication::tabMenu(Host& host, luciole::TabId tab, float x, float y) {
   auto& page = *m_pages.at(m_model.windows().at(host.id).active);
   std::vector<ContextMenuControlEntry> entries{
@@ -1432,7 +1487,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
         ui::button(
             {.out = &close,
              .glyph = "x",
-             .glyphSize = 14.0F,
+             .glyphSize = Style::baseGlyphSize,
              .controlHeight = 24.0F,
              .variant = ButtonVariant::Ghost,
              .customPalette = closeTabPalette(foreground),
@@ -1451,6 +1506,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
       ui::button(
           {.out = &host.newTabButton,
            .glyph = "plus",
+           .glyphSize = Style::baseGlyphSize,
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Ghost,
            .tooltip = "New tab (Ctrl+T)",
@@ -1472,6 +1528,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
       ui::button(
           {.out = &host.splitButton,
            .glyph = "layout-columns",
+           .glyphSize = Style::baseGlyphSize,
            .controlHeight = Style::controlHeightSm,
            .selected = window.secondary.has_value(),
            .variant = ButtonVariant::Ghost,
@@ -1485,6 +1542,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
     strip->addChild(
         ui::button(
             {.glyph = "minus",
+             .glyphSize = Style::baseGlyphSize,
              .controlHeight = Style::controlHeightSm,
              .variant = ButtonVariant::Ghost,
              .tooltip = "Minimize window",
@@ -1494,6 +1552,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
     strip->addChild(
         ui::button(
             {.glyph = "square",
+             .glyphSize = Style::baseGlyphSize,
              .controlHeight = Style::controlHeightSm,
              .variant = ButtonVariant::Ghost,
              .tooltip = "Toggle maximized",
@@ -1503,6 +1562,7 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
     strip->addChild(
         ui::button(
             {.glyph = "x",
+             .glyphSize = Style::baseGlyphSize,
              .controlHeight = Style::controlHeightSm,
              .variant = ButtonVariant::Ghost,
              .tooltip = "Close window (Ctrl+Shift+W)",

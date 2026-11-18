@@ -7,6 +7,7 @@
 #include "browser/location_presentation.h"
 #include "core/ui_phase.h"
 #include "fs/gio_ptr.h"
+#include "operations/trash_item.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/browser/file_error_text.h"
@@ -28,6 +29,13 @@ namespace {
     return result.outcome == luciole::TransferOutcome::Moved
         || result.outcome == luciole::TransferOutcome::Copied
         || result.outcome == luciole::TransferOutcome::Linked;
+  }
+  template <typename Callback> auto withTransferResults(const OperationJob& job, Callback callback) {
+    if (job.kind() != JobKind::Restore) {
+      return callback(job.service<luciole::TransferService>().results());
+    }
+    const auto results = job.service<luciole::RestoreService>().transferResults();
+    return callback(results);
   }
 } // namespace
 
@@ -104,7 +112,7 @@ void TransferController::transferTo(
 void TransferController::transfer(
     std::vector<luciole::Location> sources, const luciole::Location& destination, luciole::TransferAction action
 ) {
-  (void)start({std::move(sources), destination, action});
+  (void)startPayloadTransfer({std::move(sources), false}, destination, action);
 }
 
 std::shared_ptr<OperationJob> TransferController::start(luciole::TransferRequest request) {
@@ -117,7 +125,7 @@ std::shared_ptr<OperationJob> TransferController::start(luciole::TransferRequest
 
 void TransferController::finishMove(OperationJob& job, luciole::ClipboardFiles selection) {
   job.whenIdle([&clipboard = m_page.clipboard(), selection = std::move(selection)](OperationJob& done) {
-    clipboard.finishMove(selection, done.service<luciole::TransferService>().results());
+    withTransferResults(done, [&](const auto& results) { clipboard.finishMove(selection, results); });
   });
 }
 
@@ -203,8 +211,9 @@ void TransferController::resolvedDrop(
     return;
   }
   job->whenIdle([finish = std::move(finish)](OperationJob& done) {
-    const auto& results = done.service<luciole::TransferService>().results();
-    finish(!results.empty() && std::ranges::all_of(results, arrived));
+    finish(withTransferResults(done, [](const auto& results) {
+      return !results.empty() && std::ranges::all_of(results, arrived);
+    }));
   });
 }
 
@@ -554,6 +563,22 @@ void TransferController::retry(luciole::JobId target) {
 std::shared_ptr<OperationJob> TransferController::startPayloadTransfer(
     luciole::FilePayload payload, const luciole::Location& destination, luciole::TransferAction action
 ) {
+  if (std::ranges::any_of(payload.locations, [](const auto& location) { return location.isTrash(); })) {
+    if (action != luciole::TransferAction::Move
+        || !destination.isNative()
+        || destination.isTrash()
+        || !std::ranges::all_of(payload.locations, luciole::isTopLevelTrashItem)) {
+      m_page.actionError("Move items directly from Trash into a local folder.");
+      return nullptr;
+    }
+    auto job = m_page.jobs().create<luciole::RestoreService>();
+    if (!job->service<luciole::RestoreService>().move(std::move(payload.locations), destination)) {
+      m_page.actionError("Could not start moving the items out of Trash.");
+      return nullptr;
+    }
+    m_page.setActionMessage({});
+    return job;
+  }
   if (payload.locations.empty()
       || !luciole::transferLocationSupported(destination)
       || std::ranges::any_of(payload.locations, [](const auto& location) {

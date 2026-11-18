@@ -6,6 +6,7 @@
 #include "fs/gio_interop.h"
 #include "test_check.h"
 #include "ui/browser/action_shortcuts.h"
+#include "ui/browser/file_view.h"
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,117 @@ namespace {
         .error = {},
         .monitorError = {}
     };
+  }
+  void testPointerActivation() {
+    luciole::FileIconCache icons;
+    luciole::ThumbnailService thumbnails;
+    for (const auto mode : {luciole::ViewMode::List, luciole::ViewMode::Grid, luciole::ViewMode::Miller}) {
+      for (const auto policy : {luciole::ActivationMode::SingleClick, luciole::ActivationMode::DoubleClick}) {
+        luciole::BrowserController browser({}, false);
+        auto& model = browser.model();
+        model.applySnapshot(snapshot());
+        std::uint32_t modifiers = KeyMod::Alt;
+        luciole::FileViewAdapter adapter(
+            browser, icons, thumbnails, mode, [&] { return modifiers; }, [] { return true; }
+        );
+        adapter.setActivationMode(policy);
+        std::vector<luciole::EntryId> activated, dragged;
+        adapter.setActivateCallback([&](luciole::EntryId id) { activated.push_back(id); });
+        adapter.setDragCallback([&](const auto& ids) { dragged = ids; }, [] {});
+        const auto index = [&](luciole::EntryId id) {
+          const auto found = std::ranges::find(model.rows(), id);
+          TEST_CHECK(found != model.rows().end());
+          return static_cast<std::size_t>(found - model.rows().begin());
+        };
+        const auto press = [&](luciole::EntryId id) {
+          TEST_CHECK(adapter.onPointerPress(index(id), 100, 15, 300, 36));
+        };
+        const auto release = [&](std::optional<std::size_t> row) {
+          const auto result = adapter.onPointerRelease(row);
+          if (result.activateIndex) {
+            adapter.onActivate(*result.activateIndex);
+          }
+        };
+        const auto click = [&](luciole::EntryId id) {
+          press(id);
+          release(index(id));
+        };
+        modifiers = 0;
+        click(1);
+        if (policy == luciole::ActivationMode::DoubleClick) {
+          TEST_CHECK(activated.empty());
+          click(1);
+        }
+        TEST_CHECK(activated == std::vector<luciole::EntryId>{1});
+        modifiers = KeyMod::Alt;
+        for (const auto id : {luciole::EntryId{1}, luciole::EntryId{6}}) {
+          adapter.onPointerCancel();
+          activated.clear();
+          model.select(2);
+          press(id);
+          if (mode == luciole::ViewMode::Miller) {
+            TEST_CHECK(model.selection().selected.contains(2) && !model.selection().selected.contains(id));
+          }
+          release(index(id));
+          if (policy == luciole::ActivationMode::DoubleClick) {
+            TEST_CHECK(activated.empty());
+            click(id);
+          }
+          TEST_CHECK(activated == std::vector<luciole::EntryId>{id});
+        }
+        adapter.onPointerCancel();
+        activated.clear();
+        model.select(1);
+        model.select(2, luciole::SelectionMode::Toggle);
+        press(1);
+        TEST_CHECK(!adapter.onPointerDrag(index(1), 130, 15, 300, 36));
+        TEST_CHECK(
+            dragged.size() == 2 && model.selection().selected.contains(1) && model.selection().selected.contains(2)
+        );
+        release(index(1));
+        TEST_CHECK(activated.empty());
+        adapter.onPointerCancel();
+        press(6);
+        TEST_CHECK(!adapter.onPointerDrag(index(6), 130, 15, 300, 36));
+        TEST_CHECK(dragged == std::vector<luciole::EntryId>{6});
+        release(index(6));
+        TEST_CHECK(activated.empty());
+        adapter.onPointerCancel();
+        press(1);
+        release(index(2));
+        TEST_CHECK(activated.empty());
+        press(1);
+        adapter.onPointerCancel();
+        release(index(1));
+        TEST_CHECK(activated.empty());
+        for (const auto chord :
+             {KeyMod::Ctrl | KeyMod::Alt, KeyMod::Shift | KeyMod::Alt, KeyMod::Super | KeyMod::Alt}) {
+          modifiers = chord;
+          click(1);
+          click(1);
+          TEST_CHECK(activated.empty());
+        }
+        adapter.onPointerCancel();
+        adapter.setActivationMode(luciole::ActivationMode::DoubleClick);
+        modifiers = 0;
+        click(1);
+        modifiers = KeyMod::Alt;
+        click(1);
+        TEST_CHECK(activated.empty());
+        modifiers = 0;
+        click(1);
+        TEST_CHECK(activated.empty());
+        modifiers = KeyMod::Alt;
+        press(1);
+        modifiers = 0;
+        release(index(1));
+        TEST_CHECK(activated.empty());
+        modifiers = KeyMod::Alt;
+        click(1);
+        click(1);
+        TEST_CHECK(activated == std::vector<luciole::EntryId>{1});
+      }
+    }
   }
   void testPendingActionFacts() {
     luciole::DirectoryModel model;
@@ -246,11 +358,17 @@ namespace {
     model.applySnapshot(data);
     model.select(1);
     luciole::ActionContext context{.model = model, .context = 33, .query = {}, .pinned = {}};
+    context.clipboardAvailable = true;
     const auto request = R::capture(context);
     TEST_CHECK(
         R::state(A::Restore, context, request).enabled && R::state(A::DeletePermanently, context, request).enabled
     );
+    test::editEntries(data, [&](auto& entries) { entries[0].access.rename = false; });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(R::state(A::CutFiles, context, request).enabled && !R::state(A::CopyFiles, context, request).enabled);
     context.operationsBusy = true;
+    TEST_CHECK(!R::state(A::CutFiles, context, request).enabled);
     TEST_CHECK(
         !R::state(A::Restore, context, request).enabled && !R::state(A::DeletePermanently, context, request).enabled
     );
@@ -261,10 +379,12 @@ namespace {
     TEST_CHECK(
         !R::state(A::Restore, context, request).enabled && R::state(A::DeletePermanently, context, request).enabled
     );
+    TEST_CHECK(R::state(A::CutFiles, context, request).enabled);
     test::editEntries(data, [&](auto& entries) { entries[0].access.remove = false; });
     ++data.generation;
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, request).enabled);
+    TEST_CHECK(!R::state(A::CutFiles, context, request).enabled);
     test::editEntries(data, [&](auto& entries) { entries[0].access.remove = true; });
     data.location = luciole::Location::fromUri("trash:///folder");
     test::editEntries(data, [&](auto& entries) {
@@ -289,6 +409,12 @@ namespace {
     ++data.generation;
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
+  }
+  void testPermanentDeletionMenuEntries() {
+    TEST_CHECK((luciole::itemMenuDeletionActions(false, false) == std::vector{A::Trash}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(false, true) == std::vector{A::Trash, A::DeletePermanently}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(true, false) == std::vector{A::Restore, A::DeletePermanently}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(true, true) == std::vector{A::Restore, A::DeletePermanently}));
   }
   void testEmptyTrashAvailability() {
     luciole::DirectoryModel model;
@@ -562,6 +688,62 @@ namespace {
     TEST_CHECK(!luciole::isSupportedArchive(luciole::Location::fromPath("/tmp/plain.zst"), "application/zstd"));
     TEST_CHECK(!luciole::isSupportedArchive(luciole::Location::fromPath("/tmp/plain.xz"), "application/x-xz"));
   }
+  void testSearchTrashActions() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    data.entries = {entry(1, "match.txt"), entry(2, "match.txt")};
+    test::editEntries(data, [](auto& entries) {
+      entries[0].place = luciole::Location::fromPath("/tmp/action-fixture/first/match.txt");
+      entries[1].place = luciole::Location::fromPath("/tmp/action-fixture/second/match.txt");
+    });
+    model.applySnapshot(data);
+    model.selectAll();
+    luciole::ActionContext context{.model = model, .context = 79, .query = "match", .pinned = {}};
+    const auto request = R::capture(context);
+    TEST_CHECK(request.targets.size() == 2 && R::state(A::Trash, context, request).enabled);
+    TEST_CHECK(R::state(A::DeletePermanently, context, request).enabled);
+    context.operationsBusy = true;
+    TEST_CHECK(!R::state(A::Trash, context, request).enabled);
+    context.operationsBusy = false;
+    context.query = "different";
+    TEST_CHECK(!R::state(A::Trash, context, request).enabled);
+    context.query = "match";
+    for (const auto field : {0, 1, 2, 3, 4}) {
+      auto denied = data;
+      ++denied.generation;
+      test::editEntries(denied, [field](auto& entries) {
+        if (field == 0) {
+          entries[1].access.trash = false;
+        }
+        if (field == 1) {
+          entries[1].metadataPending = true;
+        }
+        if (field == 2) {
+          entries[1].metadataFailed = true;
+        }
+        if (field == 3) {
+          entries[1].place = luciole::Location::fromUri("sftp://example.invalid/match.txt");
+        }
+        if (field == 4) {
+          entries[1].place = luciole::Location::fromUri("trash:///match.txt");
+        }
+      });
+      model.applySnapshot(denied);
+      TEST_CHECK(!R::state(A::Trash, context, R::capture(context)).enabled);
+      data.generation = denied.generation + 1;
+      model.applySnapshot(data);
+      model.selectAll();
+    }
+    test::editEntries(data, [](auto& entries) {
+      entries[1].place = luciole::Location::fromPath("/tmp/action-fixture/second/replaced.txt");
+    });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::Trash, context, request).enabled);
+    model.clearSelection();
+    TEST_CHECK(!R::state(A::Trash, context, R::capture(context)).enabled);
+  }
+
   void testCapabilitiesAndTargets() {
     luciole::DirectoryModel model;
     auto data = snapshot();
@@ -618,7 +800,7 @@ namespace {
     TEST_CHECK(!R::state(A::Open, c, request).enabled);
     auto search = R::capture(c);
     search.targets = request.targets;
-    TEST_CHECK(!R::state(A::Trash, c, search).enabled && R::state(A::Rename, c, search).enabled);
+    TEST_CHECK(R::state(A::Trash, c, search).enabled && R::state(A::Rename, c, search).enabled);
     c.query = {};
     ++c.context;
     TEST_CHECK(!R::state(A::Open, c, request).enabled);
@@ -823,18 +1005,21 @@ int main() {
   try {
     testActionTable();
     testShortcuts();
+    testPointerActivation();
     testTerminalActions();
     testArchiveActions();
     testSplitArchiveActions();
     testCompressedArchiveActions();
     testExecutionActions();
     testTrashActions();
+    testPermanentDeletionMenuEntries();
     testEmptyTrashAvailability();
     testLinkActions();
     testFileClipboardActions();
     testPendingActionFacts();
     testPreviewActions();
     testCapabilitiesAndTargets();
+    testSearchTrashActions();
     testRenameHistoryActions();
     testBulkSelection();
     testChooserGate();

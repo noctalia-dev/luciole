@@ -7,6 +7,7 @@
 
 namespace luciole {
   struct RenameIdentity;
+  class HistoryMount;
   // Immutable proof of one completed rename. Worker-only capture/reversal; no traversal or overwrite.
   class RenameReceipt {
   public:
@@ -17,6 +18,7 @@ namespace luciole {
     capture(const Location& source, const Location& destination, int parent, int item);
     // Returns the inverse receipt. A null result means the rename committed but could not arm another reversal.
     std::shared_ptr<const RenameReceipt> reverse(const CancelToken& token) const;
+    bool usesMount(const HistoryMount& mount) const;
 
   private:
     Location m_source, m_destination;

@@ -33,6 +33,8 @@ namespace luciole {
     bool busy() const;
     bool canRename() const;
     const RenameSnapshot& snapshot() const;
+    // Hand optional history to its application owner without retaining descriptors in the report.
+    std::shared_ptr<const RenameReceipt> takeReceipt();
     void setChangedCallback(std::function<void()> callback);
 
   private:

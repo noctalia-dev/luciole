@@ -5,6 +5,7 @@
 #include "fs/posix_fd.h"
 #include "operations/copy_history_tree.h"
 #include "operations/creation_stage.h"
+#include "operations/history_mount.h"
 #include "operations/history_revisions.h"
 #include "operations/provider_copy_receipt.h"
 #include "operations/transfer_copy.h"
@@ -175,6 +176,21 @@ struct luciole::CopyStorage {
     }
   }
 };
+
+bool luciole::CopyEffect::usesMount(const HistoryMount& mount) const {
+  const auto& storage = *m_storage;
+  return mount.contains(storage.parent.get())
+      || mount.contains(storage.item.get())
+      || (storage.stage
+          && (mount.contains(storage.stage->parent())
+              || mount.contains(storage.stage->fd())
+              || mount.contains(storage.stage->item())))
+      || (m_previous && m_previous->usesMount(mount));
+}
+
+bool luciole::CopyReceipt::usesMount(const HistoryMount& mount) const {
+  return std::ranges::any_of(m_effects, [&](const auto& effect) { return effect->usesMount(mount); });
+}
 
 luciole::CopyEffect::CopyEffect(
     Location destination, std::shared_ptr<CopyStorage> storage, std::shared_ptr<const transfer::Tree> tree, bool hidden,

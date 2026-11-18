@@ -21,6 +21,43 @@ namespace {
     choice.app = std::shared_ptr<GAppInfo>(G_APP_INFO(g_object_ref(app)), g_object_unref);
     return choice;
   }
+
+  // A native document uses its MIME association, independently of any file:// scheme handler.
+  // Both content sniffing and desktop association lookup stay on the worker.
+  void queryDefaultHandler(GFile* file, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer data) {
+    const luciole::GioPtr<GTask> task(g_task_new(file, cancellable, callback, data));
+    g_task_run_in_thread(task.get(), [](GTask* task, gpointer source, gpointer, GCancellable* cancellable) {
+      auto* file = G_FILE(source);
+      GError* error = nullptr;
+      GAppInfo* application = nullptr;
+      if (g_file_is_native(file)) {
+        const luciole::GioPtr<GFileInfo> info(g_file_query_info(
+            file, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
+            G_FILE_QUERY_INFO_NONE, cancellable, &error
+        ));
+        if (info) {
+          const char* type = g_file_info_get_content_type(info.get());
+          if (!type) {
+            type = g_file_info_get_attribute_string(info.get(), G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
+          }
+          if (type) {
+            application = g_app_info_get_default_for_type(type, false);
+          }
+        }
+      } else {
+        application = g_file_query_default_handler(file, cancellable, &error);
+      }
+      if (error) {
+        g_task_return_error(task, error);
+      } else if (application) {
+        g_task_return_pointer(task, application, g_object_unref);
+      } else {
+        g_task_return_new_error(
+            task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "No application is associated with this file."
+        );
+      }
+    });
+  }
 } // namespace
 
 struct luciole::FileLauncher::State {
@@ -359,14 +396,14 @@ void luciole::FileLauncher::open(const Location& location) {
         static_cast<double>(g_get_monotonic_time() - started) / 1000.0
     );
     const auto file = gioFile(location);
-    g_file_query_default_handler_async(
-        file.get(), G_PRIORITY_DEFAULT, state->cancellable.get(),
-        [](GObject* source, GAsyncResult* result, gpointer data) {
+    queryDefaultHandler(
+        file.get(), state->cancellable.get(),
+        [](GObject*, GAsyncResult* result, gpointer data) {
           const std::unique_ptr<Request> request(static_cast<Request*>(data));
           const auto& state = request->state;
           --state->active;
           GError* raw = nullptr;
-          const GioPtr<GAppInfo> application(g_file_query_default_handler_finish(G_FILE(source), result, &raw));
+          const GioPtr<GAppInfo> application(static_cast<GAppInfo*>(g_task_propagate_pointer(G_TASK(result), &raw)));
           const GErrorPtr error(raw);
           if (g_cancellable_is_cancelled(state->cancellable.get())) {
             kLog.debug("request {}: GIO completion (cancelled handler lookup)", request->serial);
@@ -424,15 +461,15 @@ void luciole::FileLauncher::open(const std::vector<Location>& locations) {
   for (std::size_t index = 0; index < locations.size(); ++index) {
     auto* request = new Request{batch, index};
     const auto file = gioFile(locations[index]);
-    g_file_query_default_handler_async(
-        file.get(), G_PRIORITY_DEFAULT, m_state->cancellable.get(),
-        [](GObject* source, GAsyncResult* result, gpointer data) {
+    queryDefaultHandler(
+        file.get(), m_state->cancellable.get(),
+        [](GObject*, GAsyncResult* result, gpointer data) {
           const std::unique_ptr<Request> request(static_cast<Request*>(data));
           const auto& batch = request->batch;
           const auto& state = batch->state;
           --state->active;
           GError* raw = nullptr;
-          const GioPtr<GAppInfo> app(g_file_query_default_handler_finish(G_FILE(source), result, &raw));
+          const GioPtr<GAppInfo> app(static_cast<GAppInfo*>(g_task_propagate_pointer(G_TASK(result), &raw)));
           const GErrorPtr error(raw);
           if (!g_cancellable_is_cancelled(state->cancellable.get())) {
             if (app) {

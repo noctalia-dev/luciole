@@ -5,6 +5,7 @@
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
+#include "operations/history_mount.h"
 
 #include <algorithm>
 #include <array>
@@ -409,6 +410,11 @@ struct luciole::BatchRenameReceipt {
   std::shared_ptr<const std::vector<BatchRenameRow>> rows;
 };
 
+bool luciole::batchRenameUsesMount(const BatchRenameReceipt& receipt, const HistoryMount& mount) {
+  return mount.contains(receipt.plan->fd.get())
+      || std::ranges::any_of(receipt.plan->items, [&](const auto& item) { return mount.contains(item->fd.get()); });
+}
+
 namespace {
   using Revisions = std::map<std::pair<dev_t, ino_t>, std::shared_ptr<struct stat>>;
 
@@ -676,6 +682,9 @@ bool luciole::BatchRenameService::applying() const {
 }
 std::size_t luciole::BatchRenameService::completed() const { return m_state->completed.load(); }
 const luciole::BatchRenameSnapshot& luciole::BatchRenameService::snapshot() const { return m_state->snapshot; }
+std::shared_ptr<const luciole::BatchRenameReceipt> luciole::BatchRenameService::takeReceipt() {
+  return std::move(m_state->snapshot.receipt);
+}
 void luciole::BatchRenameService::setChangedCallback(std::function<void()> callback) {
   m_state->changed = std::move(callback);
 }

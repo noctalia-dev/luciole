@@ -1,5 +1,6 @@
 #include "operations/copied_move_receipt.h"
 
+#include "operations/history_mount.h"
 #include "operations/history_revisions.h"
 #include "operations/transfer_staging.h"
 
@@ -109,6 +110,15 @@ struct luciole::CopiedMoveReceipt::State {
   std::vector<std::shared_ptr<const CopyEffect>> restored;
   std::uint64_t generation = 0;
 };
+
+bool luciole::CopiedMoveReceipt::usesMount(const HistoryMount& mount) const {
+  return (m_state->sources && m_state->sources->usesMount(mount))
+      || (m_state->destinations && m_state->destinations->usesMount(mount))
+      || (m_state->native && m_state->native->usesMount(mount))
+      || (m_state->root && mount.contains(m_state->root->parent.get()))
+      || std::ranges::any_of(m_state->origins, [&](const auto& origin) { return mount.contains(origin.parent->get()); })
+      || std::ranges::any_of(m_state->restored, [&](const auto& effect) { return effect->usesMount(mount); });
+}
 luciole::CopiedMoveReceipt::CopiedMoveReceipt(std::shared_ptr<State> state, std::uint64_t generation, bool undone)
     : m_state(std::move(state)), m_generation(generation), m_undone(undone) {}
 std::shared_ptr<const luciole::MoveReceipt> luciole::CopiedMoveReceipt::capture(

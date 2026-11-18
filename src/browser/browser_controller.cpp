@@ -633,6 +633,12 @@ void luciole::BrowserController::publish(DirectorySnapshot snapshot) {
   }
 }
 
+void luciole::BrowserController::releaseLocation(const Location& root) {
+  if (m_tree) {
+    m_tree->releaseLocation(root);
+  }
+}
+
 void luciole::BrowserController::setExpandableFolders(bool enabled) {
   if (enabled == expandableFolders()) {
     return;

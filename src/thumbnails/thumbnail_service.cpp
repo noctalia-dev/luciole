@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
+#include "fs/native_listing.h"
 #include "fs/posix_fd.h"
 #include "thumbnails/thumbnail_codec.h"
 #include "thumbnails/thumbnail_provider.h"
@@ -29,9 +30,11 @@ namespace {
   }
   // Purpose is part of the identity: previews accept no smaller foreign thumbnail and take clean video frames.
   std::string cacheKey(const luciole::DirectoryEntry& source, int side, luciole::ThumbnailPurpose purpose) {
+    const auto identity = source.identity();
     return std::format(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.id, source.etag().value_or(""),
-        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision), side,
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.etag().value_or(""),
+        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision),
+        identity ? identity->filesystem : "", identity ? identity->file : "", side,
         purpose == luciole::ThumbnailPurpose::Preview ? "preview" : "thumbnail"
     );
   }
@@ -65,8 +68,9 @@ namespace {
     bool decodeNeeded = false;
   };
   LoadResult load(
-      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options, GCancellable* cancel,
-      bool generate, luciole::ThumbnailPurpose purpose
+      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options,
+      const luciole::ThumbnailService::NetworkFilesystemCheck& networkFilesystem, GCancellable* cancel, bool generate,
+      luciole::ThumbnailPurpose purpose
   ) {
     using namespace luciole;
     LoadResult result;
@@ -86,15 +90,8 @@ namespace {
     if (g_cancellable_is_cancelled(cancel)) {
       return result;
     }
-    if (options.policy == ThumbnailPolicy::Local) {
-      const GioPtr<GFileInfo> filesystem(
-          g_file_query_filesystem_info(gioFile(location).get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE, cancel, nullptr)
-      );
-      if (!filesystem
-          || !g_file_info_has_attribute(filesystem.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)
-          || g_file_info_get_attribute_boolean(filesystem.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)) {
-        return result;
-      }
+    if (options.policy == ThumbnailPolicy::Local && networkFilesystem(*native)) {
+      return result;
     }
     const std::string mime(source.contentType.value_or(""));
     const bool media = mime.starts_with("video/") || mime.starts_with("audio/");
@@ -235,6 +232,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   };
   static constexpr std::size_t kWriteBudget = 64U * 1024U * 1024U;
   ThumbnailOptions options;
+  NetworkFilesystemCheck networkFilesystem;
   std::unordered_map<std::string, Item> cache;
   std::unordered_map<const FileIconImage*, Item*> leases;
   std::function<void()> changed;
@@ -247,7 +245,11 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   GSource* sweepTimer = nullptr;
   std::deque<ThumbnailCacheWrite> writes;
   GioPtr<GCancellable> writeCancel{g_cancellable_new()};
-  std::vector<GioPtr<GCancellable>> running;
+  struct Running {
+    GioPtr<GCancellable> cancel;
+    Location source;
+  };
+  std::vector<Running> running;
   void notify() {
     const auto callback = changed;
     if (alive && callback) {
@@ -263,7 +265,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   void retire() {
     ++epoch;
     for (const auto& cancel : running) {
-      g_cancellable_cancel(cancel.get());
+      g_cancellable_cancel(cancel.cancel.get());
     }
     for (const auto& [_, item] : cache) {
       g_cancellable_cancel(item.cancel.get());
@@ -452,7 +454,9 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     } else {
       ++probes;
     }
-    running.emplace_back(static_cast<GCancellable*>(g_object_ref(item.cancel.get())));
+    running.push_back(
+        {GioPtr<GCancellable>(static_cast<GCancellable*>(g_object_ref(item.cancel.get()))), item.source.location()}
+    );
     const GioPtr<GTask> task(g_task_new(
         nullptr, item.cancel.get(),
         [](GObject*, GAsyncResult* result, gpointer) {
@@ -468,7 +472,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
             --owner->probes;
           }
           std::erase_if(owner->running, [&](const auto& cancel) {
-            return cancel.get() == g_task_get_cancellable(task);
+            return cancel.cancel.get() == g_task_get_cancellable(task);
           });
           auto found = owner->cache.find(request->key);
           if (owner->alive
@@ -525,7 +529,10 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
       const auto& request = *static_cast<Request*>(data);
       auto result = std::make_unique<Result>();
       try {
-        result->loaded = load(request.source, request.side, request.options, cancel, request.generate, request.purpose);
+        result->loaded = load(
+            request.source, request.side, request.options, request.owner->networkFilesystem, cancel, request.generate,
+            request.purpose
+        );
       } catch (const std::exception& error) {
         result->error = error.what();
       }
@@ -562,7 +569,12 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   }
 };
 
-luciole::ThumbnailService::ThumbnailService() : m_state(std::make_shared<State>()) {}
+luciole::ThumbnailService::ThumbnailService()
+    : ThumbnailService([](const std::string& path) { return luciole::networkFilesystem(path); }) {}
+luciole::ThumbnailService::ThumbnailService(NetworkFilesystemCheck networkFilesystem)
+    : m_state(std::make_shared<State>()) {
+  m_state->networkFilesystem = std::move(networkFilesystem);
+}
 std::size_t luciole::ThumbnailService::decoders() {
   static const std::size_t count = std::clamp<std::size_t>(std::thread::hardware_concurrency() / 4, 2, 6);
   return count;
@@ -646,13 +658,11 @@ std::shared_ptr<const luciole::FileIconImage> luciole::ThumbnailService::prepare
   if (m_state->clearing || m_state->options.policy == ThumbnailPolicy::Never) {
     return {};
   }
-  const auto identity = source.identity();
   for (const int side : {kMaxPreviewImageSide, 1024, 512, 256, 128}) {
     for (const auto purpose : {ThumbnailPurpose::Preview, ThumbnailPurpose::Thumbnail}) {
       const auto found = m_state->cache.find(cacheKey(source, side, purpose));
       if (found != m_state->cache.end()
           && found->second.image->pixels
-          && found->second.source.identity() == identity
           && found->second.source.type == source.type
           && found->second.source.symlink == source.symlink
           && found->second.source.contentType == source.contentType) {
@@ -731,6 +741,32 @@ void luciole::ThumbnailService::setOptions(ThumbnailOptions options) {
   m_state->notify();
 }
 const luciole::ThumbnailOptions& luciole::ThumbnailService::options() const { return m_state->options; }
+void luciole::ThumbnailService::releaseLocation(const Location& root) {
+  const auto inside = [&](const Location& location) {
+    return location == root || location.uri().starts_with(root.uri() + (root.uri().ends_with('/') ? "" : "/"));
+  };
+  for (const auto& running : m_state->running) {
+    if (inside(running.source)) {
+      g_cancellable_cancel(running.cancel.get());
+    }
+  }
+  for (auto item = m_state->cache.begin(); item != m_state->cache.end();) {
+    if (inside(item->second.source.location())) {
+      const auto old = item++;
+      m_state->erase(old);
+    } else {
+      ++item;
+    }
+  }
+}
+
+bool luciole::ThumbnailService::readingLocation(const Location& root) const {
+  return std::ranges::any_of(m_state->running, [&](const auto& running) {
+    const auto& location = running.source;
+    return location == root || location.uri().starts_with(root.uri() + (root.uri().ends_with('/') ? "" : "/"));
+  });
+}
+
 void luciole::ThumbnailService::endFrame() { m_state->schedule(); }
 void luciole::ThumbnailService::setChangedCallback(std::function<void()> callback) {
   m_state->changed = std::move(callback);

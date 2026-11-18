@@ -74,8 +74,7 @@ These are pkg-config modules or header paths. Install the corresponding developm
 | `cairo`, `cairo-ft` | Cairo with FreeType integration |
 | `pango`, `pangocairo`, `pangoft2` | Pango 1.50+ |
 | `harfbuzz`, `xkbcommon` | Text shaping and keyboard input |
-| `gdk-pixbuf-2.0` | 2.44+, built with Glycin support |
-| `glycin-2` | 2.0.1+, compatible with the selected GdkPixbuf build |
+| `gdk-pixbuf-2.0` | 2.42+; a Glycin-enabled 2.44+ build is recommended |
 | `librsvg-2.0`, `libpng` | SVG and PNG libraries |
 | `libarchive`, `liblzma` | Archive libraries |
 | `libacl` | POSIX ACL library |
@@ -84,7 +83,7 @@ These are pkg-config modules or header paths. Install the corresponding developm
 | `stb/stb_image_resize2.h` | System stb resize2 header; the older resize header is insufficient |
 | Threads | System thread support |
 
-Use compatible GdkPixbuf, Glycin and loader packages. Installed Glycin loaders determine format coverage; AVIF/HEIF may need additional loader dependencies such as libheif. The Nix recipe selects a compatible GdkPixbuf variant and builds librsvg against it; native distributions should use their own compatible package set.
+GdkPixbuf decodes raster images; Luciole does not link Glycin itself. A Glycin-enabled GdkPixbuf (2.44+) decodes in sandboxed loader processes, and the installed Glycin loaders determine format coverage; AVIF/HEIF may need additional loader dependencies such as libheif. Without Glycin, GdkPixbuf uses its built-in loaders in-process; WebP, AVIF, HEIF and JPEG XL then need the matching GdkPixbuf loader packages, and PNG-compressed ICO icons are not decoded. Thumbnail decoding stays in Luciole's resource-limited helper processes either way. The Nix recipe selects a Glycin-enabled GdkPixbuf variant and builds librsvg against it; native distributions should use their own compatible package set.
 
 The internal UI library's optional codec pack is disabled. Wuffs, JPEG XL and its WebP codec-pack dependencies are not required for Luciole's normal build. Archive support uses system libarchive and its enabled filters; encrypted 7z uses the system CLI below, without py7zr, SDK headers or a `7z.so` C++ ABI dependency.
 
@@ -98,7 +97,7 @@ In addition to linked-library runtime packages, ship or recommend the following 
 | Shared MIME database | Provide `shared-mime-info` data. |
 | Icon theme | Provide a usable theme; the Nix package supplies Adwaita. |
 | Desktop settings | Expose `org.gnome.desktop.interface` schemas and a GSettings backend, normally gsettings-desktop-schemas and dconf. |
-| Glycin loaders | Install compatible raster decoders and their runtime dependencies. |
+| Image loaders | Glycin loaders for a Glycin-enabled GdkPixbuf, otherwise GdkPixbuf loader modules for the formats to support. |
 | Session D-Bus and GVfs | Required for the shipped Trash interface; see below. |
 | GVfs protocol backends | Install the backends for the network protocols the package supports. |
 | GVfs DNS-SD backend and Avahi | Optional DNS-SD discovery; requires the backend, its schemas/mount data and a working Avahi service. |
@@ -220,7 +219,7 @@ meson compile -C build-check
 meson test -C build-check --print-errorlogs
 ```
 
-Tests additionally need Python 3, `dbus-daemon`, `glib-compile-schemas`, `wayland-server` development files and libwebp development files. Provide FFmpeg, ffmpegthumbnailer, Poppler utilities, 7-Zip and Glycin loaders, including AVIF/HEIF support. Ordinary headless suites need no compositor; their local-VFS override does not verify GVfs activation.
+Tests additionally need Python 3, `dbus-daemon`, `glib-compile-schemas`, `wayland-server` development files and libwebp development files. Provide FFmpeg, ffmpegthumbnailer, Poppler utilities, 7-Zip and image loaders, including AVIF/HEIF support. The `thumbnail` suite's format checks expect a Glycin-enabled GdkPixbuf; without Glycin its PNG-compressed ICO check fails. Ordinary headless suites need no compositor; their local-VFS override does not verify GVfs activation.
 
 Smoke-test the installed binary's help/version, configuration validation, fonts, completions and an installed window with asset overrides unset. Verify image/helper availability and session access to `trash:///`. Use disposable files for operation checks. Destructive whole-Trash checks require a private mount namespace hiding user drives, not just temporary HOME/XDG directories.
 

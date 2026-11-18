@@ -48,7 +48,7 @@ TooltipPresenter::TooltipPresenter(std::function<void()> requestUpdate)
   setAlign(FlexAlign::Stretch);
   setPadding(kPadV, kPadH);
   setFill(colorSpecFromRole(ColorRole::Surface));
-  setRadius(Style::scaledRadiusMd());
+  setStyleRadius(Style::radiusMd);
   setBorder(colorSpecFromRole(ColorRole::OutlineVariant), Style::borderWidth);
   setParticipatesInLayout(false);
   setHitTestVisible(false);
@@ -193,6 +193,13 @@ void TooltipPresenter::sync(
     const auto* node = area->tooltipAnchorNode() ? area->tooltipAnchorNode() : area;
     anchor = {0, 0, node->width(), node->height()};
     Node::absolutePosition(node, anchor.x, anchor.y);
+    float rootX = 0.0F, rootY = 0.0F;
+    Node::absolutePosition(&root, rootX, rootY);
+    // TooltipPresenter is arranged relative to `root`. Dialog roots can have a
+    // non-zero scene position inside their popup frame, so convert the absolute
+    // anchor back to the presenter's local coordinates before placement.
+    anchor.x -= rootX;
+    anchor.y -= rootY;
     if (area->hasTooltipAnchorInsets()) {
       const auto inset = area->tooltipAnchorInsets();
       anchor.x += inset.left;

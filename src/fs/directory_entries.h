@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -70,6 +71,8 @@ namespace luciole {
     FileType type = FileType::Unknown;
     bool hidden = false;
     bool symlink = false;
+    // A symlink whose target is a folder. Only local sessions learn this, after they publish the listing.
+    bool linksToDirectory = false;
     // Local listings leave access read/write/execute unknown; entryAccess() asks the filesystem when they matter.
     bool accessDeferred = false;
     // A browse catalogue knows the name/kind before its worker has queried detailed facts.
@@ -123,6 +126,7 @@ namespace luciole {
     FileType type;
     bool hidden;
     bool symlink;
+    bool linksToDirectory;
   };
 
   // Native browse names and dirent kinds. Detailed GIO facts are prepared separately on demand.
@@ -142,6 +146,7 @@ namespace luciole {
     std::string names;
     std::vector<Item> items;
     std::unordered_map<std::size_t, std::string> displayNames;
+    // Never a link's target; see DirectoryEntries::withDirectoryLinks.
     EntryBrief brief(std::size_t index) const;
   };
 
@@ -169,6 +174,8 @@ namespace luciole {
     const DirectoryEntry* known(std::size_t index) const;
     bool isCatalogue() const;
     bool sameCatalogue(const DirectoryEntries& other) const;
+    // Of the same catalogue: whether both lead the same symlinks to folders.
+    bool sameDirectoryLinks(const DirectoryEntries& other) const;
     const BrowseCatalogue* catalogue() const;
     struct CatalogueRow {
       const BrowseCatalogue* catalogue;
@@ -178,6 +185,9 @@ namespace luciole {
     std::optional<CatalogueRow> catalogueRow(std::size_t index) const;
     DirectoryEntries withFacts(std::vector<std::pair<std::size_t, DirectoryEntry>> facts) const;
     DirectoryEntries withoutFacts() const;
+    // The same entries, with exactly the symlinks at these indices leading to folders. Takes a flat catalogue, whose
+    // names and facts are shared, or unprojected entries, which are copied.
+    DirectoryEntries withDirectoryLinks(const std::unordered_set<std::size_t>& links) const;
     const DirectoryEntry& operator[](std::size_t index) const;
     const DirectoryEntry& at(std::size_t index) const;
     const DirectoryEntry& front() const { return (*this)[0]; }

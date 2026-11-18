@@ -52,14 +52,17 @@ luciole config validate /path/to/config.toml
 
 File and folder artwork follows the desktop icon theme. Theme selection changes and edits to active SVG/PNG artwork refresh automatically. If desktop settings support is unavailable, Luciole uses the icon theme named by GTK settings.ini. Nix users need a fresh development shell after updating runtime dependencies.
 
+Icon themes that declare `FollowsColorScheme=true` in their `index.theme` (Breeze, Tela, Colloid, and others) draw their recolorable parts with the `colors.toml` palette, as KDE apps do: folders take the primary color and monochrome icons the text color. They update when the palette changes. Other themes keep their own colors.
+
 ## Browser preferences
 
-All keys below belong in `[browser]`. Dimensions are logical pixels unless stated otherwise. View, grid zoom and sorting choices become defaults for new pages; existing pages retain their visit state. Interaction, sidebar, thumbnail and preview preferences apply across the application.
+All keys below belong in `[browser]`. Dimensions are logical pixels unless stated otherwise. View, zoom and sorting choices become defaults for new pages; existing pages retain their visit state. Interaction, sidebar, thumbnail and preview preferences apply across the application.
 
 | Key | Default | Accepted values / meaning |
 | --- | --- | --- |
 | `view_mode` | `"list"` | `"list"`, `"grid"`, `"miller"` |
-| `grid_icon_size` | `48` | `32`, `48`, `64`, `80`, `96`, `128`, `160`, `192`, `256` |
+| `grid_icon_size` | `96` | `32`, `48`, `64`, `80`, `96`, `128`, `160`, `192`, `256` |
+| `list_icon_size` | `0` | `0` uses the default size, `32`; or `16`, `20`, `24`, `28`, `32`, `40`, `48`, `64`. Rows grow with the icon. |
 | `density` | `"compact"` | `"compact"`, `"comfortable"` |
 | `filename_truncation` | `"middle"` | `"middle"` keeps both ends of long filenames; `"end"` keeps the beginning. Applies to List and Columns. |
 | `show_size_caption` | `false` | Size caption in Grid view |
@@ -72,20 +75,22 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `always_show_status_bar` | `false` | Keep the status pill visible when idle, showing the item count and free space |
 | `compact_menus` | `true` | Reduce the row height and padding in context menus without shrinking their text |
 | `background_opacity` | `1.0` | Number from `0` (clear) to `1` (opaque) for the window background; tabs, toolbar, sidebar and file area share it. Menus and dialogs stay opaque |
-| `corner_radius_scale` | `1.0` | Number from `0` (square) to `2` (extra rounded) scaling every corner radius, like Noctalia's setting of the same name. Open windows apply a change after restart; menus and dialogs opened afterwards use it at once |
+| `corner_radius_scale` | `1.0` | Number from `0` (square) to `2` (extra rounded) scaling every corner radius, like Noctalia's setting of the same name. Open windows, menus and dialogs update live |
 | `activation_mode` | `"double_click"` | `"single_click"`, `"double_click"` |
 | `typing_mode` | `"search"` | `"search"` recursively searches filenames; `"filter"` filters names in the current folder only; `"typeahead"` selects names |
 | `confirm_permanent_deletion` | `true` | Ask before permanently deleting selected items, including Shift+Delete and selections in Trash; Empty Trash always confirms |
+| `show_permanent_deletion` | `false` | Show Delete Permanently in context menus for items outside Trash; Shift+Delete and Trash actions stay available either way |
 | `switch_to_new_tab` | `true` | Switch when opening a folder in a new tab; disable to keep browsing the current tab |
 | `restore_last_window` | `false` | Reopen tabs from the last closed window once in a new window, or at startup without a requested location |
 | `terminal_command` | `""` | Terminal command and optional arguments, for example `"foot"`; empty uses `$TERMINAL`, then automatic discovery |
 | `sort_by` | `"name"` | `"name"`, `"type"`, `"size"`, `"modified"`, `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"` |
 | `sort_descending` | `false` | Reverse sort direction |
-| `directories_first` | `true` | Group folders before files |
+| `directories_first` | `true` | Group folders, and links to local folders, before files |
 | `show_sidebar` | `true` | Show the sidebar |
 | `sidebar_width` | `206` | Integer `160` through `400` |
 | `sidebar_tree` | `false` | Optional sidebar folder tree |
 | `show_drives` | `true` | Show drive rows |
+| `show_network` | `true` | Show Network in the sidebar, retaining its saved position when hidden |
 | `expandable_folders` | `false` | Expand folders within List view |
 | `show_preview` | `true` | Show the side preview when space permits |
 | `chooser_show_preview` | `false` | Show the side preview in file picker windows; toggling the preview there changes only this key |
@@ -128,7 +133,7 @@ Name accepts `0` for automatic sizing or an integer from `160` through `16384`. 
 | `thumbnail_max_file_mib` | `64` | Image/PDF source limit, integer `1` through `1024`; does not limit video/audio file size |
 | `thumbnail_cache_mib` | `1024` | Integer `16` through `8192`; only Luciole-written thumbnails count and are pruned |
 
-Local policy generates thumbnails for eligible local files. To generate thumbnails on mounted network shares such as `/mnt/media`, choose Settings → Thumbnails → Show thumbnails → All locations. All permits generation from filesystem paths, including mounted shares, and reuses the shared thumbnail cache. Locations without a filesystem path remain cache-only; Luciole does not download entire remote files for thumbnail generation.
+Local policy generates thumbnails for eligible local files. It skips network shares and FUSE mounts without a local disk, such as rclone and sshfs. A FUSE mount of local files that has no disk of its own, such as gocryptfs, is skipped too; choose All locations to get its thumbnails. To generate thumbnails on mounted network shares such as `/mnt/media`, choose Settings → Thumbnails → Show thumbnails → All locations. All permits generation from filesystem paths, including mounted shares, and reuses the shared thumbnail cache. Locations without a filesystem path remain cache-only; Luciole does not download entire remote files for thumbnail generation.
 
 The Image/PDF size limit applies to image and PDF sources. Video stills and embedded audio artwork use seekable media access and are not rejected merely because their files exceed that limit. There is no pixel-count limit: a decoding helper's memory, CPU time and output limits decide how large an image can be, which admits phone photos up to about 200 megapixels. Settings also provides cache inspection/clearing. Luciole reuses compatible shared thumbnails and preserves cache files created or replaced by other applications. Older Luciole video thumbnails regenerate using representative frames instead of always taking the opening frame. With `ffmpegthumbnailer` installed, newly generated video thumbnails include its filmstrip edges, stored in the shared cache so other file managers display them too. Missing/failing helpers keep a plain thumbnail. The edges come from the thumbnailer rather than the icon theme. Native video previews generate clean frames separately.
 
@@ -138,9 +143,13 @@ User bookmarks live in `$XDG_CONFIG_HOME/gtk-3.0/bookmarks`, defaulting to `~/.c
 
 Built-in Places layout and optional last-window tab state remain in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. Cached user rows there preserve their placement among built-ins; their contents always come from the shared bookmark file. Deleting a shared user bookmark removes it from Luciole even when an old cache row remains. Tab restoration is controlled by `browser.restore_last_window`.
 
+Custom bookmark icons are saved as an optional `icon` field on the matching bookmark row in this private state file. They are Luciole-only; the shared GTK bookmark format has no icon field.
+
 Thumbnails use the shared `$XDG_CACHE_HOME/thumbnails/` cache plus a Luciole ownership ledger under `$XDG_CACHE_HOME/luciole/`. The default cache root is `~/.cache`. Custom actions live in the [Scripts directory](scripts.md).
 
-An optional `colors.toml` beside the settings files supplies the supported Noctalia palette handoff. The installed template is `share/luciole/templates/colors.toml`; broader palette/font/UI-scale preferences remain planned. See [Packaging](../../PACKAGING.md#configuration-and-writable-data) for the complete ownership and installation notes.
+An optional `colors.toml` beside the settings files supplies the supported Noctalia palette handoff. The installed template is `share/luciole/templates/colors.toml`; UI-scale preferences remain planned. See [Packaging](../../PACKAGING.md#configuration-and-writable-data) for the complete ownership and installation notes.
+
+Text follows the system font: the family and size from GNOME's `font-name` setting, or `gtk-font-name` in `~/.config/gtk-3.0/settings.ini` (then `gtk-4.0`), as written by GNOME Settings or nwg-look. The size sets body text (11 pt is about 14.7 px) and other text keeps its proportions; without a system font, Luciole uses Fontconfig's `sans-serif` at 14 px. GNOME's Large Text (`text-scaling-factor`) multiplies it. Changes apply to open windows right away, including symlinked `settings.ini` files. Icons keep their size.
 
 ## Terminal selection
 

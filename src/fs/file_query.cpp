@@ -142,6 +142,33 @@ void luciole::queryFileDetails(
   );
 }
 
+void luciole::queryFileIcon(
+    const Location& location, const CancelToken& token,
+    std::move_only_function<void(std::expected<FileIconSource, FileError>)> done
+) {
+  runJob<FileIconSource>(
+      token,
+      [location, token] {
+        GError* rawError = nullptr;
+        const GioPtr<GFileInfo> info(g_file_query_info(
+            gioFile(location).get(),
+            G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_STANDARD_NAME "," G_FILE_ATTRIBUTE_STANDARD_ICON,
+            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, gioCancellable(token), &rawError
+        ));
+        const GErrorPtr error(rawError);
+        if (!info) {
+          throw FileErrorException(error ? fileError(*error) : FileError{FileErrorKind::Other, "Icon unavailable"});
+        }
+        return readFileIcon(info.get(), location);
+      },
+      [token, done = std::move(done)](auto reply) mutable {
+        if (!token.cancelled()) {
+          done(std::move(reply));
+        }
+      }
+  );
+}
+
 void luciole::queryFileType(
     const Location& location, const CancelToken& token,
     std::move_only_function<void(std::expected<FileType, FileError>)> done

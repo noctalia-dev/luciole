@@ -42,8 +42,7 @@ gio = dependency('gio-2.0', version: '>=2.76')
 gio_unix = dependency('gio-unix-2.0', version: '>=2.76')
 curl = dependency('libcurl', version: '>=7.85')
 xml = dependency('libxml-2.0', version: '>=2.9')
-gdk_pixbuf = dependency('gdk-pixbuf-2.0', version: '>=2.44')
-glycin = dependency('glycin-2', version: '>=2.0.1')
+gdk_pixbuf = dependency('gdk-pixbuf-2.0', version: '>=2.42')
 if not cpp.has_header('stb/stb_image_resize2.h')
   error('system stb/stb_image_resize2.h is required')
 endif
@@ -222,6 +221,7 @@ operations_lib = static_library('luciole-operations',
     'src/operations/copied_move_receipt.cpp',
     'src/operations/copy_history_tree.cpp',
     'src/operations/creation_stage.cpp',
+    'src/operations/history_mount.cpp',
     'src/operations/empty_trash_service.cpp',
     'src/operations/permission_accounts.cpp',
     'src/operations/permission_jobs.cpp',
@@ -258,7 +258,7 @@ imaging_lib = static_library('luciole-imaging',
     'src/imaging/svg_rasterizer.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf, glycin, libpng, dependency('librsvg-2.0')],
+  dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf, libpng, dependency('librsvg-2.0')],
 )
 imaging_dep = declare_dependency(link_with: imaging_lib, include_directories: src_inc,
   dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf],
@@ -351,6 +351,7 @@ ui_lib = static_library('luciole-ui',
     'src/ui/controls/file_preview_view.cpp',
     'src/ui/controls/file_metadata_view.cpp',
     'src/ui/controls/folder_totals_view.cpp',
+    'src/ui/controls/glyph_picker.cpp',
     'src/ui/controls/miller_view.cpp',
     'src/ui/controls/permission_editor.cpp',
     'src/ui/controls/permission_results_view.cpp',
@@ -374,7 +375,7 @@ ui_dep = declare_dependency(link_with: ui_lib, include_directories: src_inc,
 )
 
 app_jobs_lib = static_library('luciole-app-jobs',
-  files('src/app/operation_hub.cpp', 'src/app/job_activity.cpp'),
+  files('src/app/operation_hub.cpp', 'src/app/job_activity.cpp', 'src/app/drive_removal.cpp'),
   include_directories: src_inc,
   dependencies: [browser_dep, operations_dep],
 )
@@ -399,6 +400,7 @@ app = executable('luciole',
     'src/app/page/browser_page.cpp',
     'src/app/page/create_controller.cpp',
     'src/app/page/details_header_controller.cpp',
+    'src/app/page/dialog_dropdown.cpp',
     'src/app/page/program_controller.cpp',
     'src/app/page/drag_drop_controller.cpp',
     'src/app/page/file_keyboard_controller.cpp',

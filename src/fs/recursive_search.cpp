@@ -229,6 +229,9 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     entry.setDisplayName(std::move(displayName));
     entry.setParentDisplayName(parentName.get());
     entry.setIdentity(readFileIdentity(info));
+    if (const char* etag = infoString(info, G_FILE_ATTRIBUTE_ETAG_VALUE)) {
+      entry.setEtag(etag);
+    }
     if (location.isTrash()) {
       entry.setTrash(readTrashInfo(info));
     }

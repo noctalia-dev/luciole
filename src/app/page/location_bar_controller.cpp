@@ -44,7 +44,7 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
       {.out = &m_locationArea,
        .align = FlexAlign::Stretch,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusMd(),
+       .styleRadius = Style::radiusMd,
        .minWidth = 80.0F,
        .height = Style::controlHeight,
        .flexGrow = 1.0F},
@@ -52,7 +52,6 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
       ui::input(
           {.out = &m_location,
            .placeholder = "Location",
-           .fontSize = Style::fontSizeCaption,
            .frameVisible = false,
            .minLayoutWidth = 72.0F,
            .flexGrow = 1.0F,
@@ -85,7 +84,7 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
        .gap = Style::spaceXs,
        .paddingH = Style::spaceSm,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusMd(),
+       .styleRadius = Style::radiusMd,
        .minWidth = 220.0F,
        .maxWidth = 220.0F,
        .height = Style::controlHeight,
@@ -98,7 +97,6 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
       ui::input(
           {.out = &m_filterInput,
            .placeholder = "Search files…",
-           .fontSize = Style::fontSizeCaption,
            .controlHeight = Style::controlHeight,
            .horizontalPadding = 0.0F,
            .clearButtonEnabled = true,
@@ -141,7 +139,7 @@ void LocationBarController::buildCompletion(Node& toolbar) {
   auto completionFrame = ui::column(
       {.out = &m_completionFrame,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusLg(),
+       .styleRadius = Style::radiusLg,
        .border = colorSpecFromRole(ColorRole::OutlineVariant),
        .visible = false,
        .participatesInLayout = false},
@@ -678,6 +676,7 @@ void LocationBarController::rebuildBreadcrumbs() {
       ui::button(
           {.out = &m_breadcrumbOverflow,
            .glyph = "dots",
+           .glyphSize = Style::baseGlyphSize,
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Ghost,
            .tooltip = "Parent folders",
@@ -695,7 +694,6 @@ void LocationBarController::rebuildBreadcrumbs() {
     auto* partButton = static_cast<Button*>(m_breadcrumbs->addChild(
         ui::button(
             {.text = crumbs[i].label,
-             .fontSize = Style::fontSizeCaption,
              .controlHeight = Style::controlHeightSm,
              .contentAlign = ButtonContentAlign::Start,
              .variant = ButtonVariant::Ghost,

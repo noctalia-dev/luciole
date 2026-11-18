@@ -1,10 +1,14 @@
 #include "app/operation_hub.h"
 
+#include "fs/background_job.h"
 #include "operations/copy_receipt.h"
 #include "operations/create_receipt.h"
+#include "operations/history_mount.h"
 #include "operations/move_receipt.h"
 
 #include <algorithm>
+#include <array>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -112,6 +116,7 @@ bool OperationJob::resolve(std::uint64_t id, luciole::TransferConflictChoice cho
 OperationHub::OperationHub(const luciole::TabWorkspace& workspace) : m_workspace(workspace) {}
 
 OperationHub::~OperationHub() {
+  m_lifetime.reset();
   m_owners.clear();
   for (auto& [id, job] : m_jobs) {
     (void)id;
@@ -195,6 +200,14 @@ void OperationHub::changed(OperationJob& job) {
       owner->transfersFinished(job.service<luciole::TransferService>().results());
     }
   }
+  if (finished && job.kind() == JobKind::Restore) {
+    const auto effects = job.service<luciole::RestoreService>().transferResults();
+    for (const auto& [page, owner] : m_owners) {
+      if (page != m_routing.owner(job.id())) {
+        owner->transfersFinished(effects);
+      }
+    }
+  }
 }
 
 void OperationHub::notify(luciole::TabId page, OperationJob& job) {
@@ -276,6 +289,98 @@ void OperationHub::update(std::optional<luciole::WindowId> preferred) {
   }
 }
 
+void OperationHub::leaveDrive(const luciole::Location& root) {
+  for (const auto& [page, owner] : m_owners) {
+    (void)page;
+    owner->leaveDrive(root);
+  }
+}
+
+void OperationHub::prepareDriveRemoval(
+    const luciole::Location& root, std::function<void(std::optional<luciole::FileError>)> done
+) {
+  // Never inspect mutable replay state or discard proofs while work is running or an editor is prepared.
+  if (std::ranges::any_of(m_jobs, [](const auto& item) {
+        const OperationJob& job = *item.second;
+        if (job.pending()) {
+          return true;
+        }
+        switch (job.kind()) {
+        case JobKind::Create:
+          return job.service<luciole::CreateService>().canCreate();
+        case JobKind::Rename:
+          return job.service<luciole::RenameService>().canRename();
+        case JobKind::BatchRename:
+          return job.service<luciole::BatchRenameService>().snapshot().phase == luciole::BatchRenamePhase::Ready;
+        default:
+          return false;
+        }
+      })) {
+    done(std::nullopt);
+    return;
+  }
+  ++m_historyProbes;
+  luciole::runJob<std::array<bool, 5>>(
+      [root, rename = m_renameReceipt, batch = m_batchRenameReceipt, create = m_createReceipt, move = m_moveReceipt,
+       copy = m_copyReceipt] {
+        const luciole::HistoryMount mount(root);
+        return std::array{
+            rename && rename->usesMount(mount), batch && luciole::batchRenameUsesMount(*batch, mount),
+            create && create->usesMount(mount), move && move->usesMount(mount), copy && copy->usesMount(mount)
+        };
+      },
+      [this, generation = m_historyGeneration, lifetime = std::weak_ptr(m_lifetime),
+       done = std::move(done)](luciole::JobResult<std::array<bool, 5>> result) {
+        if (lifetime.expired()) {
+          return;
+        }
+        --m_historyProbes;
+        if (!result) {
+          done(result.error());
+          return;
+        }
+        if (generation != m_historyGeneration) {
+          done(
+              luciole::FileError{
+                  luciole::FileErrorKind::Changed, "File operations changed while preparing removal. Try again."
+              }
+          );
+          return;
+        }
+        if (std::ranges::any_of(*result, [](bool matched) { return matched; })) {
+          auto retired = std::tuple{
+              (*result)[0] ? std::exchange(m_renameReceipt, {}) : nullptr,
+              (*result)[1] ? std::exchange(m_batchRenameReceipt, {}) : nullptr,
+              (*result)[2] ? std::exchange(m_createReceipt, {}) : nullptr,
+              (*result)[3] ? std::exchange(m_moveReceipt, {}) : nullptr,
+              (*result)[4] ? std::exchange(m_copyReceipt, {}) : nullptr
+          };
+          ++m_historyGeneration;
+          m_historyRedo = false;
+          ++m_historyRetirements;
+          luciole::detail::runInThread(
+              [retired = std::move(retired)] mutable { retired = {}; },
+              [this, lifetime] {
+                if (!lifetime.expired()) {
+                  --m_historyRetirements;
+                }
+              }
+          );
+          notifyActivity();
+        }
+        done(std::nullopt);
+      }
+  );
+}
+
+bool OperationHub::removalReady(const luciole::Location& root) const {
+  return m_historyRetirements == 0
+      && !luciole::CopyReceipt::cleanupPending()
+      && !luciole::CreateReceipt::cleanupPending()
+      && !luciole::MoveReceipt::cleanupPending()
+      && std::ranges::none_of(m_owners, [&](const auto& item) { return item.second->driveReadersBusy(root); });
+}
+
 void OperationHub::shutdown() {
   ++m_historyGeneration;
   m_copyReceipt.reset();
@@ -291,14 +396,18 @@ void OperationHub::shutdown() {
 }
 
 bool OperationHub::busy() const {
-  return luciole::CopyReceipt::cleanupPending()
+  return m_historyProbes != 0
+      || m_historyRetirements != 0
+      || luciole::CopyReceipt::cleanupPending()
+      || luciole::CreateReceipt::cleanupPending()
+      || luciole::MoveReceipt::cleanupPending()
       || std::ranges::any_of(m_jobs, [](const auto& item) { return item.second->running(); });
 }
 
 bool OperationHub::historyReplayBusy() const {
-  return std::ranges::any_of(m_jobs, [](const auto& item) {
-    return item.second->historyReplay() != HistoryReplay::None && item.second->running();
-  });
+  return m_historyProbes != 0 || std::ranges::any_of(m_jobs, [](const auto& item) {
+           return item.second->historyReplay() != HistoryReplay::None && item.second->running();
+         });
 }
 
 bool OperationHub::canUndo() const {
@@ -401,13 +510,14 @@ void OperationHub::recordHistory(OperationJob& job) {
     }
     return;
   }
-  if (job.m_historyGeneration != m_historyGeneration) {
-    return;
-  }
   if (job.kind() == JobKind::Create) {
+    auto receipt = job.service<luciole::CreateService>().takeReceipt();
+    if (job.m_historyGeneration != m_historyGeneration) {
+      return;
+    }
     const auto& snapshot = job.service<luciole::CreateService>().snapshot();
     if (snapshot.status == luciole::CreateStatus::Succeeded || snapshot.status == luciole::CreateStatus::Partial) {
-      m_createReceipt = snapshot.status == luciole::CreateStatus::Succeeded ? snapshot.receipt : nullptr;
+      m_createReceipt = snapshot.status == luciole::CreateStatus::Succeeded ? std::move(receipt) : nullptr;
       m_createKind = snapshot.kind;
       m_renameReceipt.reset();
       m_batchRenameReceipt.reset();
@@ -424,9 +534,13 @@ void OperationHub::recordHistory(OperationJob& job) {
     return;
   }
   if (job.kind() == JobKind::BatchRename) {
+    auto receipt = job.service<luciole::BatchRenameService>().takeReceipt();
+    if (job.m_historyGeneration != m_historyGeneration) {
+      return;
+    }
     const auto& snapshot = job.service<luciole::BatchRenameService>().snapshot();
     if (snapshot.phase == luciole::BatchRenamePhase::Finished) {
-      m_batchRenameReceipt = snapshot.receipt;
+      m_batchRenameReceipt = std::move(receipt);
       m_renameReceipt.reset();
       m_historyRedo = job.historyReplay() == HistoryReplay::Undo;
     } else if (
@@ -439,9 +553,13 @@ void OperationHub::recordHistory(OperationJob& job) {
     }
     return;
   }
+  auto receipt = job.service<luciole::RenameService>().takeReceipt();
+  if (job.m_historyGeneration != m_historyGeneration) {
+    return;
+  }
   const auto& snapshot = job.service<luciole::RenameService>().snapshot();
   if (snapshot.status == luciole::RenameStatus::Succeeded) {
-    m_renameReceipt = snapshot.receipt;
+    m_renameReceipt = std::move(receipt);
     m_historyRedo = job.historyReplay() == HistoryReplay::Undo;
   } else if (
       snapshot.error

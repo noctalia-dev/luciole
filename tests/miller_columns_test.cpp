@@ -101,6 +101,8 @@ namespace {
     columns.start(source, false);
     pump.loaded(columns);
     auto& parent = columns.active();
+    // A late metadata publication would replace the injected listing and drop its selection.
+    pump.until([&] { return !parent.model().snapshot().metadataLoading; });
     auto snapshot = parent.model().snapshot();
     luciole::DirectoryEntry shortcut{
         .id = 10000,
