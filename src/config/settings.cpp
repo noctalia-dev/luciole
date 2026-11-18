@@ -276,6 +276,7 @@ namespace {
       describe(P::DirectoriesFirst, "directories_first", [](S& s) -> auto& { return s.sort.directoriesFirst; }),
       describe(P::HiddenLast, "hidden_last", [](S& s) -> auto& { return s.sort.hiddenLast; }),
       describe(P::ViewMode, "view_mode", [](S& s) -> auto& { return s.viewMode; }, {kViewModes}),
+      describe(P::RememberFolderViews, "remember_folder_views", [](S& s) -> auto& { return s.rememberFolderViews; }),
       describe(
           P::GridIconSize, "grid_icon_size", [](S& s) -> auto& { return s.gridIconSize; }, kGridIconSize
       ),
@@ -665,6 +666,23 @@ template const luciole::ThumbnailPolicy&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ThumbnailPolicy>);
 template const luciole::ChooserStartFolder&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ChooserStartFolder>);
+
+std::string_view luciole::sortFieldName(SortField field) {
+  const auto* found = std::ranges::find(kSortFields, field, &Named<SortField>::value);
+  return found != kSortFields.end() ? found->name : std::string_view{};
+}
+std::optional<luciole::SortField> luciole::sortFieldFromName(std::string_view name) {
+  const auto* found = std::ranges::find(kSortFields, name, &Named<SortField>::name);
+  return found != kSortFields.end() ? std::optional(found->value) : std::nullopt;
+}
+std::string_view luciole::viewModeName(ViewMode mode) {
+  const auto* found = std::ranges::find(kViewModes, mode, &Named<ViewMode>::value);
+  return found != kViewModes.end() ? found->name : std::string_view{};
+}
+std::optional<luciole::ViewMode> luciole::viewModeFromName(std::string_view name) {
+  const auto* found = std::ranges::find(kViewModes, name, &Named<ViewMode>::name);
+  return found != kViewModes.end() ? std::optional(found->value) : std::nullopt;
+}
 
 std::vector<luciole::OverrideEdit> luciole::inheritAllPreferences() {
   std::vector<OverrideEdit> edits;

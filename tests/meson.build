@@ -66,6 +66,7 @@ test_table = [
   {'name': 'xdg-dirs', 'deps': [fs_dep]},
   {'name': 'shared-helpers', 'deps': [operations_dep], 'env': gio_env},
   {'name': 'state-store', 'deps': [config_dep], 'env': gio_env},
+  {'name': 'folder-views', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-filter', 'deps': [fs_dep], 'env': gio_env},
   {'name': 'chooser-policy', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-chooser-portal', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},

@@ -1,6 +1,7 @@
 #include "browser/browser_controller.h"
 
 #include "browser/directory_tree.h"
+#include "browser/folder_views.h"
 #include "browser/location_presentation.h"
 #include "fs/file_query.h"
 
@@ -47,6 +48,7 @@ luciole::BrowserController::BrowserController(SortOptions sort, bool showHidden,
       showMessage("Opening files is not available yet.");
     }
   };
+  m_defaultSort = sort;
   m_model.setSort(sort);
   m_model.setFilter({.showHidden = showHidden, .text = {}, .showBackups = showBackups});
   m_model.setChangedCallback([this] {
@@ -115,6 +117,27 @@ void luciole::BrowserController::setViewDefaults(ViewMode mode, int iconSize) {
   m_defaults.mode = mode;
   m_defaults.iconSize = iconSize;
 }
+void luciole::BrowserController::setDefaultSort(SortOptions sort) {
+  m_defaultSort = sort;
+  applyFolderView(false);
+}
+std::optional<luciole::FolderView> luciole::BrowserController::folderView() const {
+  if (m_folderViews == nullptr || m_history.empty()) {
+    return std::nullopt;
+  }
+  return m_folderViews->lookup(m_history[m_historyIndex].location);
+}
+void luciole::BrowserController::applyFolderView(bool viewMode) {
+  const auto view = folderView();
+  m_model.setSort(view && view->sort ? *view->sort : m_defaultSort);
+  if (!viewMode || m_history.empty() || m_defaults.mode == ViewMode::Miller) {
+    return;
+  }
+  const auto mode = view && view->mode ? *view->mode : m_defaults.mode;
+  m_viewport.mode = mode;
+  m_history[m_historyIndex].viewport.mode = mode;
+}
+void luciole::BrowserController::reapplyFolderView() { applyFolderView(true); }
 std::optional<luciole::BrowseViewport> luciole::BrowserController::takeRestoredViewport() {
   return std::exchange(m_restoredViewport, std::nullopt);
 }
@@ -152,6 +175,12 @@ void luciole::BrowserController::loadVisit() {
   const auto destination = m_history[m_historyIndex].location;
   const auto query = m_history[m_historyIndex].query;
   m_viewport = m_history[m_historyIndex].viewport;
+  if (folderView()) {
+    // The listing is replaced next, so the re-sort need not be published.
+    m_publishing = true;
+    applyFolderView(true);
+    m_publishing = false;
+  }
   m_restoredViewport.reset();
   m_restoring = true;
   ++m_visitSerial;
@@ -759,6 +788,8 @@ void luciole::BrowserController::duplicateFrom(BrowserController& source) {
     }
   }
   m_defaults = source.m_defaults;
+  m_defaultSort = source.m_defaultSort;
+  m_folderViews = source.m_folderViews;
   m_searchRecursive = source.m_searchRecursive;
   m_history = source.m_history;
   m_historyIndex = source.m_historyIndex;

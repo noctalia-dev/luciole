@@ -86,7 +86,7 @@ BrowserPage::BrowserPage(
     const luciole::BrowserSettings& settings, luciole::WaylandTextClipboard& clipboard, luciole::WindowSurface& surface,
     InputDispatcher& dispatcher, AnimationManager& animations, luciole::PinService& pins, luciole::DriveMonitor& drives,
     luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-    OperationHub& hub, luciole::TabId id
+    luciole::FolderViewService& folderViews, OperationHub& hub, luciole::TabId id
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
@@ -101,8 +101,8 @@ BrowserPage::BrowserPage(
           [this] { return m_connection.keyboardModifiers(); },
           [this] { return m_fileKeys.keyboardFocus() && m_list != nullptr && m_list->focusArea()->focused(); }
       ),
-      m_preferences(preferences), m_savedSettings(settings), m_pins(pins), m_drives(drives), m_hub(hub),
-      m_jobs(hub, id), m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
+      m_preferences(preferences), m_savedSettings(settings), m_pins(pins), m_folderViews(folderViews), m_drives(drives),
+      m_hub(hub), m_jobs(hub, id), m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
@@ -110,6 +110,7 @@ BrowserPage::BrowserPage(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );
   browser().setViewDefaults(settings.viewMode, settings.gridIconSize);
+  m_browser.setFolderViews(&m_folderViews);
   m_listIconSize = settings.listIconSize;
   m_millerIconSize = settings.millerIconSize;
   m_preview.setChangedCallback([this] {
@@ -412,7 +413,11 @@ luciole::BrowserSettings BrowserPage::options() const {
   value.columns = m_detailsHeader.columnVisibility();
   value.columnOrder = m_detailsHeader.columnOrder();
   value.columnWidths = m_detailsHeader.columnWidths();
-  value.sort = browser().model().sort();
+  // New tabs start from the defaults, not from the current folder's own settings.
+  value.sort = m_folderView.enabled() ? browser().defaultSort() : browser().model().sort();
+  if (m_folderView.enabled() && !m_miller.enabled()) {
+    value.viewMode = browser().defaultViewMode();
+  }
   value.showHidden = browser().model().filter().showHidden;
   value.showBackups = browser().model().filter().showBackups;
   return value;
@@ -1374,7 +1379,9 @@ luciole::ActionContext BrowserPage::actionContext() const {
       .canUndo = m_hub.canUndo(),
       .canRedo = m_hub.canRedo(),
       .chooser = choosing(),
-      .singleSelection = browser().model().singleSelection()
+      .singleSelection = browser().model().singleSelection(),
+      .folderViews = m_folderView.enabled(),
+      .folderViewCustomized = m_folderView.customized()
   };
 }
 
@@ -1514,6 +1521,8 @@ void BrowserPage::runAction(
       {Action::Descending, sort},
       {Action::FoldersFirst, sort},
       {Action::HiddenLast, sort},
+      {Action::ResetFolderView,
+       [](BrowserPage& page, const Call& call) { page.m_folderView.reset(*call.request.folder); }},
       {Action::Open, [](BrowserPage& page, const Call& call) { page.openTargets(call.targets); }},
       {Action::ContainingFolder,
        [](BrowserPage& page, const Call& call) { page.showContaining(call.targets.front().location()); }},
@@ -1988,59 +1997,77 @@ void BrowserPage::captureViewAnchor() {
   }
 }
 
-void BrowserPage::applySort(luciole::SortOptions options) {
-  if (options == browser().model().sort()) {
-    return;
-  }
+void BrowserPage::sortChanged() {
   // An explicit reorder starts at the new beginning, rather than following the old first visible item.
   m_viewAnchor.reset();
   m_pendingHistoryViewport.reset();
   m_fileKeys.resetReveal();
   m_listAdapter.onPointerCancel();
   m_gridAdapter.onPointerCancel();
-  browser().model().setSort(options);
-  for (const auto& column : m_miller.columns()) {
-    column->browser->model().setSort(options);
-  }
   m_sortScrollPending = true;
+}
+
+void BrowserPage::applySort(luciole::SortOptions options) {
+  const auto before = browser().model().sort();
+  m_browser.setDefaultSort(options);
+  for (const auto& column : m_miller.columns()) {
+    column->browser->setDefaultSort(options);
+  }
+  if (browser().model().sort() != before) {
+    sortChanged();
+  }
 }
 
 void BrowserPage::changeSort(luciole::SortOptions options) {
   if (options == browser().model().sort()) {
     return;
   }
-  applySort(options);
-  if (choosing()) {
-    m_preferences.submit({
-        {luciole::BrowserPreference::ChooserSortBy, options.field},
-        {luciole::BrowserPreference::ChooserSortDescending, options.descending},
-        {luciole::BrowserPreference::ChooserDirectoriesFirst, options.directoriesFirst},
-        {luciole::BrowserPreference::ChooserHiddenLast, options.hiddenLast},
-    });
-  } else {
-    m_preferences.saveSort(options);
+  if (!m_folderView.saveSort(options)) {
+    applySort(options);
+    if (choosing()) {
+      m_preferences.submit({
+          {luciole::BrowserPreference::ChooserSortBy, options.field},
+          {luciole::BrowserPreference::ChooserSortDescending, options.descending},
+          {luciole::BrowserPreference::ChooserDirectoriesFirst, options.directoriesFirst},
+          {luciole::BrowserPreference::ChooserHiddenLast, options.hiddenLast},
+      });
+    } else {
+      m_preferences.saveSort(options);
+    }
   }
   dispatcher().setFocus(m_list->focusArea());
 }
 
-void BrowserPage::setViewMode(luciole::ViewMode mode) {
+void BrowserPage::showViewMode(luciole::ViewMode mode) {
   if (mode == m_viewMode) {
     return;
   }
   m_viewAnchor.reset();
   if (m_list != nullptr) {
     captureViewAnchor();
-    dispatcher().setFocus(m_list->focusArea());
   }
   m_viewMode = mode;
+  m_browserDirty = true;
+  m_surface->requestUpdate();
+}
+
+void BrowserPage::setViewMode(luciole::ViewMode mode) {
+  if (mode == m_viewMode) {
+    return;
+  }
+  if (m_list != nullptr) {
+    dispatcher().setFocus(m_list->focusArea());
+  }
+  if (m_folderView.saveViewMode(mode)) {
+    return;
+  }
+  showViewMode(mode);
   if (choosing()) {
     m_preferences.submit({{luciole::BrowserPreference::ChooserViewMode, mode}});
   } else {
     m_preferences.save(mode);
   }
   browser().setDefaultViewMode(m_viewMode);
-  m_browserDirty = true;
-  m_surface->requestUpdate();
 }
 
 void BrowserPage::applyViewMode() {
@@ -2267,8 +2294,8 @@ void BrowserPage::syncBrowser() {
                                                : (sort.descending ? "Z to A" : "A to Z");
   m_menuButton->setTooltip(
       std::format(
-          "View options: {}, {}{}{}", field, direction, sort.directoriesFirst ? " · Folders first" : "",
-          sort.hiddenLast ? " · Hidden last" : ""
+          "View options: {}, {}{}{}{}", field, direction, sort.directoriesFirst ? " · Folders first" : "",
+          sort.hiddenLast ? " · Hidden last" : "", m_folderView.sortCustomized() ? " · This folder" : ""
       )
   );
   const bool grid = m_viewMode == luciole::ViewMode::Grid;

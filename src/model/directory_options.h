@@ -220,6 +220,15 @@ namespace luciole {
     bool operator==(const SortOptions&) const = default;
   };
 
+  // A folder's own sort and view mode; an unset field follows the global default. The mode is List or Grid:
+  // column view is a window-wide mode.
+  struct FolderView {
+    std::optional<SortOptions> sort;
+    std::optional<ViewMode> mode;
+    bool empty() const { return !sort && !mode; }
+    bool operator==(const FolderView&) const = default;
+  };
+
   struct FilterOptions {
     bool showHidden = false;
     std::string text; // Literal substring of the display name, folded and normalized.
