@@ -241,6 +241,26 @@ namespace {
     TEST_CHECK(std::ranges::any_of(restarted.bookmarks(), [&](const auto& pin) {
       return pin.location == downloads.location && pin.label == "Root <files> & storage";
     }));
+    // Icon overrides stay private and follow their URI when another application reorders or relabels rows.
+    const auto sharedBeforeIcon = read(sharedPath);
+    const auto pinned = *std::ranges::find(service.bookmarks(), a.location, &luciole::Bookmark::location);
+    TEST_CHECK(service.setIcon(pinned, "star"));
+    pump.ready(service);
+    TEST_CHECK(read(sharedPath) == sharedBeforeIcon && !service.setIcon(pinned, "heart"));
+    replace(
+        sharedPath,
+        fixture.pin("first").location.uri()
+            + " First\n"
+            + fixture.pin("second").location.uri()
+            + " Second\n"
+            + b.location.uri()
+            + " b\n"
+            + a.location.uri()
+            + " Relabelled\n"
+    );
+    pump.until([&] { return !service.busy() && service.contains(fixture.location("first")); });
+    const auto carried = std::ranges::find(service.bookmarks(), a.location, &luciole::Bookmark::location);
+    TEST_CHECK(carried != service.bookmarks().end() && carried->label == "Relabelled" && carried->iconName == "star");
     // External reorder, relabel and deletion override the private layout cache.
     replace(
         sharedPath,

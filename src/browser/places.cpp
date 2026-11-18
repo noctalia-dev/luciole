@@ -201,15 +201,13 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     std::vector<Bookmark> custom;
     for (const auto& pin : shared) {
       if (!builtin(pin.location, places)) {
-        custom.push_back(pin);
+        auto& bookmark = custom.emplace_back(pin);
+        if (const auto previous = std::ranges::find(local, pin.location, &Bookmark::location);
+            previous != local.end()) {
+          bookmark.iconName = previous->iconName;
+        }
       }
     }
-    const auto carryIcon = [&](Bookmark& bookmark) {
-      const auto previous = std::ranges::find(local, bookmark.location, &Bookmark::location);
-      if (previous != local.end()) {
-        bookmark.iconName = previous->iconName;
-      }
-    };
     auto next = custom.begin();
     for (const auto& pin : local) {
       if (builtin(pin.location, places)) {
@@ -218,13 +216,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
         merged.iconName = pin.iconName;
         result.push_back(std::move(merged));
       } else if (next != custom.end()) {
-        auto merged = *next++;
-        carryIcon(merged);
-        result.push_back(std::move(merged));
+        result.push_back(*next++);
       }
-    }
-    for (auto remaining = next; remaining != custom.end(); ++remaining) {
-      carryIcon(*remaining);
     }
     result.insert(result.end(), next, custom.end());
     for (const auto& pin : shared) {
@@ -486,11 +479,6 @@ bool luciole::PinService::setIcon(const Bookmark& expected, std::string iconName
   if (found == proposed.end() || found->label != expected.label || found->iconName != expected.iconName) {
     return false;
   }
-  if (found->iconName == iconName) {
-    return true;
-  }
   found->iconName = std::move(iconName);
-  m_state->pinBusy = true;
-  m_state->run(std::move(proposed));
-  return true;
+  return save(std::move(proposed));
 }
