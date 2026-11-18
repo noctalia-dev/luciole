@@ -214,9 +214,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
     }
   }
   addSeparator(entries);
-  if (trash) {
-    add(Action::Restore);
-  } else {
+  if (!trash) {
     add(Action::Rename);
     add(Action::CreateLink);
     add(Action::Compress);
