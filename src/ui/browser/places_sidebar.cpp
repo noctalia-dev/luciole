@@ -526,9 +526,6 @@ void luciole::PlacesSidebar::rebuild() {
         i
     );
   }
-  if (m_showNetwork && !m_pins.contains(Location::network())) {
-    addRow({"Network", Location::network(), {}}, "network", std::nullopt);
-  }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
     heading("Drives");
