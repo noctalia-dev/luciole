@@ -8,12 +8,14 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 class Button;
 class GlyphGridAdapter;
 class InputArea;
 class Input;
 class Label;
+class Select;
 class VirtualGridView;
 class TooltipPresenter;
 
@@ -21,14 +23,14 @@ struct GlyphPickerResult {
   std::string name;
 };
 
-// Luciole dialog for searching and choosing a glyph from the Tabler catalog.
+// Luciole dialog for searching and choosing a glyph from the Tabler catalog, by name and category.
 class GlyphPicker : public Flex {
 public:
   explicit GlyphPicker(std::function<void()> requestTooltipUpdate);
   ~GlyphPicker() override;
 
   void setTitle(std::string_view title);
-  // Pre-select a glyph on first layout without changing the initial viewport.
+  // Pre-select and scroll to a glyph on first layout.
   void setInitialGlyph(std::optional<std::string> name);
 
   InputArea* initialFocusArea() const noexcept;
@@ -65,6 +67,8 @@ private:
   std::function<void(const GlyphPickerResult&)> m_onApply;
   std::function<void()> m_onReset;
 
+  Select* m_categorySelect = nullptr;
+  std::vector<std::string> m_categoryOptions;
   std::optional<std::string> m_pendingInitialGlyph;
   bool m_pendingInitialApplied = false;
   bool m_enabled = true;

@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <unordered_set>
 
 namespace {
@@ -21,31 +22,35 @@ class GlyphGridAdapter : public VirtualGridAdapter {
 public:
   struct Entry {
     std::string name;
+    std::string category;
   };
 
   GlyphGridAdapter() {
     const auto& tabler = GlyphRegistry::tablerGlyphMetadata();
     const auto& aliases = GlyphRegistry::aliases();
     std::unordered_set<std::string> seen;
+    std::set<std::string> categories;
     seen.reserve(tabler.size() + aliases.size());
     m_master.reserve(tabler.size() + aliases.size());
 
     for (const auto& [name, target] : aliases) {
       if (seen.insert(name).second) {
         if (const auto it = tabler.find(std::string(target)); it != tabler.end()) {
-          m_master.push_back({name});
+          m_master.push_back({name, it->second.category});
+          categories.insert(it->second.category);
         }
       }
     }
-    for (const auto& glyph : tabler) {
-      const auto& name = glyph.first;
+    for (const auto& [name, metadata] : tabler) {
       if (seen.insert(name).second) {
-        m_master.push_back({name});
+        m_master.push_back({name, metadata.category});
+        categories.insert(metadata.category);
       }
     }
+    m_categories.assign(categories.begin(), categories.end());
     std::ranges::sort(m_master, {}, &Entry::name);
     m_visible.reserve(m_master.size());
-    rebuildVisible({});
+    rebuildVisible({}, {});
   }
 
   std::size_t itemCount() const override { return m_visible.size(); }
@@ -106,11 +111,14 @@ public:
     return index < m_visible.size() ? m_master[m_visible[index]].name : std::string{};
   }
 
-  void rebuildVisible(std::string_view filter) {
+  void rebuildVisible(std::string_view filter, std::string_view category) {
     m_visible.clear();
     const std::string needle = StringUtils::toLower(filter);
     const bool filterByName = !needle.empty();
     for (std::size_t i = 0; i < m_master.size(); ++i) {
+      if (!category.empty() && m_master[i].category != category) {
+        continue;
+      }
       if (!filterByName || m_master[i].name.contains(needle)) {
         m_visible.push_back(i);
       }
@@ -127,10 +135,12 @@ public:
   }
 
   const Entry& entryAt(std::size_t visibleIndex) const { return m_master[m_visible[visibleIndex]]; }
+  const std::vector<std::string>& categories() const noexcept { return m_categories; }
 
 private:
   std::vector<Entry> m_master;
   std::vector<std::size_t> m_visible;
+  std::vector<std::string> m_categories;
 };
 
 GlyphPicker::GlyphPicker(std::function<void()> requestTooltipUpdate) {
@@ -150,13 +160,32 @@ GlyphPicker::GlyphPicker(std::function<void()> requestTooltipUpdate) {
   );
 
   m_adapter = std::make_unique<GlyphGridAdapter>();
+  m_categoryOptions.reserve(m_adapter->categories().size() + 1);
+  m_categoryOptions.emplace_back("All categories");
+  m_categoryOptions.insert(m_categoryOptions.end(), m_adapter->categories().begin(), m_adapter->categories().end());
   addChild(
-      ui::input({
-          .out = &m_searchInput,
-          .placeholder = "Search icons by name",
-          .clearButtonEnabled = true,
-          .onChange = [this](const std::string& value) { applyFilter(value); },
-      })
+      ui::row(
+          {
+              .align = FlexAlign::Center,
+              .gap = Style::spaceSm,
+          },
+          ui::input({
+              .out = &m_searchInput,
+              .placeholder = "Search icons by name",
+              .clearButtonEnabled = true,
+              .flexGrow = 1.0F,
+              .onChange = [this](const std::string& value) { applyFilter(value); },
+          }),
+          ui::select({
+              .out = &m_categorySelect,
+              .options = m_categoryOptions,
+              .selectedIndex = 0,
+              .width = 180.0F,
+              .onSelectionChanged = [this](std::size_t, std::string_view) {
+                applyFilter(m_searchInput != nullptr ? m_searchInput->value() : std::string{});
+              },
+          })
+      )
   );
 
   addChild(
@@ -272,6 +301,9 @@ void GlyphPicker::setEnabled(bool enabled) {
   if (m_searchInput != nullptr) {
     m_searchInput->setEnabled(enabled);
   }
+  if (m_categorySelect != nullptr) {
+    m_categorySelect->setEnabled(enabled);
+  }
   if (m_applyButton != nullptr) {
     m_applyButton->setEnabled(enabled && currentResult().has_value());
   }
@@ -324,7 +356,8 @@ void GlyphPicker::doLayout(Renderer& renderer) {
 
   if (!m_pendingInitialApplied && m_pendingInitialGlyph.has_value() && m_grid != nullptr && m_adapter != nullptr) {
     if (const auto idx = m_adapter->indexOfName(*m_pendingInitialGlyph); idx.has_value()) {
-      m_grid->setSelectedIndex(idx, false);
+      m_grid->setSelectedIndex(idx);
+      m_grid->scrollToIndex(*idx);
     }
     m_pendingInitialApplied = true;
   }
@@ -344,8 +377,11 @@ void GlyphPicker::applyFilter(const std::string& filter) {
   if (m_adapter == nullptr || m_grid == nullptr) {
     return;
   }
+  const std::string category = m_categorySelect != nullptr && m_categorySelect->selectedIndex() > 0
+      ? m_categoryOptions[m_categorySelect->selectedIndex()]
+      : std::string{};
   const auto previousResult = currentResult();
-  m_adapter->rebuildVisible(filter);
+  m_adapter->rebuildVisible(filter, category);
   // Drop selection if the previously selected name is no longer visible.
   if (previousResult.has_value()) {
     if (const auto idx = m_adapter->indexOfName(previousResult->name); idx.has_value()) {

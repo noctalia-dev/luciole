@@ -2,6 +2,7 @@
 
 #include "app/operation_hub.h"
 #include "app/page/active_popup.h"
+#include "app/page/dialog_dropdown.h"
 #include "app/page/page_context.h"
 #include "browser/browser_controller.h"
 #include "browser/places.h"
@@ -224,6 +225,7 @@ void RenameController::openPlaceIconPicker(const luciole::Bookmark& bookmark) {
   picker->setOnCancel([this] { m_page.dismissPopup(); });
   picker->setOnApply([this](const GlyphPickerResult& result) { submitPlaceIcon(result.name); });
   picker->setOnReset([this] { submitPlaceIcon({}); });
+  picker->setPopupContext(&m_page.dialogDropdown());
   m_page.showDialog(std::move(picker), DialogWidth::Large);
   if (m_page.popupSurface() != nullptr) {
     m_page.activePopup().bind(ActivePopup::Kind::PlaceIcon, [this, location = found->location] {
