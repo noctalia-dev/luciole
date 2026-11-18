@@ -42,6 +42,15 @@ namespace {
   State openFolder(const C& c, const R&) {
     return require(c.model.snapshot().location.has_value(), "Open a folder first.");
   }
+  State resetFolderView(const C& c, const R& r) {
+    if (!c.folderViews) {
+      return unavailable("Per-folder views are off in Settings.");
+    }
+    if (!r.folder) {
+      return unavailable("Open a folder first.");
+    }
+    return require(c.folderViewCustomized, "This folder already uses the default view.");
+  }
   State visibleRows(const C& c, const R&) { return require(!c.model.rows().empty(), "There are no visible items."); }
   State clipboard(const C& c, const R&) {
     return require(c.clipboardAvailable, "The application clipboard is unavailable.");
@@ -436,6 +445,11 @@ namespace {
        .label = "Hidden Last",
        .shortcut = "",
        .rule = [](const C& c, const R&) { return checked(c.model.sort().hiddenLast); }},
+      {.action = A::ResetFolderView,
+       .label = "Use default view for this folder",
+       .shortcut = "",
+       .scope = S::Location,
+       .rule = resetFolderView},
       {.action = A::Open, .label = "Open", .shortcut = "Enter", .scope = S::Targets, .rule = open},
       {.action = A::ContainingFolder,
        .label = "Show in Containing Folder",
@@ -670,6 +684,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::Descending:
   case A::FoldersFirst:
   case A::HiddenLast:
+  case A::ResetFolderView:
   case A::Open:
   case A::SelectAll:
   case A::InvertSelection:

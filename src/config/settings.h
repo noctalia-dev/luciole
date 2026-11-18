@@ -25,6 +25,7 @@ namespace luciole {
     bool switchToNewTab = true;
     bool restoreLastWindow = false;
     ViewMode viewMode = ViewMode::List;
+    bool rememberFolderViews = false; // Sort and view mode changes apply to the current folder only.
     bool showHidden = false;
     bool showBackups = true;
     bool alwaysShowTabBar = true;
@@ -89,6 +90,7 @@ namespace luciole {
     DirectoriesFirst,
     HiddenLast,
     ViewMode,
+    RememberFolderViews,
     GridIconSize,
     ListIconSize,
     Density,
@@ -174,6 +176,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
     static constexpr PreferenceKey<bool> HiddenLast{Id::HiddenLast};
     static constexpr PreferenceKey<luciole::ViewMode> ViewMode{Id::ViewMode};
+    static constexpr PreferenceKey<bool> RememberFolderViews{Id::RememberFolderViews};
     static constexpr PreferenceKey<int> GridIconSize{Id::GridIconSize};
     static constexpr PreferenceKey<int> ListIconSize{Id::ListIconSize};
     static constexpr PreferenceKey<luciole::ViewDensity> Density{Id::Density};
@@ -244,6 +247,12 @@ namespace luciole {
         ActivationMode, TypingMode, ThumbnailPolicy, std::string>
         m_value;
   };
+
+  // The TOML spelling of sort fields and view modes, shared by settings.toml and the folder view state.
+  std::string_view sortFieldName(SortField field);
+  std::optional<SortField> sortFieldFromName(std::string_view name);
+  std::string_view viewModeName(ViewMode mode);
+  std::optional<ViewMode> viewModeFromName(std::string_view name);
 
   // Edits that remove every override.
   std::vector<OverrideEdit> inheritAllPreferences();

@@ -146,6 +146,8 @@ private:
   AnimationManager m_animations;
   luciole::ViewPreferenceWriter m_preferences;
   luciole::PinService m_pins;
+  // Declared before m_pages, which read it.
+  luciole::FolderViewService m_folderViews;
   std::vector<luciole::SavedWindow> m_savedWindows;
   std::optional<std::vector<luciole::SavedWindow>> m_pendingWindows;
   luciole::DriveMonitor m_drives;

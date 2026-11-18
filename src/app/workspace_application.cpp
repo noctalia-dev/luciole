@@ -56,13 +56,15 @@ WorkspaceApplication::WorkspaceApplication(
 )
     : m_connection(connection), m_renderer(renderer), m_input(input), m_clipboard(clipboard),
       m_defaults(std::move(settings)), m_preferences(luciole::ConfigPaths::fromEnvironment()),
-      m_pins(luciole::StateStore::pathFromEnvironment()) {
+      m_pins(luciole::StateStore::pathFromEnvironment()),
+      m_folderViews(luciole::FolderViewStore::pathFromEnvironment(), m_defaults.rememberFolderViews) {
   m_preferences.setChangedCallback([this](const std::string& error) {
     if (m_preferences.settings()) {
       m_defaults = m_preferences.settings()->browser;
       // Live Style bindings update open widgets; controls built afterwards pick the values up directly.
       Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
       Style::setCloseButtonsEnabled(m_defaults.showCloseButtons);
+      m_folderViews.setEnabled(m_defaults.rememberFolderViews);
     }
     for (auto& [id, page] : m_pages) {
       (void)id;
@@ -128,6 +130,12 @@ WorkspaceApplication::WorkspaceApplication(
       [this] { clearExternalDrops(); }
   );
   m_preferences.startWatching();
+  m_folderViews.setChangedCallback([this] {
+    for (auto& [id, page] : m_pages) {
+      (void)id;
+      page->folderViewsChanged();
+    }
+  });
   m_pins.setChangedCallback([this] {
     if (m_pendingWindows && m_pins.editable()) {
       auto windows = std::exchange(m_pendingWindows, std::nullopt);
@@ -999,7 +1007,7 @@ luciole::TabId WorkspaceApplication::createPage(
   }
   auto page = std::make_unique<BrowserPage>(
       m_connection, m_renderer, m_input, settings, m_clipboard, host.surface, host.dispatcher, m_animations, m_pins,
-      m_drives, m_icons, m_thumbnails, m_preferences, m_hub, id
+      m_drives, m_icons, m_thumbnails, m_preferences, m_folderViews, m_hub, id
   );
   page->setHasOther([this, id] {
     const auto owner = m_model.owner(id);

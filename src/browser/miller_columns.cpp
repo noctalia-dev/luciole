@@ -1,5 +1,7 @@
 #include "browser/miller_columns.h"
 
+#include "browser/folder_views.h"
+
 #include <ranges>
 
 void luciole::MillerColumns::notify() const {
@@ -13,10 +15,14 @@ luciole::MillerColumns::makeColumn(BrowserController& source, const Location& lo
   auto column = std::make_unique<Column>(Column{
       ++m_nextId,
       std::make_unique<BrowserController>(
-          source.model().sort(), source.model().filter().showHidden, source.model().filter().showBackups
+          source.defaultSort(), source.model().filter().showHidden, source.model().filter().showBackups
       ),
       location, std::nullopt, defaultWidth
   });
+  column->browser->setFolderViews(source.folderViews());
+  if (!source.folderViews() || !source.folderViews()->enabled()) {
+    column->browser->model().setSort(source.model().sort());
+  }
   column->browser->setSearchRecursive(source.searchRecursive());
   if (inheritHistory) {
     column->browser->duplicateFrom(source);

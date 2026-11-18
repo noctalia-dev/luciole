@@ -135,6 +135,7 @@ SettingsDialog::SettingsDialog(
       P::ViewMode, "View",
       {{"Grid", luciole::ViewMode::Grid}, {"List", luciole::ViewMode::List}, {"Columns", luciole::ViewMode::Miller}}
   );
+  addBool(P::RememberFolderViews, "Remember view and sort per folder");
   addChoice(
       P::Density, "Density",
       {{"Compact", luciole::ViewDensity::Compact}, {"Comfortable", luciole::ViewDensity::Comfortable}}
