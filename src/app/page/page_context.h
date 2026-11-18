@@ -22,6 +22,7 @@ namespace luciole {
 
 class ActivePopup;
 class ContextMenuControl;
+class DialogDropdown;
 class Flex;
 class InputDispatcher;
 class MillerView;
@@ -169,6 +170,8 @@ public:
   virtual PopupSurface* popupSurface() = 0;
   virtual InputDispatcher& popupDispatcher() = 0;
   virtual ActivePopup& activePopup() = 0;
+  // Select dropdown host for dialog roots: setPopupContext(&dialogDropdown()).
+  virtual DialogDropdown& dialogDropdown() = 0;
   // The context menu on the popup; null while the popup shows a dialog or nothing.
   virtual ContextMenuControl* contextMenu() = 0;
   // False while the workspace cannot show a popup for this page.
