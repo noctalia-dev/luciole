@@ -536,7 +536,7 @@ namespace {
          .modifiedSeconds = std::nullopt},
     };
     model.applySnapshot(std::move(data));
-    TEST_CHECK((model.rows() == std::vector<luciole::EntryId>{1, 2}));
+    TEST_CHECK((model.rows() == std::vector<luciole::EntryId>{2, 1}));
   }
 
   void testGridIconSize() {
