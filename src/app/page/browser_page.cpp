@@ -2180,13 +2180,13 @@ void BrowserPage::syncBrowser() {
     );
   }
   const bool showEmptyTrash = !choosing() && snapshot.location && snapshot.location->isTrash();
-  m_trashBar->setVisible(showEmptyTrash);
-  m_trashBar->setParticipatesInLayout(showEmptyTrash);
+  m_emptyTrashButton->setVisible(showEmptyTrash);
+  m_emptyTrashButton->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
   const std::string emptyTrashLabel(luciole::ActionRegistry::definition(Action::EmptyTrash).label);
   m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
   m_emptyTrashButton->setTooltip(
-      emptyTrashState.enabled ? "" : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
+      emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
   );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());
@@ -2610,6 +2610,15 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
                .onClick = [this] { dispatchAction(Action::CreateFolder); }}
           ),
           ui::button(
+              {.out = &m_emptyTrashButton,
+               .glyph = "trash-x",
+               .glyphSize = Style::baseGlyphSize,
+               .variant = ButtonVariant::Ghost,
+               .visible = false,
+               .participatesInLayout = false,
+               .onClick = [this] { dispatchAction(Action::EmptyTrash); }}
+          ),
+          ui::button(
               {.out = &m_sortButton,
                .glyph = "arrows-sort",
                .glyphSize = Style::baseGlyphSize,
@@ -2657,28 +2666,6 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
   );
 }
 
-std::unique_ptr<Flex> BrowserPage::buildTrashBar() {
-  return ui::row(
-      {.out = &m_trashBar,
-       .align = FlexAlign::Center,
-       .justify = FlexJustify::End,
-       .paddingV = Style::spaceXs,
-       .paddingH = Style::spaceSm,
-       .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
-       .radius = Style::scaledRadiusMd(),
-       .visible = false,
-       .participatesInLayout = false},
-      ui::button(
-          {.out = &m_emptyTrashButton,
-           .text = std::string(luciole::ActionRegistry::definition(Action::EmptyTrash).label),
-           .glyph = "trash",
-           .controlHeight = Style::controlHeight,
-           .variant = ButtonVariant::Destructive,
-           .onClick = [this] { dispatchAction(Action::EmptyTrash); }}
-      )
-  );
-}
-
 std::unique_ptr<Flex> BrowserPage::buildFilePane() {
   auto content = ui::column(
       {.out = &m_filePane,
@@ -2686,7 +2673,7 @@ std::unique_ptr<Flex> BrowserPage::buildFilePane() {
        .gap = Style::spaceXs,
        .padding = Style::spaceSm,
        .flexGrow = 1.0F},
-      buildTrashBar(), m_detailsHeader.buildHeader(), m_statusBar.buildNotice(),
+      m_detailsHeader.buildHeader(), m_statusBar.buildNotice(),
       ui::virtualGridView(
           {.out = &m_list,
            .columns = 1,
