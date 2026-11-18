@@ -142,6 +142,24 @@ namespace {
     fixture.write("config.toml", "[browser]\nconfirm_permanent_deletion = true\n");
     TEST_CHECK(restored.reload() && restored.settings().browser.confirmPermanentDeletion);
   }
+  void testPermanentDeletionMenuPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && !service.settings().browser.showPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nshow_permanent_deletion = true\n");
+    TEST_CHECK(service.reload() && service.settings().browser.showPermanentDeletion);
+    const std::array off{luciole::OverrideEdit{luciole::BrowserPreference::ShowPermanentDeletion, false}};
+    TEST_CHECK(service.saveOverrides(off) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && !restored.settings().browser.showPermanentDeletion);
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::ShowPermanentDeletion, std::nullopt}};
+    TEST_CHECK(restored.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(restored.reload() && restored.settings().browser.showPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nshow_permanent_deletion = 'true'\n");
+    TEST_CHECK(!restored.reload() && restored.settings().browser.showPermanentDeletion);
+    fixture.write("config.toml", "[browser]\nshow_permanent_deletion = false\n");
+    TEST_CHECK(restored.reload() && !restored.settings().browser.showPermanentDeletion);
+  }
   void testRestoreLastWindowPreference() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -1178,6 +1196,7 @@ int main() {
     testBackupPreference();
     testNewTabPreference();
     testDeletionConfirmationPreference();
+    testPermanentDeletionMenuPreference();
     testRestoreLastWindowPreference();
     testMillerSettings();
     testMillerParents();

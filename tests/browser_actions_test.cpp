@@ -410,6 +410,12 @@ namespace {
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
   }
+  void testPermanentDeletionMenuEntries() {
+    TEST_CHECK((luciole::itemMenuDeletionActions(false, false) == std::vector{A::Trash}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(false, true) == std::vector{A::Trash, A::DeletePermanently}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(true, false) == std::vector{A::Restore, A::DeletePermanently}));
+    TEST_CHECK((luciole::itemMenuDeletionActions(true, true) == std::vector{A::Restore, A::DeletePermanently}));
+  }
   void testEmptyTrashAvailability() {
     luciole::DirectoryModel model;
     auto data = snapshot();
@@ -950,6 +956,7 @@ int main() {
     testCompressedArchiveActions();
     testExecutionActions();
     testTrashActions();
+    testPermanentDeletionMenuEntries();
     testEmptyTrashAvailability();
     testLinkActions();
     testFileClipboardActions();

@@ -129,6 +129,8 @@ namespace luciole {
   // Actions a file chooser window offers: browsing, selection and New Folder. Everything else would act on files or
   // leave the chooser.
   bool chooserAction(BrowserAction action);
+  // Deletion entries of the item context menu. Trash always offers permanent deletion; outside Trash it is opt-in.
+  std::vector<BrowserAction> itemMenuDeletionActions(bool inTrash, bool showPermanentDeletion);
   struct ActionState {
     bool enabled = true;
     std::string_view reason;

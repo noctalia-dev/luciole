@@ -100,7 +100,7 @@ SettingsDialog::SettingsDialog(
        {"Select names", luciole::TypingMode::Typeahead}}
   );
   addBool(P::ConfirmPermanentDeletion, "Confirm permanent deletion");
-  addBool(P::ShowPermanentDeletion, "Show permanent deletion");
+  addBool(P::ShowPermanentDeletion, "Show Delete Permanently in context menus");
   addBool(P::SwitchToNewTab, "Switch to new folder tabs");
   addBool(P::RestoreLastWindow, "Restore tabs from last closed window");
   card("Terminal");

@@ -709,6 +709,16 @@ bool luciole::chooserAction(BrowserAction action) {
   return false;
 }
 
+std::vector<luciole::BrowserAction> luciole::itemMenuDeletionActions(bool inTrash, bool showPermanentDeletion) {
+  if (inTrash) {
+    return {A::Restore, A::DeletePermanently};
+  }
+  if (showPermanentDeletion) {
+    return {A::Trash, A::DeletePermanently};
+  }
+  return {A::Trash};
+}
+
 luciole::ActionState
 luciole::ActionRegistry::state(BrowserAction action, const ActionContext& c, const ActionRequest& r) {
   if (c.chooser && !chooserAction(action)) {
