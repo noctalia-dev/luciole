@@ -30,9 +30,11 @@ namespace {
   }
   // Purpose is part of the identity: previews accept no smaller foreign thumbnail and take clean video frames.
   std::string cacheKey(const luciole::DirectoryEntry& source, int side, luciole::ThumbnailPurpose purpose) {
+    const auto identity = source.identity();
     return std::format(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.id, source.etag().value_or(""),
-        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision), side,
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}", source.location().uri(), source.etag().value_or(""),
+        source.modifiedSeconds.value_or(0), source.size.value_or(0), revisionText(source.contentRevision),
+        identity ? identity->filesystem : "", identity ? identity->file : "", side,
         purpose == luciole::ThumbnailPurpose::Preview ? "preview" : "thumbnail"
     );
   }
@@ -656,13 +658,11 @@ std::shared_ptr<const luciole::FileIconImage> luciole::ThumbnailService::prepare
   if (m_state->clearing || m_state->options.policy == ThumbnailPolicy::Never) {
     return {};
   }
-  const auto identity = source.identity();
   for (const int side : {kMaxPreviewImageSide, 1024, 512, 256, 128}) {
     for (const auto purpose : {ThumbnailPurpose::Preview, ThumbnailPurpose::Thumbnail}) {
       const auto found = m_state->cache.find(cacheKey(source, side, purpose));
       if (found != m_state->cache.end()
           && found->second.image->pixels
-          && found->second.source.identity() == identity
           && found->second.source.type == source.type
           && found->second.source.symlink == source.symlink
           && found->second.source.contentType == source.contentType) {

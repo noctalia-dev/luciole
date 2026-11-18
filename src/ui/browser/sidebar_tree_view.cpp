@@ -211,7 +211,12 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
     const auto known = std::ranges::find_if(pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pin.location;
     });
-    m_glyphs.emplace(id, known == pins.userPlaces().end() ? "folder" : known->glyphName);
+    m_glyphs.emplace(
+        id,
+        !pin.iconName.empty()                  ? pin.iconName
+            : known == pins.userPlaces().end() ? "folder"
+                                               : known->glyphName
+    );
     DirectoryEntry entry{
         .id = id,
         .place = pin.location,
@@ -270,7 +275,7 @@ void luciole::SidebarTreeView::prepare() {
 }
 std::optional<luciole::Bookmark> luciole::SidebarTreeView::bookmark(EntryId id) const {
   const auto* entry = m_model.entry(id);
-  return entry ? std::optional(Bookmark{entry->displayName(), entry->navigationLocation()}) : std::nullopt;
+  return entry ? std::optional(Bookmark{entry->displayName(), entry->navigationLocation(), {}}) : std::nullopt;
 }
 InputArea* luciole::SidebarTreeView::focusArea(const Location& location) {
   const auto found = std::ranges::find_if(m_model.rows(), [&](EntryId id) {

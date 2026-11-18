@@ -8,6 +8,7 @@
 #include "app/page/batch_rename_controller.h"
 #include "app/page/create_controller.h"
 #include "app/page/details_header_controller.h"
+#include "app/page/dialog_dropdown.h"
 #include "app/page/drag_drop_controller.h"
 #include "app/page/file_keyboard_controller.h"
 #include "app/page/location_bar_controller.h"
@@ -324,6 +325,7 @@ private:
   PopupSurface* popupSurface() override;
   InputDispatcher& popupDispatcher() override;
   ActivePopup& activePopup() override;
+  DialogDropdown& dialogDropdown() override;
   ContextMenuControl* contextMenu() override;
   std::uint32_t popupSerial() override;
   float popupMaxHeight() const override;
@@ -379,6 +381,7 @@ private:
   Flex* m_filePane = nullptr;
   OperationHub& m_hub;
   PageJobs m_jobs;
+  DialogDropdown m_dialogDropdown{*this, m_connection, m_renderer};
   TrashController m_trashController{*this};
   RenameController m_renameController{*this, m_pins};
   PropertiesController m_propertiesController{*this, m_icons};
@@ -409,9 +412,7 @@ private:
       m_locationBar,
       m_programs
   };
-  SettingsController m_settingsController{*this,        m_preferences, m_thumbnails,
-                                          m_connection, m_renderer,    [this] {
-        m_thumbnails.clearCache(); }};
+  SettingsController m_settingsController{*this, m_preferences, m_thumbnails, [this] { m_thumbnails.clearCache(); }};
   AboutController m_aboutController{*this, m_launcher};
   ShortcutsController m_shortcutsController{*this};
   ApplicationChooserController m_applicationChooser{*this, m_launcher, m_icons};

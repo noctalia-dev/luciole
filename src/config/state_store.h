@@ -14,6 +14,8 @@ namespace luciole {
   struct Bookmark {
     std::string label;
     Location location;
+    // Private Luciole override; the GTK bookmark format has no icon field.
+    std::string iconName;
     bool operator==(const Bookmark&) const = default;
   };
 

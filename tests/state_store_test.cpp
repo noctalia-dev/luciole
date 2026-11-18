@@ -69,9 +69,9 @@ namespace {
     const auto deepLocation = Location::fromPath(deepNative);
     TEST_CHECK(deepLocation.uri().size() > 8192);
     const std::vector<Bookmark> bookmarks{
-        {.label = "Work \"files\"", .location = local},
-        {.label = "共享", .location = remote},
-        {.label = "Deep native path", .location = deepLocation}
+        {.label = "Work \"files\"", .location = local, .iconName = "folder"},
+        {.label = "共享", .location = remote, .iconName = {}},
+        {.label = "Deep native path", .location = deepLocation, .iconName = {}}
     };
     TEST_CHECK(store.saveBookmarks(bookmarks) == AtomicWriteState::Durable);
     std::vector<SavedWindow> windows{window("/tmp/second-tab"), window("/tmp/other-window")};
@@ -97,9 +97,9 @@ namespace {
     StateStore first(fixture.path());
     StateStore second(fixture.path());
     TEST_CHECK(first.load() && second.load());
-    const std::vector<Bookmark> a{{.label = "A", .location = Location::fromPath("/tmp/a")}};
-    const std::vector<Bookmark> b{{.label = "B", .location = Location::fromPath("/tmp/b")}};
-    const std::vector<Bookmark> c{{.label = "C", .location = Location::fromPath("/tmp/c")}};
+    const std::vector<Bookmark> a{{.label = "A", .location = Location::fromPath("/tmp/a"), .iconName = {}}};
+    const std::vector<Bookmark> b{{.label = "B", .location = Location::fromPath("/tmp/b"), .iconName = {}}};
+    const std::vector<Bookmark> c{{.label = "C", .location = Location::fromPath("/tmp/c"), .iconName = {}}};
     TEST_CHECK(first.saveBookmarks(a) == AtomicWriteState::Durable);
     TEST_CHECK(
         second.saveWindows({window("/tmp/session-one")}) == AtomicWriteState::Durable && second.state().bookmarks == a
@@ -134,7 +134,7 @@ namespace {
     TEST_CHECK(stale.load() && !stale.state().placesCustomized);
     TEST_CHECK(first.saveBookmarks({}) == AtomicWriteState::Durable);
     TEST_CHECK(
-        stale.saveBookmarks({{.label = "Stale", .location = Location::fromPath("/tmp/stale")}})
+        stale.saveBookmarks({{.label = "Stale", .location = Location::fromPath("/tmp/stale"), .iconName = {}}})
         == AtomicWriteState::NotCommitted
     );
     TEST_CHECK(stale.saveWindows({window("/tmp/updated")}) == AtomicWriteState::Durable);
@@ -190,7 +190,7 @@ namespace {
     for (const std::string uri :
          {"sftp://alice:super-secret@example.test/path", "sftp://alice;token=super-secret@example.test/path",
           "https://example.test/path?token=super-secret", "https://example.test/path#super-secret"}) {
-      const std::vector<Bookmark> bookmarks{{.label = "Remote", .location = Location::fromUri(uri)}};
+      const std::vector<Bookmark> bookmarks{{.label = "Remote", .location = Location::fromUri(uri), .iconName = {}}};
       TEST_CHECK(store.saveBookmarks(bookmarks) == AtomicWriteState::NotCommitted && read(fixture.path()) == original);
       for (const auto& issue : store.issues()) {
         TEST_CHECK(!issue.format().contains("super-secret"));
@@ -201,12 +201,16 @@ namespace {
     }
     const auto local = Location::fromPath("/tmp/repeated");
     TEST_CHECK(
-        store.saveBookmarks({{.label = "one", .location = local}, {.label = "two", .location = local}})
+        store.saveBookmarks(
+            {{.label = "one", .location = local, .iconName = {}}, {.label = "two", .location = local, .iconName = {}}}
+        )
         == AtomicWriteState::NotCommitted
     );
     for (const auto& label :
          {std::string(257, 'x'), std::string("line\nbreak"), std::string(1, static_cast<char>(0xFF))}) {
-      TEST_CHECK(store.saveBookmarks({{.label = label, .location = local}}) == AtomicWriteState::NotCommitted);
+      TEST_CHECK(
+          store.saveBookmarks({{.label = label, .location = local, .iconName = {}}}) == AtomicWriteState::NotCommitted
+      );
     }
     TEST_CHECK(
         store.saveWindows(std::vector<SavedWindow>(17, window("/tmp/window"))) == AtomicWriteState::NotCommitted
@@ -224,7 +228,7 @@ namespace {
     const auto original = read(fixture.path());
     TEST_CHECK(::chmod(fixture.path().c_str(), 0444) == 0 && store.load());
     TEST_CHECK(
-        store.saveBookmarks({{.label = "x", .location = Location::fromPath("/tmp/x")}})
+        store.saveBookmarks({{.label = "x", .location = Location::fromPath("/tmp/x"), .iconName = {}}})
         == AtomicWriteState::NotCommitted
     );
     struct stat info{};

@@ -511,7 +511,7 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
     }
     drag.foldersOnly = drag.foldersOnly && entry->type == luciole::FileType::Directory && !entry->symlink;
     drag.entries.push_back({id, location});
-    drag.bookmarks.push_back({entry->displayName(), std::move(location)});
+    drag.bookmarks.push_back({entry->displayName(), std::move(location), {}});
   }
   const auto* entry = m_page.browser().model().entry(ids.front());
   if (entry) {

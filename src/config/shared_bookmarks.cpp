@@ -150,7 +150,7 @@ void luciole::SharedBookmarks::parse(const std::string& text) {
           if (!location.isTrash() || location == Location::trash()) {
             auto label = space == std::string_view::npos ? location.displayName().value_or(uri)
                                                          : std::string(value.substr(space + 1));
-            line.bookmark = Bookmark{displayLabel(std::move(label)), std::move(location)};
+            line.bookmark = Bookmark{displayLabel(std::move(label)), std::move(location), {}};
             line.duplicate = seen.contains(line.bookmark->location.uri());
             if (!line.duplicate && m_bookmarks.size() < StateStore::bookmarkLimit) {
               seen.insert(line.bookmark->location.uri());
@@ -173,7 +173,9 @@ std::string luciole::SharedBookmarks::format(const std::vector<Bookmark>& bookma
   std::string text;
   auto next = bookmarks.begin();
   const auto append = [&](const Bookmark& bookmark) {
-    const auto original = std::ranges::find_if(m_lines, [&](const auto& line) { return line.bookmark == bookmark; });
+    const auto original = std::ranges::find_if(m_lines, [&](const auto& line) {
+      return line.bookmark && line.bookmark->location == bookmark.location && line.bookmark->label == bookmark.label;
+    });
     text += original != m_lines.end() ? original->raw : bookmark.location.uri() + ' ' + bookmark.label;
     text += '\n';
   };
@@ -215,7 +217,11 @@ luciole::AtomicWriteResult luciole::SharedBookmarks::save(const std::vector<Book
       return {.error = "Invalid bookmark label, duplicate location or unsafe stored URI."};
     }
   }
-  if (bookmarks == m_bookmarks) {
+  const auto sameSharedContents = bookmarks.size() == m_bookmarks.size()
+      && std::ranges::equal(bookmarks, m_bookmarks, [](const auto& left, const auto& right) {
+                                    return left.location == right.location && left.label == right.label;
+                                  });
+  if (sameSharedContents) {
     return {.state = AtomicWriteState::Unchanged, .error = {}};
   }
   const auto text = format(bookmarks);

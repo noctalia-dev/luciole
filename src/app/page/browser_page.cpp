@@ -496,7 +496,7 @@ void BrowserPage::windowFocusChanged(bool entered) {
     return;
   }
   if (!entered) {
-    m_settingsController.closeSelectDropdown();
+    m_dialogDropdown.closeSelectDropdown();
     m_popupDispatcher.pointerLeave();
     // A grabbed menu also takes focus from the parent; its compositor dismissal owns that lifetime.
     return;
@@ -530,7 +530,7 @@ void BrowserPage::setForeignDrop(
 bool BrowserPage::popupOwns(wl_surface* surface) const {
   return (m_popupSurface && m_popupSurface->wlSurface() == surface)
       || m_submenus.owns(surface)
-      || m_settingsController.dropdownOwns(surface);
+      || m_dialogDropdown.owns(surface);
 }
 
 bool BrowserPage::popup() const { return m_popupSurface != nullptr; }
@@ -762,7 +762,7 @@ void BrowserPage::outputChanged(wl_output* output) {
 }
 
 void BrowserPage::pointer(const PointerEvent& event) {
-  if (m_settingsController.dropdownPointer(event)) {
+  if (m_dialogDropdown.pointer(event)) {
     return;
   }
   if (m_popupSurface != nullptr && event.type == PointerEvent::Type::Button && event.pressed) {
@@ -793,6 +793,10 @@ void BrowserPage::pointer(const PointerEvent& event) {
     // Dialog coordinates: the dialog sits inside its shadow frame on the popup surface.
     const auto* content = m_activePopup.root();
     m_batchRename.pointer(
+        x - content->x(), y - content->y(),
+        event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
+    );
+    m_renameController.placeIconPointer(
         x - content->x(), y - content->y(),
         event.type == PointerEvent::Type::Motion || event.type == PointerEvent::Type::Enter
     );
@@ -1073,6 +1077,9 @@ void BrowserPage::keyboard(const KeyboardEvent& event) {
       return;
     }
     if (m_previewController.quickPreviewKey(event)) {
+      return;
+    }
+    if (m_dialogDropdown.key(event)) {
       return;
     }
     if (m_settingsController.key(event)) {
@@ -1481,7 +1488,7 @@ void BrowserPage::runAction(
        [](BrowserPage& page, const Call& call) {
          const auto& folder = *call.request.folder;
          page.m_sidebar.pinFolders(
-             {{luciole::locationBreadcrumbs(folder).back().label, folder}}, page.m_pins.bookmarks().size()
+             {{luciole::locationBreadcrumbs(folder).back().label, folder, {}}}, page.m_pins.bookmarks().size()
          );
        }},
       {Action::UnpinCurrent, [](BrowserPage& page, const Call& call) { page.m_pins.remove(*call.request.folder); }},
@@ -1629,7 +1636,7 @@ void BrowserPage::pinTargets(const std::vector<luciole::DirectoryEntry>& targets
   std::vector<luciole::Bookmark> pins;
   for (const auto& target : targets) {
     if (auto location = target.location(); !m_pins.contains(location)) {
-      pins.push_back({target.displayName(), std::move(location)});
+      pins.push_back({target.displayName(), std::move(location), {}});
     }
   }
   m_sidebar.pinFolders(std::move(pins), m_pins.bookmarks().size());
@@ -2243,7 +2250,7 @@ void BrowserPage::prepareFrame(bool, bool layout) {
   m_renameController.onFrame();
   if (m_browserDirty) {
     m_browserDirty = false;
-    m_renameController.syncPlaceRename();
+    m_renameController.syncPlaceEditors();
     syncBrowser();
     layout = true;
   }
@@ -2604,6 +2611,7 @@ void BrowserPage::closePopup() {
   if (!m_previewController.bounds() || !previewVisible()) {
     m_preview.clear();
   }
+  m_dialogDropdown.reset();
   m_activePopup.close();
   m_popupDispatcher.setSceneRoot(nullptr);
   m_popupDispatcher.setTextInputContext(nullptr, nullptr);
@@ -2629,6 +2637,8 @@ PopupSurface* BrowserPage::popupSurface() { return m_popupSurface.get(); }
 InputDispatcher& BrowserPage::popupDispatcher() { return m_popupDispatcher; }
 
 ActivePopup& BrowserPage::activePopup() { return m_activePopup; }
+
+DialogDropdown& BrowserPage::dialogDropdown() { return m_dialogDropdown; }
 
 ContextMenuControl* BrowserPage::contextMenu() { return m_menuController.menu(); }
 
@@ -2734,6 +2744,10 @@ float BrowserPage::dialogWidth(DialogWidth width) const {
 popup_chrome::Geometry BrowserPage::dialogGeometry(Flex& content) {
   auto& renderer = (m_popupSurface ? m_popupSurface->renderTarget() : m_surface->renderTarget()).renderer();
   const float width = dialogWidth(*m_dialogTier);
+  // A width change moves an open dropdown's anchor.
+  if (width != content.width()) {
+    m_dialogDropdown.closeSelectDropdown();
+  }
   m_settingsController.layoutDialog(width);
   m_propertiesController.layoutDialog(width);
   LayoutConstraints constraints;
@@ -2885,6 +2899,7 @@ void BrowserPage::openPopup(
         {0, 0, static_cast<float>(m_popupSurface->width()), static_cast<float>(m_popupSurface->height())}
     );
     m_batchRename.syncTooltip(m_popupSurface->renderTarget().renderer());
+    m_renameController.syncPlaceIconTooltip(m_popupSurface->renderTarget().renderer());
   });
   m_popupSurface->setConfigureCallback([this](std::uint32_t, std::uint32_t) {
     if (std::exchange(m_dialogResizePending, false)

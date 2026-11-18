@@ -39,6 +39,12 @@ namespace luciole {
       const Location& location, const CancelToken& token,
       std::move_only_function<void(std::expected<FileDetails, FileError>)> done
   );
+  // The icon a listing would show for one item (special folders, MIME types, desktop entries), without following
+  // links. Cancelled replies are suppressed; done runs on the initiating main context.
+  void queryFileIcon(
+      const Location& location, const CancelToken& token,
+      std::move_only_function<void(std::expected<FileIconSource, FileError>)> done
+  );
   // Follows symlinks. done runs on the main context unless token was cancelled first.
   void queryFileType(
       const Location& location, const CancelToken& token,

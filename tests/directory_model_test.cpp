@@ -256,6 +256,25 @@ namespace {
       rows(model, {2, 1, 3});
     }
 
+    data.entries = {
+        entry(1, "b.txt"), entry(2, "z-folder", luciole::FileType::Directory), entry(3, ".c.txt"),
+        entry(4, ".a-folder", luciole::FileType::Directory)
+    };
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].size = 1;
+      entries[2].size = 100;
+      entries[2].hidden = entries[3].hidden = true;
+    });
+    model.applySnapshot(data);
+    model.setFilter({.showHidden = true, .text = {}});
+    model.setSort({});
+    rows(model, {2, 1, 4, 3});
+    model.setSort({.descending = true, .directoriesFirst = false});
+    rows(model, {2, 1, 3, 4});
+    model.setSort({.field = SortField::Size, .descending = true, .directoriesFirst = false});
+    rows(model, {1, 2, 3, 4});
+    model.setFilter({.showHidden = false, .text = {}});
+
     // Collation ties must not let enumeration order determine action targets.
     data.entries = {entry(5, "same-b"), entry(4, "same-a")};
     test::editEntries(data, [&](auto& entries) {
