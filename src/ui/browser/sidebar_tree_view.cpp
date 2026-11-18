@@ -194,7 +194,9 @@ luciole::SidebarTreeView::~SidebarTreeView() {
   m_model.setChangedCallback({});
   m_tree.setChangedCallback({});
 }
-void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vector<Drive>& drives, bool showNetwork) {
+void luciole::SidebarTreeView::setRoots(
+    const PinService& pins, const std::vector<Drive>& drives, bool showNetwork, bool trashFull
+) {
   DirectorySnapshot snapshot;
   snapshot.status = DirectoryStatus::Ready;
   std::vector<DirectoryEntry> entries;
@@ -217,7 +219,7 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
     m_glyphs.emplace(
         id,
         !pin.iconName.empty()                  ? pin.iconName
-            : pin.location.isTrash()           ? (m_trashFull ? "trash-filled" : "trash")
+            : pin.location.isTrash()           ? (trashFull ? "trash-filled" : "trash")
             : known == pins.userPlaces().end() ? "folder"
                                                : known->glyphName
     );
@@ -255,13 +257,6 @@ void luciole::SidebarTreeView::setRoots(const PinService& pins, const std::vecto
   snapshot.entries = std::move(entries);
   m_rootIds = std::move(roots);
   m_tree.setRoot(std::move(snapshot));
-}
-void luciole::SidebarTreeView::setTrashFull(bool full) {
-  if (std::exchange(m_trashFull, full) == full) {
-    return;
-  }
-  m_dirty = true;
-  markLayoutDirty();
 }
 void luciole::SidebarTreeView::sync(std::optional<Location> current, bool showHidden) {
   if (m_current == current && m_model.filter().showHidden == showHidden) {

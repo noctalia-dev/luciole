@@ -218,13 +218,9 @@ void luciole::PlacesSidebar::sync(std::optional<Location> current) {
   markLayoutDirty();
 }
 void luciole::PlacesSidebar::setTrashFull(bool full) {
-  if (std::exchange(m_trashFull, full) == full) {
-    return;
+  if (std::exchange(m_trashFull, full) != full) {
+    invalidate();
   }
-  if (m_tree) {
-    m_tree->setTrashFull(full);
-  }
-  invalidate();
 }
 void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   auto button = ui::button(
@@ -440,7 +436,6 @@ void luciole::PlacesSidebar::rebuild() {
     if (!m_tree) {
       auto tree = std::make_unique<SidebarTreeView>();
       m_tree = tree.get();
-      m_tree->setTrashFull(m_trashFull);
       tree->open = [this](const Location& location) {
         if (m_open) {
           m_open(location);
@@ -479,7 +474,7 @@ void luciole::PlacesSidebar::rebuild() {
         return drive.root && !m_pins.contains(*drive.root);
       });
     }
-    m_tree->setRoots(m_pins, drives, m_showNetwork);
+    m_tree->setRoots(m_pins, drives, m_showNetwork, m_trashFull);
     m_tree->sync(m_current, m_showHidden);
     return;
   }
