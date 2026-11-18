@@ -412,7 +412,7 @@ void SidebarController::refreshTrashAvailability() {
   });
 }
 
-void SidebarController::refreshTrashAvailabilityAfterJob(std::uint64_t jobId) {
+void SidebarController::refreshTrashAvailabilityAfterJob(luciole::JobId jobId) {
   if (m_trashJobsRefreshed.insert(jobId).second) {
     refreshTrashAvailability();
   }
