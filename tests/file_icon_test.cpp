@@ -4,6 +4,7 @@
 #include "system/icon_resolver.h"
 #include "test_check.h"
 #include "thumbnails/file_icon_cache.h"
+#include "ui/palette.h"
 
 #include <algorithm>
 #include <chrono>
@@ -28,7 +29,8 @@ namespace {
       fs::create_directories(root / "data/icons/Parent/scalable/apps");
       std::ofstream(root / "config/gtk-3.0/settings.ini") << "[Settings]\ngtk-icon-theme-name=Test\n";
       std::ofstream(root / "data/icons/Test/index.theme")
-          << "[Icon Theme]\nName=Test\nInherits=Parent\nDirectories=scalable/apps,16x16/apps,64x64/apps\n"
+          << "[Icon Theme]\nName=Test\nInherits=Parent\nFollowsColorScheme=true\n"
+             "Directories=scalable/apps,16x16/apps,64x64/apps\n"
              "[scalable/apps]\nSize=48\nType=Scalable\nMinSize=16\nMaxSize=256\n"
              "[16x16/apps]\nSize=16\nType=Fixed\n[64x64/apps]\nSize=64\nType=Fixed\n";
       std::ofstream(root / "data/icons/Parent/index.theme")
@@ -42,6 +44,12 @@ namespace {
           root / "data/icons/Test/scalable/apps/folder.svg", root / "data/icons/Parent/scalable/apps/inherited.svg"
       );
       std::ofstream(root / "data/icons/Test/scalable/apps/broken.svg") << "broken SVG";
+      // Drawn like Breeze's folders: the fill follows the color scheme's accent, #3daee9 by default.
+      for (const auto& path : {root / "data/icons/Test/scalable/apps/accent-folder.svg", root / "accent-folder.svg"}) {
+        std::ofstream(path) << "<svg xmlns='http://www.w3.org/2000/svg' width='48' height='48'>"
+                               "<style id='current-color-scheme'>.ColorScheme-Accent { color: #3daee9; }</style>"
+                               "<path class='ColorScheme-Accent' style='fill:currentColor' d='M0 0h48v48H0z'/></svg>";
+      }
       std::ofstream(root / "launcher.desktop") << "[Desktop Entry]\nType=Application\nIcon=custom-app\nExec=false\n";
       for (const int size : {16, 64}) {
         png_image image{};
@@ -122,6 +130,29 @@ namespace {
     const auto current = cache.request(source, 80);
     pump.until([&] { return current->ready; });
     TEST_CHECK(obsolete != current && !obsolete->ready);
+
+    // A theme that follows the color scheme takes the palette's primary for its accent; a copy of the same SVG
+    // outside the theme keeps its own color.
+    const auto roots = IconResolver::colorSchemeThemeRoots();
+    TEST_CHECK(std::ranges::contains(roots, (fixture.root / "data/icons/Test").native()));
+    Palette colors{};
+    colors.primary = rgbHex(0xe0457b);
+    cache.setColorScheme(roots, iconColorSchemeStylesheet(colors));
+    cache.invalidate();
+    const auto accent = cache.request({.names = {"accent-folder"}, .filePath = {}, .desktopFile = {}}, 48);
+    const auto foreign =
+        cache.request({.names = {}, .filePath = (fixture.root / "accent-folder.svg").native(), .desktopFile = {}}, 48);
+    pump.until([&] { return accent->ready && foreign->ready; });
+    TEST_CHECK(accent->pixels && accent->path.contains("/Test/"));
+    TEST_CHECK(
+        (std::array{accent->pixels->rgba[0], accent->pixels->rgba[1], accent->pixels->rgba[2]})
+        == (std::array<std::uint8_t, 3>{0xe0, 0x45, 0x7b})
+    );
+    TEST_CHECK(foreign->pixels);
+    TEST_CHECK(
+        (std::array{foreign->pixels->rgba[0], foreign->pixels->rgba[1], foreign->pixels->rgba[2]})
+        == (std::array<std::uint8_t, 3>{0x3d, 0xae, 0xe9})
+    );
 
     auto dying = std::make_unique<luciole::FileIconCache>();
     bool destroyed = false;

@@ -45,6 +45,7 @@ namespace luciole {
     Ascending,
     Descending,
     FoldersFirst,
+    HiddenLast,
     Open,
     ContainingFolder,
     OriginalLocation,

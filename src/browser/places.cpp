@@ -65,6 +65,7 @@ std::vector<luciole::UserPlace> luciole::configuredUserPlaces() {
     }
   }
   result.push_back({{.label = "Trash", .location = Location::trash(), .iconName = {}}, "trash"});
+  result.push_back({{.label = "Network", .location = Location::network(), .iconName = {}}, "network"});
   return result;
 }
 
@@ -192,6 +193,9 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     if (std::ranges::none_of(result, [](const auto& pin) { return pin.location == Location::trash(); })) {
       result.push_back({"Trash", Location::trash(), {}});
     }
+    if (std::ranges::none_of(result, [](const auto& pin) { return pin.location == Location::network(); })) {
+      result.push_back({"Network", Location::network(), {}});
+    }
     return result;
   }
   static std::vector<Bookmark> combine(
@@ -288,7 +292,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
             result.ready = true;
             if (proposed) {
               if (proposed->size() > StateStore::placesLimit) {
-                result.error = "Places supports at most 267 rows; remove some bookmarks before adding more.";
+                result.error = "Places supports at most 268 rows; remove some bookmarks before adding more.";
                 return result;
               }
               if (result.bookmarks != expected) {
@@ -439,7 +443,9 @@ bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t befor
 }
 bool luciole::PinService::remove(const Location& location) { return removeMany({location}); }
 bool luciole::PinService::removeMany(const std::vector<Location>& locations) {
-  if (std::ranges::any_of(locations, [](const auto& location) { return location.isTrash(); })) {
+  if (std::ranges::any_of(locations, [](const auto& location) {
+        return location.isTrash() || location == Location::network();
+      })) {
     return false;
   }
   auto proposed = m_state->bookmarks;
@@ -459,7 +465,10 @@ bool luciole::PinService::move(const Location& location, std::size_t position) {
   return save(std::move(proposed));
 }
 bool luciole::PinService::rename(const Bookmark& expected, std::string label) {
-  if (!editable() || expected.location.isTrash() || bookmarkLabelProblem(label)) {
+  if (!editable()
+      || expected.location.isTrash()
+      || expected.location == Location::network()
+      || bookmarkLabelProblem(label)) {
     return false;
   }
   auto proposed = m_state->bookmarks;
@@ -471,7 +480,7 @@ bool luciole::PinService::rename(const Bookmark& expected, std::string label) {
   return save(std::move(proposed));
 }
 bool luciole::PinService::setIcon(const Bookmark& expected, std::string iconName) {
-  if (!editable() || expected.location.isTrash()) {
+  if (!editable() || expected.location.isTrash() || expected.location == Location::network()) {
     return false;
   }
   auto proposed = m_state->bookmarks;

@@ -250,6 +250,7 @@ namespace {
       describe(P::SortBy, "sort_by", [](S& s) -> auto& { return s.sort.field; }, {kSortFields}),
       describe(P::SortDescending, "sort_descending", [](S& s) -> auto& { return s.sort.descending; }),
       describe(P::DirectoriesFirst, "directories_first", [](S& s) -> auto& { return s.sort.directoriesFirst; }),
+      describe(P::HiddenLast, "hidden_last", [](S& s) -> auto& { return s.sort.hiddenLast; }),
       describe(P::ViewMode, "view_mode", [](S& s) -> auto& { return s.viewMode; }, {kViewModes}),
       describe(
           P::GridIconSize, "grid_icon_size", [](S& s) -> auto& { return s.gridIconSize; },
@@ -281,6 +282,7 @@ namespace {
       describe(P::ShowSidebar, "show_sidebar", [](S& s) -> auto& { return s.showSidebar; }),
       describe(P::SidebarTree, "sidebar_tree", [](S& s) -> auto& { return s.sidebarTree; }),
       describe(P::ShowDrives, "show_drives", [](S& s) -> auto& { return s.showDrives; }),
+      describe(P::ShowNetwork, "show_network", [](S& s) -> auto& { return s.showNetwork; }),
       describe(P::ExpandableFolders, "expandable_folders", [](S& s) -> auto& { return s.expandableFolders; }),
       describe(P::ShowPreview, "show_preview", [](S& s) -> auto& { return s.showPreview; }),
       describe(P::ChooserShowPreview, "chooser_show_preview", [](S& s) -> auto& { return s.chooserShowPreview; }),

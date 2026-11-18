@@ -11,8 +11,9 @@
 
 namespace luciole {
   inline constexpr std::array<int, 9> kGridIconSizes{32, 48, 64, 80, 96, 128, 160, 192, 256};
-  inline constexpr int kDefaultGridIconSize = 48;
+  inline constexpr int kDefaultGridIconSize = 96;
   inline constexpr std::array<int, 8> kListIconSizes{16, 20, 24, 28, 32, 40, 48, 64};
+  inline constexpr int kDefaultListIconSize = 32;
   inline constexpr int kMinSidebarWidth = 160;
   inline constexpr int kMaxSidebarWidth = 400;
   inline constexpr int kDefaultSidebarWidth = 206;
@@ -212,6 +213,7 @@ namespace luciole {
     SortField field = SortField::Name;
     bool descending = false;
     bool directoriesFirst = true;
+    bool hiddenLast = false;
     bool operator==(const SortOptions&) const = default;
   };
 

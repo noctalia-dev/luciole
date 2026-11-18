@@ -236,6 +236,14 @@ void BrowserPage::iconThemeChanged() {
   m_surface->requestUpdate();
 }
 
+void BrowserPage::fontChanged() {
+  m_browserDirty = true;
+  m_surface->requestLayout();
+  if (m_popupSurface) {
+    m_popupSurface->requestLayout();
+  }
+}
+
 bool BrowserPage::initialize(const std::optional<std::string>& initialLocation) {
   if (initialLocation) {
     (void)browser().openText(*initialLocation);
@@ -299,6 +307,23 @@ void BrowserPage::jobChanged(OperationJob& job) {
   case JobKind::Create:
     m_createController.changed(job);
     break;
+  }
+  if (job.kind() == JobKind::Trash) {
+    const auto status = job.service<luciole::TrashService>().snapshot().status;
+    if (status == luciole::TrashStatus::Finished
+        || status == luciole::TrashStatus::Error
+        || status == luciole::TrashStatus::Cancelled) {
+      m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
+    }
+  } else if (job.kind() == JobKind::EmptyTrash) {
+    const auto status = job.service<luciole::EmptyTrashService>().snapshot().status;
+    if (status == luciole::EmptyTrashStatus::Finished
+        || status == luciole::EmptyTrashStatus::Error
+        || status == luciole::EmptyTrashStatus::Cancelled) {
+      m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
+    }
+  } else if (job.kind() == JobKind::Restore && !job.service<luciole::RestoreService>().busy()) {
+    m_sidebar.refreshTrashAvailabilityAfterJob(job.id());
   }
   m_browserDirty = true;
   m_surface->requestUpdate();
@@ -1444,6 +1469,7 @@ void BrowserPage::runAction(
       {Action::Ascending, sort},
       {Action::Descending, sort},
       {Action::FoldersFirst, sort},
+      {Action::HiddenLast, sort},
       {Action::Open, [](BrowserPage& page, const Call& call) { page.openTargets(call.targets); }},
       {Action::ContainingFolder,
        [](BrowserPage& page, const Call& call) { page.showContaining(call.targets.front().location()); }},
@@ -1592,6 +1618,8 @@ void BrowserPage::sortAction(Action action) {
     options.descending = action == Action::Descending;
   } else if (action == Action::FoldersFirst) {
     options.directoriesFirst = !options.directoriesFirst;
+  } else if (action == Action::HiddenLast) {
+    options.hiddenLast = !options.hiddenLast;
   } else if (options.field != field) {
     options.field = field;
     options.descending = false;
@@ -1954,7 +1982,8 @@ float BrowserPage::gridHeight() const {
       ? luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, context).height
       : luciole::fileRowHeight(
             m_savedSettings.presentation, context,
-            luciole::fileRowIconSize(m_savedSettings.presentation, m_listIconSize)
+            m_viewMode == luciole::ViewMode::Miller ? luciole::millerRowIconSize(m_savedSettings.presentation)
+                                                    : luciole::fileRowIconSize(m_listIconSize)
         );
 }
 
@@ -1993,7 +2022,7 @@ int BrowserPage::zoomStep() const {
   if (m_viewMode == luciole::ViewMode::Grid) {
     return static_cast<int>(m_gridZoom);
   }
-  const auto size = static_cast<int>(luciole::fileRowIconSize(m_savedSettings.presentation, m_listIconSize));
+  const auto size = static_cast<int>(luciole::fileRowIconSize(m_listIconSize));
   return static_cast<int>(std::ranges::find(luciole::kListIconSizes, size) - luciole::kListIconSizes.begin());
 }
 
@@ -2003,7 +2032,7 @@ void BrowserPage::changeZoomStep(int requested) {
     return;
   }
   const auto step = std::clamp(requested, 0, static_cast<int>(luciole::kListIconSizes.size()) - 1);
-  // Staying on the density's size keeps the list on automatic sizing.
+  // Staying on the default size keeps the list on automatic sizing.
   if (step != zoomStep()) {
     changeListIconSize(luciole::kListIconSizes[static_cast<std::size_t>(step)]);
   }
@@ -2127,7 +2156,10 @@ void BrowserPage::syncBrowser() {
       : sort.field == luciole::SortField::Size ? (sort.descending ? "largest first" : "smallest first")
                                                : (sort.descending ? "Z to A" : "A to Z");
   m_menuButton->setTooltip(
-      std::format("View options: {}, {}{}", field, direction, sort.directoriesFirst ? " · Folders first" : "")
+      std::format(
+          "View options: {}, {}{}{}", field, direction, sort.directoriesFirst ? " · Folders first" : "",
+          sort.hiddenLast ? " · Hidden last" : ""
+      )
   );
   const bool grid = m_viewMode == luciole::ViewMode::Grid;
   m_viewSwitch->setSelectedIndex(grid ? 0 : m_viewMode == luciole::ViewMode::List ? 1 : 2);
@@ -2485,10 +2517,22 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
       {
           .acceptedButtons = InputArea::buttonMask(BTN_LEFT) | InputArea::buttonMask(BTN_RIGHT),
           .flexGrow = 1.0F,
+          .onLeave = [this] { m_titlebarMove.cancel(); },
+          .onMotion =
+              [this](const InputArea::PointerData& data) {
+                if (const auto serial = m_titlebarMove.motion(data.localX, data.localY)) {
+                  m_surface->beginMove(*serial);
+                }
+              },
+          // InputArea reports releases through onPress too.
           .onPress =
               [this](const InputArea::PointerData& data) {
+                if (!data.pressed) {
+                  m_titlebarMove.cancel();
+                  return;
+                }
                 if (data.button == BTN_LEFT) {
-                  m_surface->beginMove(data.serial);
+                  m_titlebarMove.press(data.serial, data.localX, data.localY);
                 } else {
                   m_surface->showWindowMenu(data.serial, static_cast<int>(data.sceneX), static_cast<int>(data.sceneY));
                 }
@@ -2504,11 +2548,21 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
        .fill = colorSpecFromRole(ColorRole::SurfaceContainer),
        .height = 48.0F},
       std::move(title),
-      ui::button({.glyph = "minus", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->minimize(); }}),
       ui::button(
-          {.glyph = "square", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->toggleMaximized(); }}
+          {.glyph = "minus",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] { m_surface->minimize(); }}
       ),
-      ui::button({.glyph = "x", .variant = ButtonVariant::Ghost, .onClick = [this] { m_surface->close(); }})
+      ui::button(
+          {.glyph = "square",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .onClick = [this] { m_surface->toggleMaximized(); }}
+      ),
+      ui::button({.glyph = "x", .glyphSize = Style::baseGlyphSize, .variant = ButtonVariant::Ghost, .onClick = [this] {
+                    m_surface->close();
+                  }})
   );
 }
 
@@ -2520,6 +2574,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_back,
                .glyph = "arrow-left",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Back (Alt+Left)",
                .onClick = [this] { dispatchAction(Action::Back); }}
@@ -2527,6 +2582,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_forward,
                .glyph = "arrow-right",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Forward (Alt+Right)",
                .onClick = [this] { dispatchAction(Action::Forward); }}
@@ -2534,6 +2590,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_up,
                .glyph = "arrow-up",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Parent folder (Alt+Up)",
                .onClick = [this] { dispatchAction(Action::Up); }}
@@ -2545,6 +2602,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_newFolderButton,
                .glyph = "folder-plus",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "New Folder… (Ctrl+Shift+N)",
                .visible = choosing(),
@@ -2554,6 +2612,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_sortButton,
                .glyph = "arrows-sort",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .tooltip = "Sort files",
                .onClick = [this] { m_menuController.openSortMenu(sceneRect(*m_sortButton)); }}
@@ -2575,6 +2634,8 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
                .selectedIndex = m_viewMode == luciole::ViewMode::Grid ? 0U
                    : m_viewMode == luciole::ViewMode::List            ? 1U
                                                                       : 2U,
+               // The segments are glyph-only, so the font size is the glyph size.
+               .fontSize = Style::baseGlyphSize,
                .compact = true,
                .onChange =
                    [this](std::size_t index) {
@@ -2587,6 +2648,7 @@ std::unique_ptr<Flex> BrowserPage::buildToolbar() {
           ui::button(
               {.out = &m_menuButton,
                .glyph = "dots-vertical",
+               .glyphSize = Style::baseGlyphSize,
                .variant = ButtonVariant::Ghost,
                .visible = !choosing(),
                .onClick = [this] { m_menuController.openMenu(); }}

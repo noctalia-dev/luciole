@@ -2,6 +2,7 @@
 
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
+#include "imaging/svg_rasterizer.h"
 #include "system/icon_resolver.h"
 
 #include <algorithm>
@@ -44,7 +45,18 @@ namespace {
     return icon ? icon.get() : "";
   }
 
-  luciole::FileIconImage load(const luciole::FileIconSource& source, int size) {
+  struct IconColorScheme {
+    std::vector<std::string> roots;
+    std::string stylesheet;
+  };
+
+  bool insideRoot(const std::string& path, const std::vector<std::string>& roots) {
+    return std::ranges::any_of(roots, [&path](const std::string& root) {
+      return path.size() > root.size() && path.starts_with(root) && path[root.size()] == '/';
+    });
+  }
+
+  luciole::FileIconImage load(const luciole::FileIconSource& source, int size, const IconColorScheme* scheme) {
     IconResolver resolver(true);
     std::vector<std::string> candidates;
     if (const auto icon = desktopIcon(source.desktopFile); !icon.empty()) {
@@ -59,7 +71,10 @@ namespace {
       if (path.empty()) {
         continue;
       }
-      if (auto image = loadImageFile(path, size)) {
+      auto image = scheme != nullptr && path.ends_with(".svg") && insideRoot(path, scheme->roots)
+          ? luciole::rasterizeSvg(path, size, false, scheme->stylesheet)
+          : loadImageFile(path, size);
+      if (image) {
         return {
             .pixels = std::make_shared<const LoadedImageFile>(std::move(*image)),
             .path = path,
@@ -96,11 +111,13 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
     std::shared_ptr<FileIconImage> image;
     int pixels = 0;
     std::uint64_t generation = 0;
+    std::shared_ptr<const IconColorScheme> colorScheme;
   };
   std::unordered_map<std::string, Item> cache;
   std::deque<Request> pending;
   std::function<void()> changed;
   std::uint64_t generation = 0;
+  std::shared_ptr<const IconColorScheme> colorScheme;
   std::uint64_t clock = 0;
   std::size_t active = 0;
   bool alive = true;
@@ -162,7 +179,7 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
         const auto& request = *static_cast<Request*>(data);
         auto image = std::make_unique<FileIconImage>();
         try {
-          *image = load(request.source, request.pixels);
+          *image = load(request.source, request.pixels, request.colorScheme.get());
         } catch (const std::exception&) {
           image->ready = true;
         }
@@ -180,6 +197,13 @@ luciole::FileIconCache::~FileIconCache() {
 }
 void luciole::FileIconCache::setChangedCallback(std::function<void()> callback) {
   m_state->changed = std::move(callback);
+}
+void luciole::FileIconCache::setColorScheme(std::vector<std::string> roots, std::string stylesheet) {
+  m_state->colorScheme = roots.empty()
+      ? nullptr
+      : std::make_shared<const IconColorScheme>(
+            IconColorScheme{.roots = std::move(roots), .stylesheet = std::move(stylesheet)}
+        );
 }
 void luciole::FileIconCache::invalidate() {
   ++m_state->generation;
@@ -201,7 +225,7 @@ luciole::FileIconCache::request(const FileIconSource& source, int pixels) {
   }
   auto image = std::make_shared<FileIconImage>();
   m_state->cache.emplace(key, State::Item{image, ++m_state->clock});
-  m_state->pending.push_back({m_state, source, image, pixels, m_state->generation});
+  m_state->pending.push_back({m_state, source, image, pixels, m_state->generation, m_state->colorScheme});
   m_state->pump();
   return image;
 }

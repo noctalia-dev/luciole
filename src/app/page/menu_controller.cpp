@@ -17,6 +17,7 @@
 #include "browser/places.h"
 #include "clipboard/text_clipboard.h"
 #include "config/settings.h"
+#include "config/view_preference_writer.h"
 #include "core/deferred_call.h"
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
@@ -65,14 +66,16 @@ namespace {
 } // namespace
 
 MenuController::MenuController(
-    PageContext& page, luciole::PinService& pins, TransferController& transferController,
-    luciole::TerminalLauncher& terminal, luciole::PathCompletion& siblingCompletion, CreateController& creator,
-    SubmenuController& submenus, RenameController& renamer, PropertiesController& properties,
-    DetailsHeaderController& columns, LocationBarController& locationBar, ProgramController& programs
+    PageContext& page, luciole::PinService& pins, luciole::ViewPreferenceWriter& preferences,
+    TransferController& transferController, luciole::TerminalLauncher& terminal,
+    luciole::PathCompletion& siblingCompletion, CreateController& creator, SubmenuController& submenus,
+    RenameController& renamer, PropertiesController& properties, DetailsHeaderController& columns,
+    LocationBarController& locationBar, ProgramController& programs
 )
-    : m_page(page), m_pins(pins), m_transferController(transferController), m_terminal(terminal),
-      m_siblingCompletion(siblingCompletion), m_creator(creator), m_submenus(submenus), m_renamer(renamer),
-      m_properties(properties), m_columns(columns), m_locationBar(locationBar), m_programs(programs) {}
+    : m_page(page), m_pins(pins), m_preferences(preferences), m_transferController(transferController),
+      m_terminal(terminal), m_siblingCompletion(siblingCompletion), m_creator(creator), m_submenus(submenus),
+      m_renamer(renamer), m_properties(properties), m_columns(columns), m_locationBar(locationBar),
+      m_programs(programs) {}
 
 ContextMenuControlEntry
 MenuController::actionEntry(Action action, const luciole::ActionRequest& request, bool radio) const {
@@ -362,28 +365,44 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     );
     return;
   }
-  {
+  const auto adjacent = [this, location = bookmark.location](bool previous) -> std::optional<std::size_t> {
     const auto& pins = m_pins.bookmarks();
-    const auto found = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);
-    const auto index = static_cast<std::size_t>(found - pins.begin());
+    const auto found = std::ranges::find(pins, location, &luciole::Bookmark::location);
+    if (found == pins.end()) {
+      return std::nullopt;
+    }
+    auto index = static_cast<std::size_t>(found - pins.begin());
+    while (previous ? index > 0 : index + 1 < pins.size()) {
+      index = previous ? index - 1 : index + 1;
+      if (m_page.settings().showNetwork || pins[index].location != luciole::Location::network()) {
+        return index;
+      }
+    }
+    return std::nullopt;
+  };
+  {
     entries.push_back({.label = "", .separator = true});
-    if (!bookmark.location.isTrash()) {
+    if (!bookmark.location.isTrash() && bookmark.location != luciole::Location::network()) {
       entries.push_back({.id = 2, .label = "Unpin", .enabled = m_pins.editable()});
       entries.push_back({.id = 6, .label = "Rename place…", .enabled = m_pins.editable()});
       entries.push_back({.id = 8, .label = "Change icon…", .enabled = m_pins.editable()});
     }
-    entries.push_back({.id = 3, .label = "Move up", .enabled = m_pins.editable() && index > 0});
-    entries.push_back({.id = 4, .label = "Move down", .enabled = m_pins.editable() && index + 1 < pins.size()});
+    entries.push_back({.id = 3, .label = "Move up", .enabled = m_pins.editable() && adjacent(true).has_value()});
+    entries.push_back({.id = 4, .label = "Move down", .enabled = m_pins.editable() && adjacent(false).has_value()});
   }
   entries.push_back({.label = "", .separator = true});
   if (bookmark.location == luciole::Location::trash()) {
     entries.push_back({.id = 7, .label = "Empty Trash…", .enabled = false, .destructive = true});
     entries.push_back({.label = "", .separator = true});
   }
-  entries.push_back({.id = 5, .label = "Properties"});
+  if (bookmark.location == luciole::Location::network()) {
+    entries.push_back({.id = 9, .label = "Hide Network"});
+  } else {
+    entries.push_back({.id = 5, .label = "Properties"});
+  }
   showContextMenu(
       entries,
-      [this, bookmark](int action) {
+      [this, bookmark, adjacent](int action) {
         if (!m_pins.contains(bookmark.location)) {
           m_page.actionError("This pin is no longer available.");
           return;
@@ -392,6 +411,8 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
           m_page.browser().open(bookmark.location);
         } else if (action == 2) {
           m_pins.remove(bookmark.location);
+        } else if (action == 9 && bookmark.location == luciole::Location::network()) {
+          m_preferences.submit({{luciole::BrowserPreference::ShowNetwork, false}});
         } else if (action == 7 && bookmark.location == luciole::Location::trash()) {
           m_page.dispatchAction(Action::EmptyTrash);
         } else if (action == 6) {
@@ -399,12 +420,9 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
         } else if (action == 8) {
           m_renamer.openPlaceIconPicker(bookmark);
         } else if (action == 3 || action == 4) {
-          const auto& pins = m_pins.bookmarks();
-          const auto found = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);
-          const auto index = static_cast<std::size_t>(found - pins.begin());
-          m_pins.move(
-              bookmark.location, action == 3 ? (index > 0 ? index - 1 : 0) : std::min(index + 1, pins.size() - 1)
-          );
+          if (const auto index = adjacent(action == 3)) {
+            m_pins.move(bookmark.location, *index);
+          }
         } else if (action == 5) {
           luciole::DirectoryEntry entry{
               .place = bookmark.location,
@@ -721,7 +739,9 @@ void MenuController::showActionMenu(
   }
   for (const auto action : actions) {
     if (action) {
-      entries.push_back(actionEntry(*action, request, radio && *action != Action::FoldersFirst));
+      entries.push_back(
+          actionEntry(*action, request, radio && *action != Action::FoldersFirst && *action != Action::HiddenLast)
+      );
     } else {
       entries.push_back({.label = "", .separator = true});
     }
@@ -746,7 +766,7 @@ void MenuController::openSortMenu(std::optional<LayoutRect> anchor, bool alignLe
   showActionMenu(
       {Action::SortName, Action::SortType, Action::SortSize, Action::SortModified, Action::SortAccessed,
        Action::SortCreated, Action::SortOwner, Action::SortGroup, Action::SortPermissions, Action::SortLocation,
-       std::nullopt, Action::Ascending, Action::Descending, std::nullopt, Action::FoldersFirst},
+       std::nullopt, Action::Ascending, Action::Descending, std::nullopt, Action::FoldersFirst, Action::HiddenLast},
       true, !anchor.has_value(), anchor, alignLeft
   );
 }

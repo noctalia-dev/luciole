@@ -58,7 +58,9 @@ External drag destinations use actual core `wl_keyboard.modifiers` events delive
 
 The 2026-11-13 investigation reproduces Ctrl choosing Move in Luciole and Shift choosing Copy in a matched native Qt receiver when drag destinations do not receive the held state. The corresponding Umbriel fix forwards modifiers to the active native pointer-drag focus client and clears stale state on leave/drop/client destruction, retaining keyboard-focus, key-event, cursor-ownership, session-lock and capture boundaries. This is compositor-owned protocol delivery, outside both Noctalia library copies. Luciole does not guess missing modifiers, identify source applications or force a global action. A compositor must supply the modifier state for an external target to honor it.
 
-## Trash drops
+## Trash selections and drops
+
+Move to Trash and Delete use the selected entries' actual locations, including recursive search results and expanded folder rows. ActionRegistry retains current-request, metadata, per-item Trash capability, native-location, job-busy and listing guards; an active query is not a refusal reason. TrashController uses TrashService's multi-parent preparation rather than treating the displayed search root as every result's parent. Completion refreshes the active query. [Nautilus likewise checks selected-file capabilities and passes their locations to its operation](https://github.com/GNOME/nautilus/blob/main/src/nautilus-files-view.c). RecursiveSearch preserves the provider etag in each result so permanent deletion compares the same captured version as an ordinary directory listing. Permanent deletion retains its separate confirmation and identity-validation path; changed results are still refused.
 
 The Places Trash root is a separate move destination, routed through TrashService rather than TransferService. Both sidebar modes and the internal fallback use the same path. FileDropTarget's moveOnly policy negotiates only Move, including when the source advertises Ask intent; legacy and Copy-only offers are rejected. Ctrl and Alt hover policies reject copy/chooser drops. Provider sources and deferred extraction remain unsupported.
 

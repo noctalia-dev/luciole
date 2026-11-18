@@ -217,9 +217,15 @@ void luciole::PlacesSidebar::sync(std::optional<Location> current) {
   }
   markLayoutDirty();
 }
+void luciole::PlacesSidebar::setTrashFull(bool full) {
+  if (std::exchange(m_trashFull, full) != full) {
+    invalidate();
+  }
+}
 void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   auto button = ui::button(
       {.glyph = drive.glyph,
+       .glyphSize = luciole::kSideListGlyphSize,
        .controlHeight = luciole::kSideListRowHeight,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
@@ -265,7 +271,9 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   // the row removes the drive instead of opening it.
   Glyph* eject = nullptr;
   if (drive.removal != DriveRemoval::None) {
-    eject = static_cast<Glyph*>(raw->addChild(ui::glyph({.glyph = "player-eject", .glyphSize = Style::fontSizeBody})));
+    eject = static_cast<Glyph*>(
+        raw->addChild(ui::glyph({.glyph = "player-eject", .glyphSize = luciole::kSideListGlyphSize}))
+    );
   }
   struct EjectPointer {
     bool over = false;
@@ -320,6 +328,7 @@ void luciole::PlacesSidebar::addRow(
   auto button = ui::button(
       {.text = bookmark.label,
        .glyph = glyph,
+       .glyphSize = luciole::kSideListGlyphSize,
        .controlHeight = luciole::kSideListRowHeight,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
@@ -415,6 +424,11 @@ void luciole::PlacesSidebar::setShowDrives(bool showDrives) {
     invalidate();
   }
 }
+void luciole::PlacesSidebar::setShowNetwork(bool showNetwork) {
+  if (std::exchange(m_showNetwork, showNetwork) != showNetwork) {
+    invalidate();
+  }
+}
 void luciole::PlacesSidebar::rebuild() {
   if (m_treeEnabled) {
     m_scroll->setVisible(false);
@@ -460,18 +474,7 @@ void luciole::PlacesSidebar::rebuild() {
         return drive.root && !m_pins.contains(*drive.root);
       });
     }
-    if (!m_pins.contains(Location::network())) {
-      drives.insert(
-          drives.begin(),
-          {.key = "network",
-           .label = "Network",
-           .glyph = "network",
-           .root = Location::network(),
-           .removal = DriveRemoval::None,
-           .usage = std::nullopt}
-      );
-    }
-    m_tree->setRoots(m_pins, drives);
+    m_tree->setRoots(m_pins, drives, m_showNetwork, m_trashFull);
     m_tree->sync(m_current, m_showHidden);
     return;
   }
@@ -503,19 +506,20 @@ void luciole::PlacesSidebar::rebuild() {
   heading("Places", &m_heading);
   const auto& pins = m_pins.bookmarks();
   for (std::size_t i = 0; i < pins.size(); ++i) {
+    if (!m_showNetwork && pins[i].location == Location::network()) {
+      continue;
+    }
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;
     });
     addRow(
         pins[i],
         !pins[i].iconName.empty()                ? pins[i].iconName
+            : pins[i].location.isTrash()         ? (m_trashFull ? "trash-filled" : "trash")
             : known == m_pins.userPlaces().end() ? "folder"
                                                  : known->glyphName,
         i
     );
-  }
-  if (!m_pins.contains(Location::network())) {
-    addRow({"Network", Location::network(), {}}, "network", std::nullopt);
   }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));

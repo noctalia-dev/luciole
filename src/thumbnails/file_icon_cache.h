@@ -7,6 +7,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace luciole {
   struct FileIconImage {
@@ -31,6 +33,9 @@ namespace luciole {
     void imageChanged();
     void invalidate();
     void setChangedCallback(std::function<void()> callback);
+    // SVG icons under one of `roots` (a theme that follows the color scheme) render with `stylesheet` from later
+    // requests on; no roots turns it off. invalidate() drops the icons drawn before.
+    void setColorScheme(std::vector<std::string> roots, std::string stylesheet);
 
   private:
     SharedTextureCache m_textures;

@@ -12,7 +12,7 @@ namespace luciole {
   struct TreeRowInfo;
   struct BrowseViewport {
     ViewMode mode = ViewMode::Grid;
-    int iconSize = 48;
+    int iconSize = kDefaultGridIconSize;
     float vertical = 0;
     float horizontal = 0;
     float withinRow = 0;

@@ -27,6 +27,7 @@
 #include "app/page/submenu_controller.h"
 #include "app/page/transfer_controller.h"
 #include "app/page/trash_controller.h"
+#include "app/window_move_gesture.h"
 #include "app/workspace_command.h"
 #include "app/workspace_layout.h"
 #include "browser/action_registry.h"
@@ -104,6 +105,8 @@ public:
   ~BrowserPage();
 
   void iconThemeChanged();
+  // The system font changed: rebuild the file views and lay out the window and its popup again.
+  void fontChanged();
 
   bool initialize(const std::optional<std::string>& initialLocation);
 
@@ -407,6 +410,7 @@ private:
   MenuController m_menuController{
       *this,
       m_pins,
+      m_preferences,
       m_transferController,
       m_terminal,
       m_siblingCompletion,
@@ -465,6 +469,7 @@ private:
   ChooserHooks m_chooser;
 
   Flex* m_titlebar = nullptr;
+  WindowMoveGesture m_titlebarMove;
   Flex* m_paneContentFrame = nullptr;
   VirtualGridView* m_list = nullptr;
   Segmented* m_viewSwitch = nullptr;

@@ -200,7 +200,7 @@ void luciole::DirectoryTree::publish() {
   std::vector<DirectoryEntries::Index> rows;
   std::unordered_map<EntryId, EntryId> parents;
   std::set<EntryId> retained;
-  const auto append = [&](this auto&& self, const DirectoryEntry& entry, std::size_t depth) -> void {
+  const auto append = [&](auto&& self, const DirectoryEntry& entry, std::size_t depth) -> void {
     if (depth >= maxDepth + 1) {
       return;
     }
@@ -235,13 +235,13 @@ void luciole::DirectoryTree::publish() {
       }
       parents.emplace(child.id, entry.id);
       rows.push_back({source, i});
-      self(child, depth + 1);
+      self(self, child, depth + 1);
     }
     node.ids->previous = std::move(currentIds);
   };
   if (!m_nodes.empty()) {
     for (const auto& entry : m_root.entries) {
-      append(entry, 0);
+      append(append, entry, 0);
     }
   }
   for (auto it = m_nodes.begin(); it != m_nodes.end();) {

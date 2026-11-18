@@ -111,8 +111,8 @@ namespace {
     if (!all(c, r, [](const DirectoryEntry& entry) { return entry.location().nativePath().has_value(); })) {
       return unavailable("This operation currently supports native files only.");
     }
-    if (!rename && (!native(r) || !c.query.empty() || !ready(c))) {
-      return unavailable("Open the containing native folder before moving items to Trash.");
+    if (!rename && (!ready(c) || r.targets.size() > 4096)) {
+      return unavailable("Select at most 4096 native items from an available listing.");
     }
     if (!all(c, r, [&](const DirectoryEntry& entry) {
           return (rename ? entry.access.rename : entry.access.trash).value_or(true);
@@ -426,6 +426,10 @@ namespace {
        .label = "Folders first",
        .shortcut = "",
        .rule = [](const C& c, const R&) { return checked(c.model.sort().directoriesFirst); }},
+      {.action = A::HiddenLast,
+       .label = "Hidden last",
+       .shortcut = "",
+       .rule = [](const C& c, const R&) { return checked(c.model.sort().hiddenLast); }},
       {.action = A::Open, .label = "Open", .shortcut = "Enter", .scope = S::Targets, .rule = open},
       {.action = A::ContainingFolder,
        .label = "Show in containing folder",
@@ -654,6 +658,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::Ascending:
   case A::Descending:
   case A::FoldersFirst:
+  case A::HiddenLast:
   case A::Open:
   case A::SelectAll:
   case A::InvertSelection:

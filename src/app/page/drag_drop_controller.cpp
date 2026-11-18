@@ -724,6 +724,8 @@ void DragDropController::layout(Renderer& renderer) {
   luciole::FileIconSource icon{.names = {"folder"}, .filePath = {}, .desktopFile = {}};
   if (m_drag->sourcePin == luciole::Location::trash()) {
     icon.names = {"user-trash"};
+  } else if (m_drag->sourcePin == luciole::Location::network()) {
+    icon.names = {"network-workgroup"};
   }
   if (!m_drag->entries.empty()) {
     if (const auto* entry = m_page.browser().model().entry(m_drag->entries.front().id)) {

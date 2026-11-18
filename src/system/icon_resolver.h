@@ -51,6 +51,8 @@ public:
   static std::shared_ptr<const IconThemeWatchPaths> themeWatchPaths();
   static std::uint64_t themeGeneration();
   static std::string activeThemeName();
+  // The active theme chain's roots when its index.theme sets FollowsColorScheme (KDE), else empty.
+  static std::vector<std::string> colorSchemeThemeRoots();
   // Icon lookups performed so far in this process.
   static std::uint64_t lookupCount();
 

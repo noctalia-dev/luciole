@@ -38,6 +38,7 @@ background_opacity = 1.0
 corner_radius_scale = 1.0
 sort_by = "name"
 directories_first = true
+hidden_last = false
 ```
 
 Validate one file without opening a window or reading adjacent GUI overrides:
@@ -52,6 +53,8 @@ luciole config validate /path/to/config.toml
 
 File and folder artwork follows the desktop icon theme. Theme selection changes and edits to active SVG/PNG artwork refresh automatically. If desktop settings support is unavailable, Luciole uses the icon theme named by GTK settings.ini. Nix users need a fresh development shell after updating runtime dependencies.
 
+Icon themes that declare `FollowsColorScheme=true` in their `index.theme` (Breeze, Tela, Colloid, and others) draw their recolorable parts with the `colors.toml` palette, as KDE apps do: folders take the primary color and monochrome icons the text color. They update when the palette changes. Other themes keep their own colors.
+
 ## Browser preferences
 
 All keys below belong in `[browser]`. Dimensions are logical pixels unless stated otherwise. View, zoom and sorting choices become defaults for new pages; existing pages retain their visit state. Interaction, sidebar, thumbnail and preview preferences apply across the application.
@@ -59,8 +62,8 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | Key | Default | Accepted values / meaning |
 | --- | --- | --- |
 | `view_mode` | `"list"` | `"list"`, `"grid"`, `"miller"` |
-| `grid_icon_size` | `48` | `32`, `48`, `64`, `80`, `96`, `128`, `160`, `192`, `256` |
-| `list_icon_size` | `0` | `0` uses the density's size (`20` compact, `28` comfortable); or `16`, `20`, `24`, `28`, `32`, `40`, `48`, `64`. Rows grow with the icon. |
+| `grid_icon_size` | `96` | `32`, `48`, `64`, `80`, `96`, `128`, `160`, `192`, `256` |
+| `list_icon_size` | `0` | `0` uses the default size, `32`; or `16`, `20`, `24`, `28`, `32`, `40`, `48`, `64`. Rows grow with the icon. |
 | `density` | `"compact"` | `"compact"`, `"comfortable"` |
 | `filename_truncation` | `"middle"` | `"middle"` keeps both ends of long filenames; `"end"` keeps the beginning. Applies to List and Columns. |
 | `show_size_caption` | `false` | Size caption in Grid view |
@@ -84,10 +87,12 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `sort_by` | `"name"` | `"name"`, `"type"`, `"size"`, `"modified"`, `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"` |
 | `sort_descending` | `false` | Reverse sort direction |
 | `directories_first` | `true` | Group folders, and links to local folders, before files |
+| `hidden_last` | `false` | Sort shown hidden items after visible ones; `directories_first` applies within each group |
 | `show_sidebar` | `true` | Show the sidebar |
 | `sidebar_width` | `206` | Integer `160` through `400` |
 | `sidebar_tree` | `false` | Optional sidebar folder tree |
 | `show_drives` | `true` | Show drive rows |
+| `show_network` | `true` | Show Network in the sidebar, retaining its saved position when hidden |
 | `expandable_folders` | `false` | Expand folders within List view |
 | `show_preview` | `true` | Show the side preview when space permits |
 | `chooser_show_preview` | `false` | Show the side preview in file picker windows; toggling the preview there changes only this key |
@@ -144,7 +149,9 @@ Custom bookmark icons are saved as an optional `icon` field on the matching book
 
 Thumbnails use the shared `$XDG_CACHE_HOME/thumbnails/` cache plus a Luciole ownership ledger under `$XDG_CACHE_HOME/luciole/`. The default cache root is `~/.cache`. Custom actions live in the [Scripts directory](scripts.md).
 
-An optional `colors.toml` beside the settings files supplies the supported Noctalia palette handoff. The installed template is `share/luciole/templates/colors.toml`; broader palette/font/UI-scale preferences remain planned. See [Packaging](../../PACKAGING.md#configuration-and-writable-data) for the complete ownership and installation notes.
+An optional `colors.toml` beside the settings files supplies the supported Noctalia palette handoff. The installed template is `share/luciole/templates/colors.toml`; UI-scale preferences remain planned. See [Packaging](../../PACKAGING.md#configuration-and-writable-data) for the complete ownership and installation notes.
+
+Text follows the system font: the family and size from GNOME's `font-name` setting, or `gtk-font-name` in `~/.config/gtk-3.0/settings.ini` (then `gtk-4.0`), as written by GNOME Settings or nwg-look. The size sets body text (11 pt is about 14.7 px) and other text keeps its proportions; without a system font, Luciole uses Fontconfig's `sans-serif` at 14 px. GNOME's Large Text (`text-scaling-factor`) multiplies it. Changes apply to open windows right away, including symlinked `settings.ini` files. Icons keep their size.
 
 ## Terminal selection
 

@@ -51,7 +51,7 @@ namespace {
       }
     };
     if (state.bookmarks.size() > luciole::StateStore::placesLimit) {
-      add("bookmarks", "at most 267 Places rows are supported");
+      add("bookmarks", "at most 268 Places rows are supported");
     }
     std::unordered_set<std::string> uris;
     for (std::size_t i = 0; i < state.bookmarks.size(); ++i) {

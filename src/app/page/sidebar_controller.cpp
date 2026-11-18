@@ -40,6 +40,7 @@ void SidebarController::load(const luciole::BrowserSettings& settings) {
   m_showSidebar = settings.showSidebar;
   m_sidebarTree = settings.sidebarTree;
   m_showDrives = settings.showDrives;
+  m_showNetwork = settings.showNetwork;
 }
 
 void SidebarController::applySettings(
@@ -58,6 +59,12 @@ void SidebarController::applySettings(
     m_showDrives = settings.showDrives;
     if (m_places) {
       m_places->setShowDrives(m_showDrives);
+    }
+  }
+  if (force || before.showNetwork != settings.showNetwork) {
+    m_showNetwork = settings.showNetwork;
+    if (m_places) {
+      m_places->setShowNetwork(m_showNetwork);
     }
   }
   if (force || before.sidebarWidth != settings.sidebarWidth) {
@@ -147,6 +154,7 @@ void SidebarController::configureCallbacks() {
   m_places->setChangedCallback([this] { m_page.requestSync(); });
   m_places->setTreeEnabled(m_sidebarTree);
   m_places->setShowDrives(m_showDrives);
+  m_places->setShowNetwork(m_showNetwork);
   m_places->setOpenCallback([this](const luciole::Location& location) {
     m_page.setActionMessage({});
     m_page.browser().open(location);
@@ -389,6 +397,25 @@ void SidebarController::showDropLine(Renderer& renderer, std::size_t slot) {
 void SidebarController::sync(const std::optional<luciole::Location>& location) {
   m_places->setShowHidden(m_page.browser().model().filter().showHidden);
   m_places->sync(location);
+  if (m_trashQueryLocation != location) {
+    m_trashQueryLocation = location;
+    refreshTrashAvailability();
+  }
+}
+
+void SidebarController::refreshTrashAvailability() {
+  const std::weak_ptr<int> lifetime = m_lifetime;
+  m_trashAvailability.query([this, lifetime](auto count) {
+    if (!lifetime.expired() && count) {
+      m_places->setTrashFull(*count > 0);
+    }
+  });
+}
+
+void SidebarController::refreshTrashAvailabilityAfterJob(luciole::JobId jobId) {
+  if (m_trashJobsRefreshed.insert(jobId).second) {
+    refreshTrashAvailability();
+  }
 }
 
 void SidebarController::onFrame() {

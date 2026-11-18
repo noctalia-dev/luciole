@@ -230,6 +230,7 @@ void luciole::ViewPreferenceWriter::saveSort(SortOptions options) {
       {BrowserPreference::SortBy, options.field},
       {BrowserPreference::SortDescending, options.descending},
       {BrowserPreference::DirectoriesFirst, options.directoriesFirst},
+      {BrowserPreference::HiddenLast, options.hiddenLast},
   });
 }
 bool luciole::ViewPreferenceWriter::busy() const {

@@ -52,7 +52,6 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
       ui::input(
           {.out = &m_location,
            .placeholder = "Location",
-           .fontSize = Style::fontSizeCaption,
            .frameVisible = false,
            .minLayoutWidth = 72.0F,
            .flexGrow = 1.0F,
@@ -98,7 +97,6 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
       ui::input(
           {.out = &m_filterInput,
            .placeholder = "Search files…",
-           .fontSize = Style::fontSizeCaption,
            .controlHeight = Style::controlHeight,
            .horizontalPadding = 0.0F,
            .clearButtonEnabled = true,
@@ -678,6 +676,7 @@ void LocationBarController::rebuildBreadcrumbs() {
       ui::button(
           {.out = &m_breadcrumbOverflow,
            .glyph = "dots",
+           .glyphSize = Style::baseGlyphSize,
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Ghost,
            .tooltip = "Parent folders",
@@ -695,7 +694,6 @@ void LocationBarController::rebuildBreadcrumbs() {
     auto* partButton = static_cast<Button*>(m_breadcrumbs->addChild(
         ui::button(
             {.text = crumbs[i].label,
-             .fontSize = Style::fontSizeCaption,
              .controlHeight = Style::controlHeightSm,
              .contentAlign = ButtonContentAlign::Start,
              .variant = ButtonVariant::Ghost,

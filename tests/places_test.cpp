@@ -166,6 +166,36 @@ namespace {
     pump.ready(crowdedPlaces);
     TEST_CHECK(crowdedPlaces.error().empty() && !read(path).contains(first.uri() + ' '));
   }
+  void testExistingNetworkLayout(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "network-layout/state.toml";
+    const auto shared = fixture.root / "network-layout/bookmarks";
+    const auto pin = fixture.pin("existing");
+    write(
+        path,
+        "schema_version = 1\nplaces_customized = true\nbookmarks = [{label='existing', uri='"
+            + pin.location.uri()
+            + "'}]\n"
+    );
+    write(shared, pin.location.uri() + " existing\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    const auto network = luciole::Location::network();
+    TEST_CHECK(service.bookmarks().front() == pin && service.bookmarks().back().location == network);
+    TEST_CHECK(service.move(network, 0));
+    pump.ready(service);
+    TEST_CHECK(read(shared) == pin.location.uri() + " existing\n");
+    luciole::PinService restarted(path, shared, {});
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK(restarted.bookmarks().front().location == network);
+    // An existing shared Network bookmark must not create a second built-in row.
+    replace(shared, read(shared) + network.uri() + " Network\n");
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK(std::ranges::count(restarted.bookmarks(), network, &luciole::Bookmark::location) == 1);
+  }
   void testPlacesAndPins(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "main/state.toml";
@@ -185,9 +215,9 @@ namespace {
     TEST_CHECK(!service.contains(stale.location) && !fs::exists(sharedPath));
     const auto& places = service.userPlaces();
     TEST_CHECK(
-        places.size() == 7
+        places.size() == 8
         && places.front().bookmark.label == "Home"
-        && places.back().bookmark.location == luciole::Location::trash()
+        && places.back().bookmark.location == luciole::Location::network()
     );
     const auto documents = std::ranges::find_if(places, [](const auto& p) { return p.bookmark.label == "Documents"; });
     TEST_CHECK(documents != places.end() && documents->bookmark.location == fixture.location("home/My Documents"));
@@ -199,6 +229,10 @@ namespace {
     const auto downloads =
         std::ranges::find(places, std::string("Downloads"), [](const auto& p) { return p.bookmark.label; })->bookmark;
     const luciole::Bookmark trash{"Trash", luciole::Location::trash(), {}};
+    const luciole::Bookmark network{"Network", luciole::Location::network(), {}};
+    TEST_CHECK(service.contains(network.location));
+    TEST_CHECK(!service.remove(network.location) && !service.rename(network, "changed"));
+    TEST_CHECK(!service.setIcon(network, "star"));
     const auto a = fixture.pin("a");
     const auto b = fixture.pin("b");
     TEST_CHECK(service.add({a, b, a}, service.bookmarks().size()));
@@ -222,6 +256,16 @@ namespace {
     for (const auto& invalid :
          {std::string{}, std::string(257, 'x'), std::string("line\nbreak"), std::string(1, static_cast<char>(0xff))}) {
       TEST_CHECK(!service.rename(renamed, invalid));
+    }
+    const auto sharedBeforeMove = read(sharedPath);
+    TEST_CHECK(service.move(network.location, 0));
+    pump.ready(service);
+    TEST_CHECK(service.bookmarks().front() == network && read(sharedPath) == sharedBeforeMove);
+    {
+      luciole::PinService reloaded(path, sharedPath, {});
+      reloaded.reload();
+      pump.ready(reloaded);
+      TEST_CHECK(reloaded.bookmarks().front() == network);
     }
     TEST_CHECK(service.move(b.location, 0));
     pump.ready(service);
@@ -345,6 +389,7 @@ int main() {
     Fixture fixture;
     testSharedDocument(fixture);
     testPlacesAndPins(fixture);
+    testExistingNetworkLayout(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {

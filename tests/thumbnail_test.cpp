@@ -254,7 +254,10 @@ namespace {
     TEST_CHECK(length > 0);
     decoded = luciole::decodeRasterImage({webp, length}, 128, 1000000, cancel.get());
     WebPFree(webp);
-    TEST_CHECK(decoded && decoded->rgba == original.rgba);
+    // Non-Glycin WebP loaders round-trip through premultiplied alpha, so translucent channels may drift by one.
+    TEST_CHECK(decoded && std::ranges::equal(decoded->rgba, original.rgba, [](std::uint8_t a, std::uint8_t b) {
+                 return std::abs(a - b) <= 1;
+               }));
     const GioPtr<GdkPixbuf> pixbuf(gdk_pixbuf_new(GDK_COLORSPACE_RGB, false, 8, 32, 16));
     gdk_pixbuf_fill(pixbuf.get(), 0xff3020ffU);
     gchar* jpeg = nullptr;

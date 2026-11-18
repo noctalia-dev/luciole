@@ -26,6 +26,7 @@ std::unique_ptr<Button> OperationsController::buildButton() {
   return ui::button(
       {.out = &m_button,
        .glyph = "progress",
+       .glyphSize = Style::baseGlyphSize,
        .variant = ButtonVariant::Ghost,
        .tooltip = "File operations",
        // A file picker starts no file jobs; progress of browsing windows does not belong in it.

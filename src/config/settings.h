@@ -33,11 +33,12 @@ namespace luciole {
     double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
     BrowsePresentation presentation;
     int gridIconSize = kDefaultGridIconSize;
-    int listIconSize = 0; // 0 keeps the density's list icon size.
+    int listIconSize = 0; // 0 keeps kDefaultListIconSize.
     int sidebarWidth = kDefaultSidebarWidth;
     bool showSidebar = true;
     bool sidebarTree = false;
     bool showDrives = true;
+    bool showNetwork = true;
     bool expandableFolders = false;
     bool showPreview = true;
     bool chooserShowPreview = false; // File picker windows keep their own preview visibility.
@@ -82,6 +83,7 @@ namespace luciole {
     SortBy,
     SortDescending,
     DirectoriesFirst,
+    HiddenLast,
     ViewMode,
     GridIconSize,
     ListIconSize,
@@ -95,6 +97,7 @@ namespace luciole {
     ShowSidebar,
     SidebarTree,
     ShowDrives,
+    ShowNetwork,
     ExpandableFolders,
     ShowPreview,
     ChooserShowPreview,
@@ -163,6 +166,7 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::SortField> SortBy{Id::SortBy};
     static constexpr PreferenceKey<bool> SortDescending{Id::SortDescending};
     static constexpr PreferenceKey<bool> DirectoriesFirst{Id::DirectoriesFirst};
+    static constexpr PreferenceKey<bool> HiddenLast{Id::HiddenLast};
     static constexpr PreferenceKey<luciole::ViewMode> ViewMode{Id::ViewMode};
     static constexpr PreferenceKey<int> GridIconSize{Id::GridIconSize};
     static constexpr PreferenceKey<int> ListIconSize{Id::ListIconSize};
@@ -176,6 +180,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> ShowSidebar{Id::ShowSidebar};
     static constexpr PreferenceKey<bool> SidebarTree{Id::SidebarTree};
     static constexpr PreferenceKey<bool> ShowDrives{Id::ShowDrives};
+    static constexpr PreferenceKey<bool> ShowNetwork{Id::ShowNetwork};
     static constexpr PreferenceKey<bool> ExpandableFolders{Id::ExpandableFolders};
     static constexpr PreferenceKey<bool> ShowPreview{Id::ShowPreview};
     static constexpr PreferenceKey<bool> ChooserShowPreview{Id::ChooserShowPreview};

@@ -831,17 +831,23 @@ namespace {
     const auto beforeColumns = session.snapshot().entries;
     TEST_CHECK(beforeColumns.known(columnIndex) && beforeColumns.known(columnIndex)->queriedDetails == 0);
     TEST_CHECK(!beforeColumns.known(columnIndex)->details.owner && !beforeColumns.known(columnIndex)->details.mode);
-    session.requestMetadata(columnIndex, initial.brief(columnIndex).id, luciole::EntryDetails::Permissions);
+    // A rescan can retire queued facts. Start one explicitly and keep requesting
+    // the visible column until the new listing can serve it, just as the view does.
+    session.refresh();
+    TEST_CHECK(session.snapshot().status == DirectoryStatus::Loading);
     pump.until([&] {
+      session.requestMetadata(columnIndex, initial.brief(columnIndex).id, luciole::EntryDetails::Permissions);
       const auto* value = session.snapshot().entries.known(columnIndex);
       return value && (value->queriedDetails & luciole::EntryDetails::Permissions) != 0;
     });
     const auto* permissions = session.snapshot().entries.known(columnIndex);
     TEST_CHECK(permissions->details.mode && !permissions->details.owner && !permissions->details.group);
     TEST_CHECK(!beforeColumns.known(columnIndex)->details.mode);
-    session.requestMetadata(columnIndex, initial.brief(columnIndex).id, luciole::EntryDetails::All);
+    session.refresh();
     pump.until([&] {
-      return session.snapshot().entries.known(columnIndex)->queriedDetails == luciole::EntryDetails::All;
+      session.requestMetadata(columnIndex, initial.brief(columnIndex).id, luciole::EntryDetails::All);
+      const auto* value = session.snapshot().entries.known(columnIndex);
+      return value && value->queriedDetails == luciole::EntryDetails::All;
     });
     TEST_CHECK(session.snapshot().entries.known(columnIndex)->details.owner);
     session.refresh();

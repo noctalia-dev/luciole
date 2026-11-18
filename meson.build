@@ -42,8 +42,7 @@ gio = dependency('gio-2.0', version: '>=2.76')
 gio_unix = dependency('gio-unix-2.0', version: '>=2.76')
 curl = dependency('libcurl', version: '>=7.85')
 xml = dependency('libxml-2.0', version: '>=2.9')
-gdk_pixbuf = dependency('gdk-pixbuf-2.0', version: '>=2.44')
-glycin = dependency('glycin-2', version: '>=2.0.1')
+gdk_pixbuf = dependency('gdk-pixbuf-2.0', version: '>=2.42')
 if not cpp.has_header('stb/stb_image_resize2.h')
   error('system stb/stb_image_resize2.h is required')
 endif
@@ -259,7 +258,7 @@ imaging_lib = static_library('luciole-imaging',
     'src/imaging/svg_rasterizer.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf, glycin, libpng, dependency('librsvg-2.0')],
+  dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf, libpng, dependency('librsvg-2.0')],
 )
 imaging_dep = declare_dependency(link_with: imaging_lib, include_directories: src_inc,
   dependencies: [fs_dep, noctalia_ui_dep, gdk_pixbuf],

@@ -18,12 +18,14 @@ namespace luciole {
     void setTreeEnabled(bool enabled);
     void setShowHidden(bool showHidden);
     void setShowDrives(bool showDrives);
+    void setShowNetwork(bool showNetwork);
     void setChangedCallback(std::function<void()> callback) { m_changed = std::move(callback); }
     void invalidate();
     void releaseLocation(const Location& root);
     // Updates drive usage bars from the monitor without rebuilding the list.
     void updateDriveUsage();
     void sync(std::optional<Location> current);
+    void setTrashFull(bool full);
     void cancelDragCandidate();
     std::optional<std::size_t> dropSlot(float x, float y) const;
     LayoutRect dropLine(std::size_t slot) const;
@@ -74,7 +76,7 @@ namespace luciole {
     PinService& m_pins;
     DriveMonitor& m_drives;
     SidebarTreeView* m_tree = nullptr;
-    bool m_treeEnabled = false, m_showHidden = false, m_showDrives = true;
+    bool m_treeEnabled = false, m_showHidden = false, m_showDrives = true, m_showNetwork = true;
     std::function<void()> m_changed;
     ScrollView* m_scroll = nullptr;
     Label* m_heading = nullptr;
@@ -85,6 +87,7 @@ namespace luciole {
     float m_pressX = 0;
     float m_pressY = 0;
     bool m_dirty = true;
+    bool m_trashFull = false;
     bool m_dragged = false;
     std::function<void(const Location&)> m_open;
     std::function<void(const Bookmark&, float, float)> m_context;

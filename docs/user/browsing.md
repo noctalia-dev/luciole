@@ -34,7 +34,7 @@ The cursor ring marks the item the keyboard acts on and stays visible inside a m
 
 Enter an address such as `smb://server/share` in the location bar, or open a saved network place. If the location is not mounted, Luciole asks the installed GIO/GVfs provider to connect and then opens the folder. You can also open an SMB server address and activate one of its listed shares. The same mounted share becomes visible to other applications using that desktop session.
 
-The **Network** sidebar entry is always available, including when no servers are found. Discovery starts when you open Network or expand it in the optional sidebar tree; ordinary local startup does not start discovery. Open a discovered server and its share as usual. You can also enter `network:///` directly. Grid, List and Columns use the discovered destination when opening an entry; middle-click and Ctrl+Enter can open it in a new tab.
+The **Network** sidebar entry is shown by default, including when no servers are found. Drag it among Places or use Move up/Move down in its context menu to save its position. Settings → Appearance → Sidebar → Show Network hides or restores it in both sidebar modes; its context menu also offers Hide Network. Hiding the entry preserves its position and does not disable direct network addresses or existing network tabs. Discovery starts when you open Network or expand it in the optional sidebar tree; ordinary local startup does not start discovery. Open a discovered server and its share as usual. You can also enter `network:///` directly. Grid, List and Columns use the discovered destination when opening an entry; middle-click and Ctrl+Enter can open it in a new tab.
 
 Luciole discovers SMB computers using its built-in WS-Discovery client, with optional DNS-SD discovery through GVfs and Avahi. No external WS-Discovery helper is needed. Discovery runs in the background while Network is open; closing its last view stops Luciole's discovery workers. Server names may replace numeric addresses as metadata arrives. Refresh retries discovery. A reachable server may not advertise itself, and multicast filtering can prevent discovery. You can still enter its known address or use a saved network place. Discovery does not ask for credentials or open every share in the background. If nothing is discovered, Network remains available.
 
@@ -50,9 +50,9 @@ Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (
 
 List and Columns shorten overflowing filenames in the middle by default, keeping their beginning and ending visible. Settings → Views → Long filenames also offers Shorten at the end. Changes apply to open panes immediately. Grid keeps its two-line name wrapping.
 
-List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu. Shown hidden items always sort after visible ones; Folders first applies within each group.
+List headers sort by their column. Drag their dividers to resize columns; Settings → List columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu. By default, shown hidden items sort among visible ones. Hidden last, in the Sort menu and Settings, sorts them after visible ones; Folders first then applies within each group.
 
-The background right-click menu also offers Sort. Changing the sort field, direction or Folders first shows the beginning of the new order, including in folders that need scrolling. Selected items stay selected. Sort changes made through list headings or Settings follow the same rule.
+The background right-click menu also offers Sort. Changing the sort field, direction, Folders first or Hidden last shows the beginning of the new order, including in folders that need scrolling. Selected items stay selected. Sort changes made through list headings or Settings follow the same rule.
 
 In large folders, names can appear while detail values are still loading. “Reading…” means a value is pending; “Unknown” means it was unavailable after querying. Hidden extra columns are not queried by ordinary large-folder browsing. Enabling one loads its visible rows. Sorting by metadata or selecting many items can require facts from the rest of the folder; file actions wait for the facts they need.
 
@@ -64,7 +64,7 @@ Opening a local file uses the default application for its file type. Use Open Wi
 
 ## Places and folder trees
 
-Places contains Home, available XDG user folders, Trash and your pinned folders. Pin or unpin a folder through its context menu, or drag a folder into Places. Drag rows to reorder them. Trash can move within the list but cannot be unpinned. Its context menu offers Empty Trash.
+Places contains Home, available XDG user folders, Trash, Network and your pinned folders. Pin or unpin a folder through its context menu, or drag a folder into Places. Drag rows to reorder them. Trash can move within the list but cannot be unpinned. Its context menu offers Empty Trash.
 
 Middle-click anywhere inside a Places or mounted-drive row to open that folder in a new tab, including the row's top and bottom edges. Dropping folders near Places row edges still inserts or reorders pins; the center remains the transfer target.
 

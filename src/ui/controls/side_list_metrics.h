@@ -10,4 +10,6 @@ namespace luciole {
   inline constexpr float kSideListRowHeight = Style::controlHeightSm;
   inline constexpr float kSideListRowPaddingH = Style::spaceSm;
   inline constexpr float kSideListRowGap = Style::spaceSm;
+  // Row icons at GTK's 16 px symbolic size (GNOME Files' sidebar); the Glyph default is the 14 px body size.
+  inline constexpr float kSideListGlyphSize = Style::baseGlyphSize;
 } // namespace luciole

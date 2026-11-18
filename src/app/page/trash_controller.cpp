@@ -45,9 +45,7 @@ void TrashController::trashItems(const std::vector<luciole::DirectoryEntry>& tar
     sources.push_back(target.location());
   }
   const auto job = m_page.jobs().create<luciole::TrashService>();
-  if (!job->service<luciole::TrashService>().prepare(
-          *m_page.browser().model().snapshot().location, std::move(sources)
-      )) {
+  if (!job->service<luciole::TrashService>().prepare(std::move(sources))) {
     m_page.actionError("Another Trash operation is still finishing.");
   }
 }

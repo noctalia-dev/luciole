@@ -121,6 +121,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::ShowSidebar, "Show sidebar");
   addBool(P::SidebarTree, "Show folder tree");
   addBool(P::ShowDrives, "Show drives");
+  addBool(P::ShowNetwork, "Show Network");
   addNumber(P::SidebarWidth, "Sidebar width", widths(luciole::kMinSidebarWidth, luciole::kMaxSidebarWidth));
   card("Preview");
   addBool(P::ShowPreview, "Show preview");
@@ -162,6 +163,7 @@ SettingsDialog::SettingsDialog(
   );
   addBool(P::SortDescending, "Reverse order");
   addBool(P::DirectoriesFirst, "Folders first");
+  addBool(P::HiddenLast, "Hidden last");
   card("Grid");
   addNumber(P::GridIconSize, "Icon size", {luciole::kGridIconSizes.begin(), luciole::kGridIconSizes.end()});
   addBool(P::ShowSizeCaption, "File size caption");
