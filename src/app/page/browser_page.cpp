@@ -2147,8 +2147,7 @@ void BrowserPage::syncBrowser() {
         + (state.enabled ? "" : "\n" + std::string(state.reason))
     );
   }
-  const bool showEmptyTrash =
-      !choosing() && snapshot.location && snapshot.location->isTrash() && !snapshot.entries.empty();
+  const bool showEmptyTrash = !choosing() && snapshot.location && snapshot.location->isTrash();
   m_trashBar->setVisible(showEmptyTrash);
   m_trashBar->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
@@ -2425,7 +2424,6 @@ void BrowserPage::buildScene() {
            .fill = colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_savedSettings.backgroundOpacity)),
            .clipChildren = true,
            .participatesInLayout = false},
-          buildTrashBar(),
           ui::column(
               {.out = &m_paneContentFrame,
                .align = FlexAlign::Stretch,
@@ -2625,7 +2623,7 @@ std::unique_ptr<Flex> BrowserPage::buildFilePane() {
        .gap = Style::spaceXs,
        .padding = Style::spaceSm,
        .flexGrow = 1.0F},
-      m_detailsHeader.buildHeader(), m_statusBar.buildNotice(),
+      buildTrashBar(), m_detailsHeader.buildHeader(), m_statusBar.buildNotice(),
       ui::virtualGridView(
           {.out = &m_list,
            .columns = 1,
