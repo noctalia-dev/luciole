@@ -151,7 +151,7 @@ void luciole::DirectoryModel::setFilter(FilterOptions options) {
   }
   m_filterKey = foldedDisplayText(options.text);
   m_filter = std::move(options);
-  rebuildProjection();
+  rebuildProjection(false);
   notify();
 }
 
@@ -353,30 +353,55 @@ void luciole::DirectoryModel::setSingleSelection(bool single) {
   notify();
 }
 
-void luciole::DirectoryModel::rebuildProjection() {
-  prepareSortKeys();
-  m_rows.clear();
-  // Sorting reads presentation and entry through direct pointers rather than hashing IDs per comparison.
-  std::vector<SortItem> items;
-  items.reserve(m_snapshot.entries.size());
-  for (std::size_t source = 0; source < m_snapshot.entries.size(); ++source) {
-    const auto entry = m_snapshot.entries.brief(source);
-    if ((!entry.hidden || m_filter.showHidden)
+void luciole::DirectoryModel::rebuildProjection(bool resort) {
+  // A wider filter can admit entries absent from the cached order.
+  resort = resort
+      || m_entryFilter
+      || (m_filter.showHidden && !m_sortedFilter.showHidden)
+      || (m_filter.showBackups && !m_sortedFilter.showBackups)
+      || !m_filterKey.contains(foldedDisplayText(m_sortedFilter.text));
+  const auto matches = [this](std::size_t source, const EntryBrief& entry) {
+    return (!entry.hidden || m_filter.showHidden)
         && (m_filter.showBackups || !isEditorBackup(entry.name, entry.type))
         && (m_filterKey.empty() || filterText(source).contains(m_filterKey))
-        && (!m_entryFilter || m_entryFilter(entry, m_snapshot.entries.known(source)))) {
+        && (!m_entryFilter || m_entryFilter(entry, m_snapshot.entries.known(source)));
+  };
+  m_rows.clear();
+  m_rowBySource.assign(m_snapshot.entries.size(), kNoRow);
+  if (resort) {
+    prepareSortKeys();
+    // Sorting reads presentation and entry through direct pointers rather than hashing IDs per comparison.
+    std::vector<SortItem> items;
+    items.reserve(m_snapshot.entries.size());
+    for (std::size_t source = 0; source < m_snapshot.entries.size(); ++source) {
+      const auto entry = m_snapshot.entries.brief(source);
+      if (!matches(source, entry)) {
+        continue;
+      }
       items.push_back(
           {entry.id, static_cast<std::uint32_t>(source), entry.type == FileType::Directory || entry.linksToDirectory,
            entry.hidden, &m_presentations[source], m_snapshot.entries.known(source)}
       );
     }
-  }
-  std::ranges::sort(items, [this](const SortItem& left, const SortItem& right) { return less(left, right); });
-  m_rows.reserve(items.size());
-  m_rowBySource.assign(m_snapshot.entries.size(), kNoRow);
-  for (const auto& item : items) {
-    m_rowBySource[item.source] = static_cast<std::uint32_t>(m_rows.size());
-    m_rows.push_back(item.id);
+    std::ranges::sort(items, [this](const SortItem& left, const SortItem& right) { return less(left, right); });
+    m_sortedSources.clear();
+    m_sortedSources.reserve(items.size());
+    m_rows.reserve(items.size());
+    for (const auto& item : items) {
+      m_sortedSources.push_back(item.source);
+      m_rowBySource[item.source] = static_cast<std::uint32_t>(m_rows.size());
+      m_rows.push_back(item.id);
+    }
+    m_sortedFilter = m_filter;
+  } else {
+    m_rows.reserve(m_sortedSources.size());
+    for (const auto source : m_sortedSources) {
+      const auto entry = m_snapshot.entries.brief(source);
+      if (matches(source, entry)) {
+        m_rowBySource[source] = static_cast<std::uint32_t>(m_rows.size());
+        m_rows.push_back(entry.id);
+      }
+    }
   }
   if (!m_treeParents.empty() || m_preserveRootOrder) {
     std::unordered_map<EntryId, std::vector<EntryId>> children;

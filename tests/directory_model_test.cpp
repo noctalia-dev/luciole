@@ -687,6 +687,32 @@ namespace {
     model.setFilter({.text = "absent"});
     rows(model, {});
     TEST_CHECK(model.snapshot().status == DirectoryStatus::Ready);
+    model.setSort({.descending = true});
+    model.setFilter({});
+    rows(model, {1, 2, 4});
+    model.setEntryFilter([](const auto& brief, const auto*) { return brief.id != 2; });
+    rows(model, {1, 4});
+    model.setFilter({.text = "STRASSE"});
+    rows(model, {1});
+    model.setEntryFilter({});
+    model.setFilter({});
+    rows(model, {1, 2, 4});
+    model.applySnapshot(snapshot({entry(5, "z"), entry(6, "a"), entry(7, "m")}, 2));
+    rows(model, {5, 7, 6});
+    model.setFilter({.text = "m"});
+    rows(model, {7});
+    model.setSort({});
+    model.setFilter({});
+    rows(model, {6, 7, 5});
+    model.setFilter({.text = "missing"});
+    model.applySnapshot(snapshot({entry(8, "alpha"), entry(9, "alpine"), entry(10, "beta")}, 3));
+    rows(model, {});
+    model.setFilter({.text = "alpha"});
+    rows(model, {8});
+    model.setFilter({.text = "alp"});
+    rows(model, {8, 9});
+    model.setFilter({});
+    rows(model, {8, 9, 10});
   }
 
   void testSelectionAndAnchors() {
