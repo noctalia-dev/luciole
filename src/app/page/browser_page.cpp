@@ -2603,6 +2603,7 @@ std::unique_ptr<Flex> BrowserPage::buildTrashBar() {
        .paddingV = Style::spaceXs,
        .paddingH = Style::spaceSm,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
+       .radius = Style::scaledRadiusMd(),
        .visible = false,
        .participatesInLayout = false},
       ui::button(
