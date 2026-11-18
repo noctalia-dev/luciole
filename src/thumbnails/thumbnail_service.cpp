@@ -648,13 +648,11 @@ std::shared_ptr<const luciole::FileIconImage> luciole::ThumbnailService::prepare
   if (m_state->clearing || m_state->options.policy == ThumbnailPolicy::Never) {
     return {};
   }
-  const auto identity = source.identity();
   for (const int side : {kMaxPreviewImageSide, 1024, 512, 256, 128}) {
     for (const auto purpose : {ThumbnailPurpose::Preview, ThumbnailPurpose::Thumbnail}) {
       const auto found = m_state->cache.find(cacheKey(source, side, purpose));
       if (found != m_state->cache.end()
           && found->second.image->pixels
-          && found->second.source.identity() == identity
           && found->second.source.type == source.type
           && found->second.source.symlink == source.symlink
           && found->second.source.contentType == source.contentType) {
