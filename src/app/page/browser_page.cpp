@@ -16,7 +16,6 @@
 #include "core/timer_manager.h"
 #include "core/ui_phase.h"
 #include "cursor-shape-v1-client-protocol.h"
-#include "fs/archive_type.h"
 #include "fs/gio_ptr.h"
 #include "model/details_columns.h"
 #include "operations/archive_service.h"
@@ -1363,6 +1362,7 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
     }
   }
   if (action == Action::Open) {
+    action = luciole::ActionRegistry::openAction(actionContext(), request);
     Logger("file-launch").debug("Open action dispatch ({} targets)", request.targets.size());
   }
   const auto state = actionState(action, request);
@@ -1628,15 +1628,6 @@ void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& target
     if (m_miller.enter()) {
       m_millerFocusPending = true;
     }
-  } else if (
-      targets.size() == 1
-      && targets.front().type == luciole::FileType::Regular
-      && !targets.front().symlink
-      && targets.front().location().nativePath().has_value()
-      && targets.front().access.read.value_or(true)
-      && luciole::isSupportedArchive(targets.front().location(), targets.front().contentType.value_or(""))
-  ) {
-    m_archiveController.browse(targets.front().location());
   } else {
     std::vector<luciole::Location> files;
     for (const auto& target : targets) {

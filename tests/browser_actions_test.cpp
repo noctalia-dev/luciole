@@ -566,9 +566,15 @@ namespace {
         && R::state(A::ExtractTo, c, request).enabled
         && R::state(A::BrowseArchive, c, request).enabled
     );
+    TEST_CHECK(R::openAction(c, request) == A::BrowseArchive);
     c.operationsBusy = true;
     TEST_CHECK(!R::state(A::BrowseArchive, c, request).enabled && !R::state(A::Compress, c, request).enabled);
+    // A running job refuses Browse Archive instead of letting Open fall back to another application.
+    TEST_CHECK(R::openAction(c, request) == A::BrowseArchive);
     c.operationsBusy = false;
+    c.chooser = true;
+    TEST_CHECK(R::openAction(c, request) == A::Open);
+    c.chooser = false;
     test::editEntries(data, [&](auto& entries) { entries.back().symlink = true; });
     ++data.generation;
     model.applySnapshot(data);
@@ -583,6 +589,7 @@ namespace {
     model.select(1);
     const auto plain = R::capture(c);
     TEST_CHECK(R::state(A::Compress, c, plain).enabled && !R::state(A::BrowseArchive, c, plain).enabled);
+    TEST_CHECK(R::openAction(c, plain) == A::Open);
     model.select(6);
     TEST_CHECK(R::state(A::Compress, c, R::capture(c)).enabled);
     test::editEntries(data, [&](auto& entries) {
@@ -593,6 +600,7 @@ namespace {
     model.applySnapshot(data);
     model.select(7);
     TEST_CHECK(!R::state(A::Compress, c, R::capture(c)).enabled);
+    TEST_CHECK(R::openAction(c, R::capture(c)) == A::Open);
   }
   void testSplitArchiveActions() {
     luciole::DirectoryModel model;
