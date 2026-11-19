@@ -145,6 +145,7 @@ public:
   virtual MillerView& millerView() = 0;
   virtual luciole::ViewMode viewMode() const = 0;
   virtual float gridIconSize() const = 0;
+  virtual float rowIconSize() const = 0;
   // Keeps the first visible item in view across the next layout change.
   virtual void captureViewAnchor() = 0;
   // Cancels file pointer gestures, drops the view anchor and scrolls the file list to the top.

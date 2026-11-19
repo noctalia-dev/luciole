@@ -520,7 +520,9 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
       m_dragArtwork = m_icons.request(
           luciole::iconSource(entry->icon),
           static_cast<int>(std::ceil(
-              (m_page.viewMode() == luciole::ViewMode::Grid ? m_page.gridIconSize() : 24)
+              (m_page.viewMode() == luciole::ViewMode::Grid       ? m_page.gridIconSize()
+                   : m_page.viewMode() == luciole::ViewMode::List ? m_page.rowIconSize()
+                                                                  : 24)
               * m_page.surface().effectiveBufferScale()
           ))
       );

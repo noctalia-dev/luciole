@@ -1989,6 +1989,7 @@ float BrowserPage::gridHeight() const {
 }
 
 float BrowserPage::gridIconSize() const { return static_cast<float>(luciole::kGridIconSizes[m_gridZoom]); }
+float BrowserPage::rowIconSize() const { return luciole::fileRowIconSize(m_listIconSize); }
 
 void BrowserPage::changeGridZoom(int requested) {
   const auto zoom =
