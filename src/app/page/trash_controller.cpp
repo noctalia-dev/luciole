@@ -160,6 +160,8 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
   luciole::applyDialogStyle(*root);
   m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.popupSurface() != nullptr) {
+    // Focus the confirm control so Enter confirms; it ignores Enter while preparation keeps it disabled.
+    m_page.popupDispatcher().setFocus(confirm->inputArea());
     m_page.activePopup().bind(ActivePopup::Kind::EmptyTrash, [this] {
       if (const auto job = std::exchange(m_emptyTrash, nullptr)) {
         job->cancel();
