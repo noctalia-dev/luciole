@@ -1981,15 +1981,14 @@ float BrowserPage::gridHeight() const {
   const bool context = !browser().searchQuery().empty() || (location && location->isTrash());
   return m_viewMode == luciole::ViewMode::Grid
       ? luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, context).height
-      : luciole::fileRowHeight(
-            m_savedSettings.presentation, context,
-            m_viewMode == luciole::ViewMode::Miller ? luciole::millerRowIconSize(m_savedSettings.presentation)
-                                                    : luciole::fileRowIconSize(m_listIconSize)
-        );
+      : luciole::fileRowHeight(m_savedSettings.presentation, context, rowIconSize());
 }
 
 float BrowserPage::gridIconSize() const { return static_cast<float>(luciole::kGridIconSizes[m_gridZoom]); }
-float BrowserPage::rowIconSize() const { return luciole::fileRowIconSize(m_listIconSize); }
+float BrowserPage::rowIconSize() const {
+  return m_viewMode == luciole::ViewMode::Miller ? luciole::millerRowIconSize(m_savedSettings.presentation)
+                                                 : luciole::fileRowIconSize(m_listIconSize);
+}
 
 void BrowserPage::changeGridZoom(int requested) {
   const auto zoom =
