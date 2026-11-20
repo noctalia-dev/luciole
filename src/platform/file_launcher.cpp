@@ -3,6 +3,8 @@
 #include "core/log.h"
 #include "fs/gio_interop.h"
 #include "fs/name_matching.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 #include "platform/launch_context.h"
 #include "platform/terminal_command.h"
 
@@ -15,6 +17,38 @@
 namespace {
   constexpr Logger kLog("file-launch");
 
+  void queryHandler(
+      const luciole::Location& location, const luciole::CancelToken& token,
+      std::move_only_function<void(luciole::JobResult<luciole::GioPtr<GAppInfo>>)> done
+  ) {
+    luciole::runIoJob<luciole::GioPtr<GAppInfo>>(
+        luciole::ioLane(location), token,
+        [location, token] {
+          // Remote URI handlers can work without a VFS backend. Native files use their MIME association.
+          const auto file = luciole::gioFile(location);
+          const luciole::GString scheme(g_file_get_uri_scheme(file.get()));
+          if (!location.isNative() && scheme) {
+            if (luciole::GioPtr<GAppInfo> handler(g_app_info_get_default_for_uri_scheme(scheme.get())); handler) {
+              return handler;
+            }
+          }
+          const auto info = luciole::isolatedInfo(
+              location, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
+              G_FILE_QUERY_INFO_NONE, token
+          );
+          const auto mime = luciole::readContentType(info.get());
+          const luciole::GString path(g_file_get_path(file.get()));
+          luciole::GioPtr<GAppInfo> app(mime ? g_app_info_get_default_for_type(mime->c_str(), !path) : nullptr);
+          if (!app) {
+            luciole::throwFileError(
+                luciole::FileErrorKind::Unsupported, "No application is associated with this file."
+            );
+          }
+          return app;
+        },
+        std::move(done)
+    );
+  }
   luciole::ApplicationChoice applicationChoice(GAppInfo* app) {
     const char* id = g_app_info_get_id(app);
     luciole::ApplicationChoice choice;
@@ -23,42 +57,6 @@ namespace {
     return choice;
   }
 
-  // A native document uses its MIME association, independently of any file:// scheme handler.
-  // Both content sniffing and desktop association lookup stay on the worker.
-  void queryDefaultHandler(GFile* file, GCancellable* cancellable, GAsyncReadyCallback callback, gpointer data) {
-    const luciole::GioPtr<GTask> task(g_task_new(file, cancellable, callback, data));
-    g_task_run_in_thread(task.get(), [](GTask* task, gpointer source, gpointer, GCancellable* cancellable) {
-      auto* file = G_FILE(source);
-      GError* error = nullptr;
-      GAppInfo* application = nullptr;
-      if (g_file_is_native(file)) {
-        const luciole::GioPtr<GFileInfo> info(g_file_query_info(
-            file, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE,
-            G_FILE_QUERY_INFO_NONE, cancellable, &error
-        ));
-        if (info) {
-          const char* type = g_file_info_get_content_type(info.get());
-          if (!type) {
-            type = g_file_info_get_attribute_string(info.get(), G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE);
-          }
-          if (type) {
-            application = g_app_info_get_default_for_type(type, false);
-          }
-        }
-      } else {
-        application = g_file_query_default_handler(file, cancellable, &error);
-      }
-      if (error) {
-        g_task_return_error(task, error);
-      } else if (application) {
-        g_task_return_pointer(task, application, g_object_unref);
-      } else {
-        g_task_return_new_error(
-            task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "No application is associated with this file."
-        );
-      }
-    });
-  }
 } // namespace
 
 struct luciole::FileLauncher::State {
@@ -394,51 +392,33 @@ void luciole::FileLauncher::open(const Location& location) {
   kLog.debug("request {}: begin", serial);
   ++m_state->active;
   State::context(m_state, {}, [state = m_state, location, serial, started](GioPtr<GAppLaunchContext> context) {
-    struct Request {
-      std::shared_ptr<State> state;
-      Location location;
-      GioPtr<GAppLaunchContext> context;
-      gint64 started;
-      std::uint64_t serial;
-    };
-    auto* request = new Request{state, location, std::move(context), started, serial};
     kLog.debug(
-        "request {}: context ready at {:.2f} ms", request->serial,
-        static_cast<double>(g_get_monotonic_time() - started) / 1000.0
+        "request {}: context ready at {:.2f} ms", serial, static_cast<double>(g_get_monotonic_time() - started) / 1000.0
     );
-    const auto file = gioFile(location);
-    queryDefaultHandler(
-        file.get(), state->cancellable.get(),
-        [](GObject*, GAsyncResult* result, gpointer data) {
-          const std::unique_ptr<Request> request(static_cast<Request*>(data));
-          const auto& state = request->state;
+    queryHandler(
+        location, cancellationToken(state->cancellable.get()),
+        [state, location, context = std::move(context), serial, started](JobResult<GioPtr<GAppInfo>> result) mutable {
           --state->active;
-          GError* raw = nullptr;
-          const GioPtr<GAppInfo> application(static_cast<GAppInfo*>(g_task_propagate_pointer(G_TASK(result), &raw)));
-          const GErrorPtr error(raw);
+          const auto application = result ? std::move(*result) : GioPtr<GAppInfo>{};
           if (g_cancellable_is_cancelled(state->cancellable.get())) {
-            kLog.debug("request {}: GIO completion (cancelled handler lookup)", request->serial);
+            kLog.debug("request {}: GIO completion (cancelled handler lookup)", serial);
             return;
           }
           if (!application) {
-            kLog.debug("request {}: GIO completion (handler lookup failed)", request->serial);
+            kLog.debug("request {}: GIO completion (handler lookup failed)", serial);
             if (const auto changed = state->changed) {
-              changed(error ? error->message : "No application is associated with this file.");
+              changed(result ? "No application is associated with this file." : result.error().message);
             }
             return;
           }
           const char* id = g_app_info_get_id(application.get());
           kLog.debug(
-              "request {}: handler={} at {:.2f} ms", request->serial, id ? id : "unknown",
-              static_cast<double>(g_get_monotonic_time() - request->started) / 1000.0
+              "request {}: handler={} at {:.2f} ms", serial, id ? id : "unknown",
+              static_cast<double>(g_get_monotonic_time() - started) / 1000.0
           );
           auto choice = applicationChoice(application.get());
-          State::dispatch(
-              state, {request->location}, std::move(choice), std::move(request->context), request->serial,
-              request->started
-          );
-        },
-        request
+          State::dispatch(state, {location}, std::move(choice), std::move(context), serial, started);
+        }
     );
   });
 }
@@ -459,58 +439,65 @@ void luciole::FileLauncher::open(const std::vector<Location>& locations) {
     std::shared_ptr<State> state;
     std::vector<Location> locations;
     std::vector<std::optional<ApplicationChoice>> applications;
+    std::size_t next = 0;
     std::size_t remaining;
-  };
-  struct Request {
-    std::shared_ptr<Batch> batch;
-    std::size_t index;
-  };
-  auto batch = std::make_shared<Batch>(
-      Batch{m_state, locations, std::vector<std::optional<ApplicationChoice>>(locations.size()), locations.size()}
-  );
-  m_state->active += locations.size();
-  for (std::size_t index = 0; index < locations.size(); ++index) {
-    auto* request = new Request{batch, index};
-    const auto file = gioFile(locations[index]);
-    queryDefaultHandler(
-        file.get(), m_state->cancellable.get(),
-        [](GObject*, GAsyncResult* result, gpointer data) {
-          const std::unique_ptr<Request> request(static_cast<Request*>(data));
-          const auto& batch = request->batch;
-          const auto& state = batch->state;
-          --state->active;
-          GError* raw = nullptr;
-          const GioPtr<GAppInfo> app(static_cast<GAppInfo*>(g_task_propagate_pointer(G_TASK(result), &raw)));
-          const GErrorPtr error(raw);
-          if (!g_cancellable_is_cancelled(state->cancellable.get())) {
-            if (app) {
-              batch->applications[request->index] = applicationChoice(app.get());
-            } else if (const auto changed = state->changed) {
-              changed(error ? error->message : "No application is associated with this file.");
+
+    void dispatch() {
+      std::vector<Group> groups;
+      for (std::size_t index = 0; index < applications.size(); ++index) {
+        if (!applications[index]) {
+          continue;
+        }
+        const auto& application = *applications[index];
+        auto found = std::ranges::find_if(groups, [&application](const Group& group) {
+          return g_app_info_equal(group.application.app.get(), application.app.get());
+        });
+        if (found == groups.end()) {
+          groups.push_back({application, {locations[index]}});
+        } else {
+          found->locations.push_back(locations[index]);
+        }
+      }
+      for (auto& group : groups) {
+        State::dispatch(state, group.locations, std::move(group.application));
+      }
+    }
+
+    // Keep large selections out of the bounded I/O queue until a lookup slot is free.
+    static void query(const std::shared_ptr<Batch>& batch) {
+      const auto index = batch->next++;
+      const auto& state = batch->state;
+      ++state->active;
+      queryHandler(
+          batch->locations[index], cancellationToken(state->cancellable.get()),
+          [batch, index](JobResult<GioPtr<GAppInfo>> result) {
+            const auto& state = batch->state;
+            --state->active;
+            if (g_cancellable_is_cancelled(state->cancellable.get())) {
+              return;
             }
-            if (--batch->remaining == 0 && !g_cancellable_is_cancelled(state->cancellable.get())) {
-              std::vector<Group> groups;
-              for (std::size_t index = 0; index < batch->applications.size(); ++index) {
-                if (!batch->applications[index]) {
-                  continue;
-                }
-                const auto& application = *batch->applications[index];
-                auto found = std::ranges::find_if(groups, [&application](const Group& group) {
-                  return g_app_info_equal(group.application.app.get(), application.app.get());
-                });
-                if (found == groups.end()) {
-                  groups.push_back({application, {batch->locations[index]}});
-                } else {
-                  found->locations.push_back(batch->locations[index]);
-                }
-              }
-              for (auto& group : groups) {
-                State::dispatch(state, group.locations, std::move(group.application));
-              }
+            if (result) {
+              batch->applications[index] = applicationChoice(result->get());
+            } else if (const auto changed = state->changed) {
+              changed(result.error().message);
+            }
+            if (g_cancellable_is_cancelled(state->cancellable.get())) {
+              return;
+            }
+            if (--batch->remaining == 0) {
+              batch->dispatch();
+            } else if (batch->next < batch->locations.size()) {
+              query(batch);
             }
           }
-        },
-        request
-    );
+      );
+    }
+  };
+  auto batch = std::make_shared<Batch>(
+      m_state, locations, std::vector<std::optional<ApplicationChoice>>(locations.size()), 0, locations.size()
+  );
+  constexpr std::size_t parallelLookups = 4;
+  for (std::size_t i = 0; i < std::min(locations.size(), parallelLookups); ++i) {
+    Batch::query(batch);
   }
 }

@@ -348,7 +348,9 @@ int main(int argc, char** argv) {
       if (with) {
         launcher->openWith(luciole::Location::fromPath(argv[index]), *choice);
       } else {
-        launcher->open(luciole::Location::fromPath(argv[index]));
+        launcher->open(
+            mode == "scheme" ? luciole::Location::fromUri(argv[index]) : luciole::Location::fromPath(argv[index])
+        );
       }
       while (sequential && launcher->busy()) {
         if (g_get_monotonic_time() >= deadline) {

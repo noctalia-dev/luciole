@@ -1,7 +1,8 @@
 #include "operations/template_catalog.h"
 
-#include "fs/background_job.h"
 #include "fs/filename.h"
+#include "fs/network_job.h"
+#include "operations/network_types.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -80,6 +81,23 @@ namespace {
   }
 } // namespace
 
+luciole::TemplateListing luciole::readTemplates(const CancelToken& token) {
+  TemplateListing result;
+  try {
+    if (!inNetworkWorker()) {
+      const auto value = NetworkProcess::acquire(IoLane::NetworkOperation)->call({{"action", "templates"}}, token);
+      return {
+          value.at("items").get<std::vector<DocumentTemplate>>(), value.at("error").get<std::optional<FileError>>(),
+          value.at("truncated").get<bool>()
+      };
+    }
+    listTemplates(result, token);
+  } catch (...) {
+    result.error = currentFileError();
+  }
+  return result;
+}
+
 struct luciole::TemplateCatalog::State {
   CancelToken token;
   std::uint64_t revision = 0;
@@ -97,16 +115,8 @@ void luciole::TemplateCatalog::cancel() {
 }
 void luciole::TemplateCatalog::load(std::function<void(TemplateListing)> completed) {
   cancel();
-  runJob<TemplateListing>(
-      [token = m_state->token] {
-        TemplateListing result;
-        try {
-          listTemplates(result, token);
-        } catch (const std::exception&) {
-          result.error = currentFileError();
-        }
-        return result;
-      },
+  runIoJob<TemplateListing>(
+      IoLane::NetworkOperation, [token = m_state->token] { return readTemplates(token); },
       [owner = m_state, revision = m_state->revision,
        completed = std::move(completed)](JobResult<TemplateListing> result) {
         if (owner->active && owner->revision == revision) {

@@ -6,6 +6,7 @@
 #include "fs/posix_fd.h"
 #include "operations/create_receipt.h"
 #include "operations/creation_stage.h"
+#include "operations/network_history.h"
 
 #include <cerrno>
 #include <fcntl.h>
@@ -133,6 +134,8 @@ namespace {
 } // namespace
 
 struct luciole::CreateService::State {
+  std::unique_ptr<NetworkService<CreateSnapshot>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<CreateSnapshot>>("create");
   CreateSnapshot snapshot;
   std::shared_ptr<Target> target;
   std::shared_ptr<LinkSource> linkSource;
@@ -189,17 +192,38 @@ luciole::CreateService::~CreateService() {
   cancel();
 }
 void luciole::CreateService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
-bool luciole::CreateService::busy() const { return m_state->active; }
+bool luciole::CreateService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
 bool luciole::CreateService::canCreate() const {
+  if (m_state->remote) {
+    return !busy() && m_state->remote->view.ready;
+  }
   return !busy() && (m_state->target != nullptr || m_state->linkSource != nullptr);
 }
-const luciole::CreateSnapshot& luciole::CreateService::snapshot() const { return m_state->snapshot; }
+const luciole::CreateSnapshot& luciole::CreateService::snapshot() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot;
+  }
+  return m_state->snapshot;
+}
 std::shared_ptr<const luciole::CreateReceipt> luciole::CreateService::takeReceipt() {
-  return std::move(m_state->snapshot.receipt);
+  return std::move(m_state->remote ? m_state->remote->view.snapshot.receipt : m_state->snapshot.receipt);
 }
 void luciole::CreateService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   m_state->target.reset();
   m_state->linkSource.reset();
@@ -219,6 +243,18 @@ bool luciole::CreateService::prepareTemplate(const Location& parent, DocumentTem
   return prepareTarget(parent, CreateKind::Document, std::move(source));
 }
 bool luciole::CreateService::prepareLink(const DirectoryEntry& source) {
+  if (m_state->remote) {
+    if (busy()
+        || !source.location().isNative()
+        || !source.identity()
+        || (source.type != FileType::Regular
+            && source.type != FileType::Directory
+            && source.type != FileType::Symlink)) {
+      return false;
+    }
+    m_state->remote->targets.set({source.location()});
+    return m_state->remote->invoke("prepareLink", {{"source", source}});
+  }
   if (busy()
       || !source.location().nativePath()
       || !source.identity()
@@ -247,6 +283,20 @@ bool luciole::CreateService::prepareLink(const DirectoryEntry& source) {
   return true;
 }
 bool luciole::CreateService::createLink(const Location& parent, std::string name, CreateKind kind) {
+  if (m_state->remote) {
+    if (!canCreate() || (kind != CreateKind::SymbolicLink && kind != CreateKind::HardLink)) {
+      return false;
+    }
+    if (const auto error = filenameProblem(name)) {
+      failRemote(m_state->remote->view.snapshot, {FileErrorKind::InvalidArgument, *error});
+      if (m_state->remote->changed) {
+        m_state->remote->changed();
+      }
+      return false;
+    }
+    m_state->remote->targets.add(parent);
+    return m_state->remote->invoke("createLink", {{"parent", parent}, {"name", name}, {"kind", kind}}, true);
+  }
   if (!canCreate() || !m_state->linkSource || (kind != CreateKind::SymbolicLink && kind != CreateKind::HardLink)) {
     return false;
   }
@@ -306,6 +356,19 @@ bool luciole::CreateService::createLink(const Location& parent, std::string name
 bool luciole::CreateService::prepareTarget(
     const Location& parent, CreateKind kind, std::optional<DocumentTemplate> source
 ) {
+  if (m_state->remote) {
+    if (busy()) {
+      return false;
+    }
+    m_state->remote->targets.set({parent});
+    if (source) {
+      m_state->remote->targets.add(source->location);
+    }
+    m_state->remote->view.snapshot.parent = parent;
+    m_state->remote->view.snapshot.kind = kind;
+    return source ? m_state->remote->invoke("prepareTemplate", {{"parent", parent}, {"source", *source}})
+                  : m_state->remote->invoke("prepare", {{"parent", parent}, {"kind", kind}});
+  }
   if (busy()) {
     return false;
   }
@@ -335,6 +398,21 @@ bool luciole::CreateService::prepareTarget(
   return true;
 }
 bool luciole::CreateService::create(std::string name) {
+  if (m_state->remote) {
+    if (!canCreate()
+        || m_state->remote->view.snapshot.kind == CreateKind::SymbolicLink
+        || m_state->remote->view.snapshot.kind == CreateKind::HardLink) {
+      return false;
+    }
+    if (const auto error = filenameProblem(name)) {
+      failRemote(m_state->remote->view.snapshot, {FileErrorKind::InvalidArgument, *error});
+      if (m_state->remote->changed) {
+        m_state->remote->changed();
+      }
+      return false;
+    }
+    return m_state->remote->invoke("create", {{"name", name}}, true);
+  }
   if (!canCreate() || !m_state->target) {
     return false;
   }
@@ -393,6 +471,21 @@ bool luciole::CreateService::create(std::string name) {
 }
 
 bool luciole::CreateService::replay(std::shared_ptr<const CreateReceipt> receipt) {
+  if (m_state->remote) {
+    if (busy() || !receipt) {
+      return false;
+    }
+    const auto history = historyHandle(receipt);
+    if (!history) {
+      return false;
+    }
+    m_state->remote->view.snapshot.kind = receipt->kind();
+    m_state->remote->view.snapshot.parent = receipt->destination().parent();
+    m_state->remote->view.snapshot.destination = receipt->destination();
+    m_state->remote->retain(receipt);
+    m_state->remote->useProcess(history->process);
+    return m_state->remote->invoke("replay", {{"receipt", history->id}}, true);
+  }
   if (busy() || !receipt) {
     return false;
   }

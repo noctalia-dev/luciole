@@ -2,8 +2,11 @@
 
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_types.h"
 #include "fs/posix_fd.h"
 #include "platform/launch_context.h"
+#include "platform/network_program.h"
 #include "platform/terminal_command.h"
 
 #include <algorithm>
@@ -13,6 +16,8 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <gio/gdesktopappinfo.h>
+#include <map>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 
@@ -23,10 +28,44 @@ struct luciole::ProgramData {
   GioPtr<GDesktopAppInfo> application;
   std::optional<Location> scripts;
   std::optional<struct stat> scriptsStamp;
+  std::shared_ptr<NetworkProcess> remote = nullptr;
+  std::uint64_t remoteId = 0;
+  ~ProgramData() {
+    if (remote) {
+      remote->discard(remoteId);
+    }
+  }
 };
 
 namespace {
   using namespace luciole;
+  std::map<std::uint64_t, PreparedProgram> workerPrograms;
+  std::uint64_t nextProgram = std::uint64_t{1} << 62;
+  NetworkMessage retainProgram(PreparedProgram value) {
+    const auto id = ++nextProgram;
+    NetworkMessage result{
+        {"id", id},
+        {"name", value.name},
+        {"command", value.command},
+        {"desktop", value.desktop},
+        {"uri", value.data->location.uri()}
+    };
+    workerPrograms.emplace(id, std::move(value));
+    return result;
+  }
+  PreparedProgram remoteProgram(const NetworkMessage& value, const std::shared_ptr<NetworkProcess>& process) {
+    const struct stat empty{};
+    auto data = std::make_shared<ProgramData>(
+        Location::fromUri(value.at("uri").get<std::string>()), Fd{}, empty, empty, GioPtr<GDesktopAppInfo>{},
+        std::nullopt, std::nullopt
+    );
+    data->remote = process;
+    data->remoteId = value.at("id").get<std::uint64_t>();
+    return {
+        value.at("name").get<std::string>(), value.at("command").get<std::string>(), value.at("desktop").get<bool>(),
+        std::move(data)
+    };
+  }
   void check(const CancelToken& token) {
     if (token.cancelled()) {
       throwFileError(FileErrorKind::Cancelled, "Launch cancelled.");
@@ -140,6 +179,13 @@ namespace {
 } // namespace
 
 luciole::PreparedProgram luciole::prepareProgram(const Location& location, const CancelToken& token) {
+  if (!inNetworkWorker()) {
+    const auto process = NetworkProcess::acquire(operationLane(location));
+    auto request = filesystemRequest("program", location);
+    request["method"] = "prepare";
+    return remoteProgram(process->call(std::move(request), token), process);
+  }
+
   check(token);
   const auto stamp = pathStamp(location);
   if (!S_ISREG(stamp.st_mode) && !S_ISLNK(stamp.st_mode)) {
@@ -180,6 +226,20 @@ void luciole::launchProgram(
     const PreparedProgram& program, const Location& workingDirectory, const std::vector<Location>& arguments,
     bool terminal, const std::string& activationToken, const CancelToken& token, const std::string& terminalCommand
 ) {
+  if (program.data && program.data->remote) {
+    auto request = filesystemRequest("program", workingDirectory);
+    request.update(
+        {{"method", "launch"},
+         {"object", program.data->remoteId},
+         {"arguments", arguments},
+         {"terminal", terminal},
+         {"activationToken", activationToken},
+         {"terminalCommand", terminalCommand}}
+    );
+    (void)program.data->remote->call(std::move(request), token);
+    return;
+  }
+
   if (!program.data || arguments.size() > 4096) {
     throwFileError(FileErrorKind::InvalidArgument, "Invalid program or too many selected files.");
   }
@@ -257,7 +317,33 @@ luciole::Location luciole::scriptsDirectory() {
   return Location::fromPath((base / "luciole/scripts").native());
 }
 
+luciole::IoLane luciole::scriptsLane() {
+  // Invalid XDG paths are reported by the script job on its normal error path.
+  return g_path_is_absolute(g_get_user_data_dir()) ? operationLane(scriptsDirectory()) : IoLane::Operation;
+}
+
 luciole::ScriptListing luciole::listScripts(const CancelToken& token) {
+  if (!inNetworkWorker()) {
+    try {
+      const auto root = scriptsDirectory();
+      const auto process = NetworkProcess::acquire(operationLane(root));
+      auto request = filesystemRequest("program", root);
+      request["method"] = "scripts";
+      const auto value = process->call(std::move(request), token);
+      ScriptListing result{
+          .items = {},
+          .error = value.at("error").get<std::optional<FileError>>(),
+          .truncated = value.at("truncated").get<bool>()
+      };
+      for (const auto& item : value.at("items")) {
+        result.items.push_back(remoteProgram(item, process));
+      }
+      return result;
+    } catch (...) {
+      return {.items = {}, .error = currentFileError(), .truncated = false};
+    }
+  }
+
   ScriptListing result;
   try {
     check(token);
@@ -307,6 +393,13 @@ luciole::ScriptListing luciole::listScripts(const CancelToken& token) {
 }
 
 luciole::Location luciole::ensureScriptsDirectory(const CancelToken& token) {
+  if (!inNetworkWorker()) {
+    const auto root = scriptsDirectory();
+    auto request = filesystemRequest("program", root);
+    request["method"] = "ensureScripts";
+    return NetworkProcess::acquire(operationLane(root))->call(std::move(request), token).get<Location>();
+  }
+
   check(token);
   const auto root = scriptsDirectory();
   const auto parent = *root.parent();
@@ -319,4 +412,97 @@ luciole::Location luciole::ensureScriptsDirectory(const CancelToken& token) {
   }
   check(token);
   return root;
+}
+
+void luciole::releaseWorkerPrograms(const NetworkMessage& request) {
+  for (const auto& value : request.value("release", NetworkMessage::array())) {
+    workerPrograms.erase(value.get<std::uint64_t>());
+  }
+}
+luciole::NetworkMessage luciole::networkProgramRequest(const NetworkMessage& request) {
+  const auto method = request.at("method").get<std::string>();
+  const CancelToken token;
+  const auto location = request.at("uri").get<Location>();
+  const auto mount = openRequestMount(request, location, token);
+  if (method == "terminal") {
+    const auto& folder = location;
+    const auto info = isolatedInfo(
+        folder, G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE, G_FILE_QUERY_INFO_NONE, token
+    );
+    if (g_file_info_get_file_type(info.get()) != G_FILE_TYPE_DIRECTORY
+        || (g_file_info_has_attribute(info.get(), G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE)
+            && !g_file_info_get_attribute_boolean(info.get(), G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE))) {
+      throwFileError(FileErrorKind::Denied, "The terminal location is not an accessible folder.");
+    }
+    const auto path = folder.nativePath();
+    if (!path) {
+      throwFileError(FileErrorKind::Unsupported, "Open Terminal Here requires a native folder.");
+    }
+    auto arguments = terminalArguments(request.at("command").get<std::string>(), false, *path);
+    std::vector<const char*> argv;
+    argv.reserve(arguments.size() + 1);
+    for (const auto& value : arguments) {
+      argv.push_back(value.c_str());
+    }
+    argv.push_back(nullptr);
+    const GioPtr<GSubprocessLauncher> launcher(g_subprocess_launcher_new(G_SUBPROCESS_FLAGS_NONE));
+    g_subprocess_launcher_set_cwd(launcher.get(), path->c_str());
+    GError* raw = nullptr;
+    const GioPtr<GSubprocess> process(g_subprocess_launcher_spawnv(launcher.get(), argv.data(), &raw));
+    const GErrorPtr error(raw);
+    if (!process) {
+      throw FileErrorException(
+          error ? fileError(*error) : FileError{FileErrorKind::Unavailable, "Could not launch the terminal."}
+      );
+    }
+    struct Wait {
+      bool done = false, success = false;
+    };
+    auto wait = std::make_shared<Wait>();
+    g_subprocess_wait_check_async(
+        process.get(), nullptr,
+        [](GObject* source, GAsyncResult* result, gpointer data) {
+          const std::unique_ptr<std::shared_ptr<Wait>> held(static_cast<std::shared_ptr<Wait>*>(data));
+          (*held)->success = g_subprocess_wait_check_finish(G_SUBPROCESS(source), result, nullptr);
+          (*held)->done = true;
+        },
+        new std::shared_ptr<Wait>(wait)
+    );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while (!wait->done && std::chrono::steady_clock::now() < deadline) {
+      g_main_context_iteration(nullptr, FALSE);
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    if (wait->done && !wait->success) {
+      throwFileError(FileErrorKind::Other, "The terminal exited unsuccessfully.");
+    }
+    return nullptr;
+  }
+  if (method == "prepare") {
+    return retainProgram(prepareProgram(location, token));
+  }
+  if (method == "scripts") {
+    auto listing = listScripts(token);
+    NetworkMessage items = NetworkMessage::array();
+    for (auto& value : listing.items) {
+      items.push_back(retainProgram(std::move(value)));
+    }
+    return {{"items", std::move(items)}, {"error", listing.error}, {"truncated", listing.truncated}};
+  }
+  if (method == "ensureScripts") {
+    return ensureScriptsDirectory(token);
+  }
+  if (method == "launch") {
+    const auto found = workerPrograms.find(request.at("object").get<std::uint64_t>());
+    if (found == workerPrograms.end()) {
+      throwFileError(FileErrorKind::Changed, "The prepared program is no longer available. Select it again.");
+    }
+    launchProgram(
+        found->second, location, request.at("arguments").get<std::vector<Location>>(),
+        request.at("terminal").get<bool>(), request.at("activationToken").get<std::string>(), token,
+        request.at("terminalCommand").get<std::string>()
+    );
+    return nullptr;
+  }
+  throwFileError(FileErrorKind::InvalidArgument, "Unknown program request.");
 }

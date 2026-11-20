@@ -99,9 +99,12 @@ std::string luciole::ThumbnailStore::filename(const std::string& uri) {
 std::optional<std::vector<std::uint8_t>>
 luciole::readThumbnailFile(const std::filesystem::path& path, std::size_t maximum) {
   const luciole::Fd file(::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
+  return readThumbnailFile(file.get(), maximum);
+}
+std::optional<std::vector<std::uint8_t>> luciole::readThumbnailFile(int fd, std::size_t maximum) {
   struct stat info{};
-  if (!file.valid()
-      || ::fstat(file.get(), &info) < 0
+  if (fd < 0
+      || ::fstat(fd, &info) < 0
       || !S_ISREG(info.st_mode)
       || info.st_size <= 0
       || static_cast<std::uint64_t>(info.st_size) > maximum) {
@@ -110,7 +113,7 @@ luciole::readThumbnailFile(const std::filesystem::path& path, std::size_t maximu
   std::vector<std::uint8_t> bytes(static_cast<std::size_t>(info.st_size));
   std::size_t offset = 0;
   while (offset < bytes.size()) {
-    const auto n = ::read(file.get(), bytes.data() + offset, bytes.size() - offset);
+    const auto n = ::pread(fd, bytes.data() + offset, bytes.size() - offset, static_cast<off_t>(offset));
     if (n < 0 && errno == EINTR) {
       continue;
     }

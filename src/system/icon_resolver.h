@@ -34,6 +34,8 @@ class IconResolver {
 public:
   IconResolver();
   explicit IconResolver(bool cacheMissing);
+  // A helper resolves a captured desktop theme without consulting its own settings backend.
+  IconResolver(std::string theme, std::uint64_t generation);
 
   // targetSize is the intended on-screen pixel size. The first theme in
   // inheritance order that has the icon wins. When > 0, a vector (SVG) icon is
@@ -67,4 +69,5 @@ private:
   std::string m_empty;
   std::uint64_t m_generation = 0;
   bool m_cacheMissing = false;
+  bool m_fixedTheme = false;
 };

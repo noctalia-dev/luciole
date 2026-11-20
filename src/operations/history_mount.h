@@ -9,6 +9,9 @@ namespace luciole {
   class HistoryMount {
   public:
     explicit HistoryMount(Location root);
+    HistoryMount(Location root, Fd directory) : m_root(std::move(root)), m_directory(std::move(directory)) {}
+    const Location& root() const { return m_root; }
+    int descriptor() const { return m_directory.get(); }
     bool contains(int fd) const;
     bool contains(const Location& location) const;
 

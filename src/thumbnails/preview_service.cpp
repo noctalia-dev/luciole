@@ -1,7 +1,9 @@
 #include "thumbnails/preview_service.h"
 
-#include "fs/entry_access.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
+#include "thumbnails/network_preview.h"
 
 #include <algorithm>
 #include <array>
@@ -39,6 +41,16 @@ namespace {
   };
   TextResult readText(const luciole::DirectoryEntry& entry, GCancellable* cancel) {
     using namespace luciole;
+    if (!inNetworkWorker()) {
+      try {
+        const auto value = previewRequest("text", entry, cancellationToken(cancel));
+        return {
+            value.at("text").get<std::string>(), value.at("message").get<std::string>(), value.at("error").get<bool>()
+        };
+      } catch (...) {
+        return {{}, currentFileError().message, true};
+      }
+    }
     const auto location = entry.location();
     const auto path = location.nativePath();
     if (!path) {
@@ -213,7 +225,11 @@ struct luciole::PreviewService::State : std::enable_shared_from_this<State> {
           auto* task = G_TASK(result);
           auto& work = *static_cast<Work*>(g_task_get_task_data(task));
           const auto state = work.owner;
-          const std::unique_ptr<TextResult> text(static_cast<TextResult*>(g_task_propagate_pointer(task, nullptr)));
+          auto text = std::unique_ptr<TextResult>(static_cast<TextResult*>(g_task_propagate_pointer(task, nullptr)));
+          if (!text && !g_cancellable_is_cancelled(g_task_get_cancellable(task))) {
+            text = std::make_unique<TextResult>();
+            text->message = "Preview unavailable.";
+          }
           state->running = false;
           if (state->alive && work.serial == state->serial && text) {
             state->view.text = text->text;
@@ -228,10 +244,14 @@ struct luciole::PreviewService::State : std::enable_shared_from_this<State> {
         nullptr
     ));
     g_task_set_task_data(task.get(), work, [](gpointer p) { delete static_cast<Work*>(p); });
-    g_task_run_in_thread(task.get(), [](GTask* task, gpointer, gpointer data, GCancellable* cancel) {
-      auto result = std::make_unique<TextResult>(readText(static_cast<Work*>(data)->entry, cancel));
-      g_task_return_pointer(task, result.release(), [](gpointer p) { delete static_cast<TextResult*>(p); });
-    });
+    runIoTask(
+        task.get(),
+        ioLane(work->entry.location()) == IoLane::Network ? IoLane::NetworkPreviewProbe : IoLane::PreviewProbe,
+        [](GTask* task, gpointer, gpointer data, GCancellable* cancel) {
+          auto result = std::make_unique<TextResult>(readText(static_cast<Work*>(data)->entry, cancel));
+          g_task_return_pointer(task, result.release(), [](gpointer p) { delete static_cast<TextResult*>(p); });
+        }
+    );
   }
 };
 luciole::PreviewService::PreviewService(ThumbnailService& thumbnails) : m_state(std::make_shared<State>(thumbnails)) {
@@ -305,7 +325,7 @@ void luciole::PreviewService::show(
   // The view shows the type icon while loading or when nothing renders, and the Details card names the type, so
   // only real failures need a message.
   state.view.message.clear();
-  if (entry->type == luciole::FileType::Regular && !entry->symlink && luciole::entryAccess(*entry).read != false) {
+  if (entry->type == luciole::FileType::Regular && !entry->symlink && entry->access.read != false) {
     state.view.status = PreviewStatus::Loading;
     if (entry->contentType && luciole::contentTypeIsText(*entry->contentType)) {
       state.pending = true;
@@ -330,4 +350,10 @@ void luciole::PreviewService::setChangedCallback(std::function<void()> callback)
 const luciole::PreviewSnapshot& luciole::PreviewService::snapshot() const { return m_state->view; }
 bool luciole::PreviewService::busy() const {
   return m_state->metadata.busy() || m_state->running || m_state->pending || m_state->pendingImage != nullptr;
+}
+
+luciole::NetworkMessage luciole::networkTextRequest(const NetworkMessage& request) {
+  const CancelToken token;
+  const auto result = readText(request.at("source").get<DirectoryEntry>(), gioCancellable(token));
+  return {{"text", result.text}, {"message", result.message}, {"error", result.error}};
 }

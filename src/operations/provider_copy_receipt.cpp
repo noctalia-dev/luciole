@@ -857,6 +857,9 @@ std::vector<luciole::TransferResult> luciole::ProviderCopyReceipt::failureResult
   return results;
 }
 
+std::vector<luciole::TransferResult> luciole::ProviderCopyReceipt::failedLocations(const FileError& error) const {
+  return failureResults(error);
+}
 std::vector<luciole::TransferResult> luciole::ProviderCopyReceipt::unconfirmed(const FileError& error) const {
   const std::unique_lock lock(m_state->mutex, std::try_to_lock);
   if (lock.owns_lock() && m_generation == m_state->generation) {
@@ -1049,6 +1052,13 @@ std::vector<luciole::TransferResult> luciole::ProviderMoveReceipt::failureResult
   }
   return results;
 }
+std::vector<luciole::TransferResult> luciole::ProviderMoveReceipt::failedLocations(const FileError& error) const {
+  auto results = failureResults(error);
+  for (std::size_t i = 0; i < size(); ++i) {
+    results[i].outcome = TransferOutcome::Partial;
+  }
+  return results;
+}
 std::vector<luciole::TransferResult> luciole::ProviderMoveReceipt::unconfirmed(const FileError& error) const {
   const std::unique_lock lock(m_state->mutex, std::try_to_lock);
   if (lock.owns_lock() && m_generation == m_state->generation) {
@@ -1057,11 +1067,7 @@ std::vector<luciole::TransferResult> luciole::ProviderMoveReceipt::unconfirmed(c
       effect->m_storage->retain = true;
     }
   }
-  auto results = failureResults(error);
-  for (std::size_t i = 0; i < size(); ++i) {
-    results[i].outcome = TransferOutcome::Partial;
-  }
-  return results;
+  return failedLocations(error);
 }
 
 luciole::MoveReplayResult

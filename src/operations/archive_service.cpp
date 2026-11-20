@@ -3,12 +3,15 @@
 #include "fs/background_job.h"
 #include "operations/archive_icons.h"
 #include "operations/archive_work.h"
+#include "operations/network_history.h"
 
 #include <filesystem>
 #include <glib.h>
 #include <utility>
 
 struct luciole::ArchiveService::State : std::enable_shared_from_this<State> {
+  std::unique_ptr<NetworkService<ArchiveView>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<ArchiveView>>("archive");
   enum class Operation { Inspect, Compress, Extract, Open };
   struct Request {
     Operation operation;
@@ -279,15 +282,43 @@ luciole::ArchiveService::ArchiveService(ArchiveLimits limits) : m_state(std::mak
   });
 }
 luciole::ArchiveService::~ArchiveService() {
-  m_state->changed = {};
-  shutdown();
+  setChangedCallback({});
+  if (!m_state->remote) {
+    shutdown();
+  }
 }
 bool luciole::ArchiveService::inspect(Location source) {
+  if (m_state->remote) {
+    if (m_state->closing || busy()) {
+      return false;
+    }
+    m_state->remote->targets.set({source});
+    return m_state->remote->invoke("inspect", {{"source", source}, {"limits", m_state->limits}});
+  }
   return m_state->start(State::Operation::Inspect, {std::move(source)}, std::nullopt, ArchiveFormat::Zip, {});
 }
 bool luciole::ArchiveService::compress(
     std::vector<Location> sources, Location destination, ArchiveFormat format, std::string password
 ) {
+  if (m_state->remote) {
+    if (m_state->closing
+        || busy()
+        || sources.empty()
+        || (!password.empty()
+            && (archivePasswordProblem(password) || format != ArchiveFormat::Zip || !archiveEncryptionAvailable()))) {
+      return false;
+    }
+    m_state->remote->targets.set(sources, destination);
+    return m_state->remote->invoke(
+        "compress",
+        {{"sources", sources},
+         {"destination", destination},
+         {"format", format},
+         {"password", password},
+         {"limits", m_state->limits}},
+        true
+    );
+  }
   auto passwords = std::make_shared<archive_work::Passwords>();
   if (!password.empty()) {
     passwords->values.push_back(std::move(password));
@@ -305,12 +336,33 @@ bool luciole::ArchiveService::extract(
     Location source, Location destination, std::vector<std::string> selected,
     std::shared_ptr<const ArchiveCatalog> expected
 ) {
+  if (m_state->remote) {
+    if (m_state->closing || busy()) {
+      return false;
+    }
+    m_state->remote->targets.set({source, destination});
+    return m_state->remote->invoke(
+        "extract",
+        {{"source", source},
+         {"destination", destination},
+         {"selected", selected},
+         {"expected", expected},
+         {"limits", m_state->limits}},
+        true
+    );
+  }
   return m_state->start(
       State::Operation::Extract, {std::move(source)}, std::move(destination), ArchiveFormat::Zip, std::move(selected),
       std::move(expected)
   );
 }
 bool luciole::ArchiveService::openMember(const std::string& path) {
+  if (m_state->remote) {
+    return !m_state->closing
+        && !busy()
+        && m_state->remote->view.snapshot.catalog
+        && m_state->remote->invoke("openMember", {{"path", path}}, true);
+  }
   if (!m_state->catalog) {
     return false;
   }
@@ -319,6 +371,10 @@ bool luciole::ArchiveService::openMember(const std::string& path) {
   );
 }
 void luciole::ArchiveService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->cancel.cancel();
   m_state->transfers.cancel();
   if (m_state->phase == ArchivePhase::WaitingPassword) {
@@ -329,6 +385,18 @@ void luciole::ArchiveService::cancel() {
   }
 }
 void luciole::ArchiveService::shutdown() {
+  if (m_state->remote) {
+    if (m_state->closing) {
+      return;
+    }
+    m_state->closing = true;
+    if (busy()) {
+      m_state->remote->cancel();
+    } else {
+      (void)m_state->remote->invoke("shutdown");
+    }
+    return;
+  }
   if (m_state->closing) {
     return;
   }
@@ -338,34 +406,88 @@ void luciole::ArchiveService::shutdown() {
     m_state->clean({});
   }
 }
-bool luciole::ArchiveService::busy() const { return m_state->phase != ArchivePhase::Idle; }
-luciole::ArchivePhase luciole::ArchiveService::phase() const { return m_state->phase; }
+bool luciole::ArchiveService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->phase != ArchivePhase::Idle;
+}
+luciole::ArchivePhase luciole::ArchiveService::phase() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.phase;
+  }
+  return m_state->phase;
+}
 std::uint64_t luciole::ArchiveService::bytes() const {
+  if (m_state->remote) {
+    return m_state->remote->view.bytes;
+  }
   return m_state->phase == ArchivePhase::Transferring ? m_state->transfers.bytes() : m_state->progress.bytes.load();
 }
-std::size_t luciole::ArchiveService::items() const { return m_state->progress.items.load(); }
-const std::optional<luciole::FileError>& luciole::ArchiveService::error() const { return m_state->error; }
+std::size_t luciole::ArchiveService::items() const {
+  if (m_state->remote) {
+    return m_state->remote->view.total;
+  }
+  return m_state->progress.items.load();
+}
+const std::optional<luciole::FileError>& luciole::ArchiveService::error() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.error;
+  }
+  return m_state->error;
+}
 const std::shared_ptr<const luciole::ArchiveCatalog>& luciole::ArchiveService::catalog() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.catalog;
+  }
   return m_state->catalog;
 }
 std::optional<luciole::Location> luciole::ArchiveService::takeOpenedFile() {
+  if (m_state->remote) {
+    return std::exchange(m_state->remote->view.snapshot.opened, std::nullopt);
+  }
   return std::exchange(m_state->opened, std::nullopt);
 }
-const std::vector<luciole::TransferResult>& luciole::ArchiveService::results() const { return m_state->results; }
+const std::vector<luciole::TransferResult>& luciole::ArchiveService::results() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.results;
+  }
+  return m_state->results;
+}
 std::optional<luciole::TransferConflict> luciole::ArchiveService::conflict() const {
+  if (m_state->remote) {
+    return m_state->remote->conflict();
+  }
   return m_state->transfers.conflict();
 }
 bool luciole::ArchiveService::resolve(std::uint64_t id, TransferConflictChoice choice) {
+  if (m_state->remote) {
+    return m_state->remote->answer(id, {{"choice", choice}});
+  }
   return m_state->transfers.resolve(id, choice);
 }
 void luciole::ArchiveService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
 
 std::optional<luciole::ArchivePasswordRequest> luciole::ArchiveService::passwordRequest() const {
+  if (m_state->remote) {
+    return m_state->remote->password();
+  }
   return m_state->password;
 }
 bool luciole::ArchiveService::providePassword(std::uint64_t id, std::string password) {
+  if (m_state->remote) {
+    const auto question = m_state->remote->password();
+    if (!question || password.empty() || archivePasswordProblem(password, question->format)) {
+      return false;
+    }
+    return m_state->remote->answer(id, {{"password", password}});
+  }
   archive_work::Passwords incoming;
   incoming.values.push_back(std::move(password));
   auto& value = incoming.values.back();

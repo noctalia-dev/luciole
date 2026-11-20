@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/cancel_token.h"
+#include "operations/network_history.h"
 #include "operations/permission_jobs.h"
 #include "operations/permission_target.h"
 
@@ -54,6 +55,8 @@ namespace {
 } // namespace
 
 struct luciole::PermissionService::State {
+  std::unique_ptr<NetworkService<PermissionSnapshot>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<PermissionSnapshot>>("permission");
   PermissionSnapshot snapshot;
   std::shared_ptr<PermissionTarget> target;
   std::shared_ptr<PermissionBatch> bulk;
@@ -122,15 +125,48 @@ luciole::PermissionService::~PermissionService() {
   m_state->changed = {};
   cancel();
 }
-bool luciole::PermissionService::busy() const { return m_state->active; }
-std::size_t luciole::PermissionService::completed() const { return m_state->completed.load(); }
-bool luciole::PermissionService::collecting() const { return m_state->collecting.load(); }
-std::size_t luciole::PermissionService::total() const { return m_state->total.load(); }
-const luciole::PermissionSnapshot& luciole::PermissionService::snapshot() const { return m_state->snapshot; }
+bool luciole::PermissionService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
+std::size_t luciole::PermissionService::completed() const {
+  if (m_state->remote) {
+    return m_state->remote->view.completed;
+  }
+  return m_state->completed.load();
+}
+bool luciole::PermissionService::collecting() const {
+  if (m_state->remote) {
+    return m_state->remote->view.collecting;
+  }
+  return m_state->collecting.load();
+}
+std::size_t luciole::PermissionService::total() const {
+  if (m_state->remote) {
+    return m_state->remote->view.total;
+  }
+  return m_state->total.load();
+}
+const luciole::PermissionSnapshot& luciole::PermissionService::snapshot() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot;
+  }
+  return m_state->snapshot;
+}
 void luciole::PermissionService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
 void luciole::PermissionService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   if (!busy()) {
     m_state->target.reset();
@@ -145,6 +181,13 @@ bool luciole::PermissionService::prepare(const Location& location) {
   return prepareEntry({.place = location, .name = {}, .size = {}, .modifiedSeconds = {}}, true);
 }
 bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
+  if (m_state->remote) {
+    if (busy() || entries.size() < 2 || entries.size() > 4096) {
+      return false;
+    }
+    m_state->remote->targets.set(entries);
+    return m_state->remote->invoke("prepare", {{"entries", entries}});
+  }
   if (busy() || entries.size() < 2 || entries.size() > 4096) {
     return false;
   }
@@ -198,6 +241,14 @@ bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
   return true;
 }
 bool luciole::PermissionService::prepareEntry(DirectoryEntry entry, bool captureCurrentLocation) {
+  if (m_state->remote) {
+    if (busy()) {
+      return false;
+    }
+    m_state->remote->targets.set({entry.location()});
+    return captureCurrentLocation ? m_state->remote->invoke("prepareLocation", {{"location", entry.location()}})
+                                  : m_state->remote->invoke("prepareEntry", {{"entry", entry}});
+  }
   if (busy()) {
     return false;
   }
@@ -225,6 +276,15 @@ bool luciole::PermissionService::prepareEntry(DirectoryEntry entry, bool capture
   return true;
 }
 bool luciole::PermissionService::apply(PermissionEdit edit) {
+  if (m_state->remote) {
+    const auto& info = m_state->remote->view.snapshot.info;
+    return !busy()
+        && m_state->remote->view.snapshot.phase == PermissionPhase::Ready
+        && !(m_state->remote->view.snapshot.recursive && m_state->remote->view.snapshot.finished)
+        && info
+        && (info->canMode || info->canOwner || info->canGroup)
+        && m_state->remote->invoke("apply", {{"edit", edit}}, true);
+  }
   if (busy()
       || (!m_state->target && !m_state->bulk)
       || m_state->snapshot.phase != PermissionPhase::Ready
@@ -261,6 +321,18 @@ bool luciole::PermissionService::apply(PermissionEdit edit) {
   return true;
 }
 bool luciole::PermissionService::applyRecursive(RecursivePermissionEdit edit) {
+  if (m_state->remote) {
+    if (busy()
+        || m_state->remote->view.snapshot.phase != PermissionPhase::Ready
+        || (m_state->remote->view.snapshot.recursive && m_state->remote->view.snapshot.finished)) {
+      return false;
+    }
+    m_state->remote->view.collecting = true;
+    m_state->remote->view.total = 0;
+    m_state->remote->view.snapshot.recursive = m_state->remote->view.snapshot.multiple = true;
+    m_state->remote->view.snapshot.finished = false;
+    return m_state->remote->invoke("applyRecursive", {{"edit", edit}}, true);
+  }
   if (busy()
       || m_state->snapshot.phase != PermissionPhase::Ready
       || (m_state->snapshot.recursive && m_state->snapshot.finished)
@@ -299,6 +371,12 @@ bool luciole::PermissionService::applyRecursive(RecursivePermissionEdit edit) {
   return true;
 }
 bool luciole::PermissionService::applyAcl(AclEdit edit) {
+  if (m_state->remote) {
+    return !busy()
+        && m_state->remote->view.snapshot.phase == PermissionPhase::Ready
+        && !(m_state->remote->view.snapshot.recursive && m_state->remote->view.snapshot.finished)
+        && m_state->remote->invoke("applyAcl", {{"edit", edit}}, true);
+  }
   if (busy() || m_state->snapshot.phase != PermissionPhase::Ready || !m_state->target || m_state->bulk) {
     return false;
   }
@@ -315,6 +393,12 @@ bool luciole::PermissionService::applyAcl(AclEdit edit) {
   return true;
 }
 bool luciole::PermissionService::applyAclPatch(AclPatchEdit edit) {
+  if (m_state->remote) {
+    return !busy()
+        && m_state->remote->view.snapshot.phase == PermissionPhase::Ready
+        && !(m_state->remote->view.snapshot.recursive && m_state->remote->view.snapshot.finished)
+        && m_state->remote->invoke("applyAclPatch", {{"edit", edit}}, true);
+  }
   if (busy()
       || m_state->snapshot.phase != PermissionPhase::Ready
       || !m_state->bulk

@@ -26,7 +26,7 @@ namespace luciole {
   // Lists a local folder on a worker. The eager path stats each entry; a large browse catalogue reads names and
   // dirent kinds, with statx only for missing kinds and mount-root lost+found hiddenness.
   // Every fact equals what GIO's local backend reports for the session's attributes with NOFOLLOW_SYMLINKS, except
-  // access read/write/execute, which are deferred to entryAccess(), and the content type of `uncertain` entries.
+  // the content type of `uncertain` entries. Access facts are captured by the helper.
   // Network and FUSE filesystems, unreadable entries and any other failure report unsupported. A cancelled listing
   // is empty.
   NativeListing
@@ -47,7 +47,7 @@ namespace luciole {
   bool networkFilesystem(const struct statfs& filesystem, dev_t device);
   // GIO's content type of a local file, sniffing its contents when the name is not decisive; nullopt when GIO
   // reports none. Blocking: worker threads only.
-  std::optional<std::string> sniffContentType(const std::string& path);
+  std::optional<std::string> sniffContentType(const std::string& path, GCancellable* cancellable = nullptr);
   // Whether the link at path leads to a folder; false for a broken or unreadable link. It follows the link, so an
   // unresponsive mount can block it without end and cancellation cannot interrupt it. Worker threads only.
   bool linksToDirectory(const std::string& path);

@@ -20,13 +20,14 @@ namespace luciole {
   // Worker-only proof and original data for one native creation. No recursive removal or overwrite.
   class CreateReceipt {
   public:
+    virtual ~CreateReceipt() = default;
     CreateReceipt(CreateKind kind, Location destination, std::shared_ptr<const CreationIdentity> identity);
     CreateKind kind() const { return m_kind; }
     const Location& destination() const { return m_destination; }
     static std::shared_ptr<const CreateReceipt>
     capture(CreateKind kind, const Location& destination, int parent, int item, bool removed = false);
-    CreateReplayResult reverse(const CancelToken& token) const;
-    bool usesMount(const HistoryMount& mount) const;
+    virtual CreateReplayResult reverse(const CancelToken& token) const;
+    virtual bool usesMount(const HistoryMount& mount) const;
     static bool cleanupPending();
 
   private:

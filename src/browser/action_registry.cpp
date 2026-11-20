@@ -1,7 +1,6 @@
 #include "browser/action_registry.h"
 
 #include "fs/archive_type.h"
-#include "fs/entry_access.h"
 #include "fs/transfer_types.h"
 
 #include <algorithm>

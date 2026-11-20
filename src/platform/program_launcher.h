@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace luciole {
+  enum class IoLane : std::uint8_t;
   struct ProgramData;
   struct PreparedProgram {
     std::string name, command;
@@ -29,6 +30,7 @@ namespace luciole {
       const std::string& terminalCommand = {}
   );
   Location scriptsDirectory();
+  IoLane scriptsLane();
   ScriptListing listScripts(const CancelToken& token);
   Location ensureScriptsDirectory(const CancelToken& token);
 } // namespace luciole

@@ -6,6 +6,7 @@
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
 #include "operations/history_mount.h"
+#include "operations/network_history.h"
 
 #include <algorithm>
 #include <array>
@@ -408,9 +409,13 @@ namespace {
 struct luciole::BatchRenameReceipt {
   std::shared_ptr<const Prepared> plan;
   std::shared_ptr<const std::vector<BatchRenameRow>> rows;
+  std::shared_ptr<NetworkHistory> remote = nullptr;
 };
 
 bool luciole::batchRenameUsesMount(const BatchRenameReceipt& receipt, const HistoryMount& mount) {
+  if (receipt.remote) {
+    return receipt.remote->usesMount(mount);
+  }
   return mount.contains(receipt.plan->fd.get())
       || std::ranges::any_of(receipt.plan->items, [&](const auto& item) { return mount.contains(item->fd.get()); });
 }
@@ -560,7 +565,10 @@ luciole::batchRenameName(const std::string& name, bool directory, std::size_t in
 }
 
 struct luciole::BatchRenameService::State {
+  std::unique_ptr<NetworkService<BatchRenameSnapshot>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<BatchRenameSnapshot>>("batchRename");
   BatchRenameSnapshot snapshot;
+  std::vector<Location> remoteInputs;
   BatchRenameOptions options;
   std::shared_ptr<Prepared> prepared;
   // One token per prepared selection, shared by its apply; each preview has its own.
@@ -676,19 +684,45 @@ luciole::BatchRenameService::~BatchRenameService() {
   m_state->changed = {};
   cancel();
 }
-bool luciole::BatchRenameService::busy() const { return m_state->active; }
+bool luciole::BatchRenameService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
 bool luciole::BatchRenameService::applying() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.phase == BatchRenamePhase::Applying && busy();
+  }
   return m_state->snapshot.phase == BatchRenamePhase::Applying && busy();
 }
-std::size_t luciole::BatchRenameService::completed() const { return m_state->completed.load(); }
-const luciole::BatchRenameSnapshot& luciole::BatchRenameService::snapshot() const { return m_state->snapshot; }
+std::size_t luciole::BatchRenameService::completed() const {
+  if (m_state->remote) {
+    return m_state->remote->view.completed;
+  }
+  return m_state->completed.load();
+}
+const luciole::BatchRenameSnapshot& luciole::BatchRenameService::snapshot() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot;
+  }
+  return m_state->snapshot;
+}
 std::shared_ptr<const luciole::BatchRenameReceipt> luciole::BatchRenameService::takeReceipt() {
-  return std::move(m_state->snapshot.receipt);
+  return std::move(m_state->remote ? m_state->remote->view.snapshot.receipt : m_state->snapshot.receipt);
 }
 void luciole::BatchRenameService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
 void luciole::BatchRenameService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   m_state->previewToken.cancel();
   m_state->snapshot.canApply = false;
@@ -700,6 +734,17 @@ void luciole::BatchRenameService::cancel() {
   }
 }
 bool luciole::BatchRenameService::prepare(std::vector<DirectoryEntry> entries) {
+  if (m_state->remote) {
+    if (busy() || entries.size() < 2 || entries.size() > 4096) {
+      return false;
+    }
+    m_state->remoteInputs.clear();
+    for (const auto& entry : entries) {
+      m_state->remoteInputs.push_back(entry.location());
+    }
+    m_state->remote->targets.set(m_state->remoteInputs);
+    return m_state->remote->invoke("prepare", {{"entries", entries}});
+  }
   if (busy() || entries.size() < 2 || entries.size() > 4096) {
     return false;
   }
@@ -718,6 +763,11 @@ bool luciole::BatchRenameService::prepare(std::vector<DirectoryEntry> entries) {
   return true;
 }
 bool luciole::BatchRenameService::preview(BatchRenameOptions options) {
+  if (m_state->remote) {
+    return !applying()
+        && (m_state->remote->view.snapshot.rows || m_state->remote->view.snapshot.phase == BatchRenamePhase::Preparing)
+        && m_state->remote->invokeLatest("preview", {{"options", options}});
+  }
   if (applying()
       || m_state->token.cancelled()
       || (!m_state->prepared && m_state->snapshot.phase != BatchRenamePhase::Preparing)) {
@@ -736,6 +786,17 @@ bool luciole::BatchRenameService::preview(BatchRenameOptions options) {
   return true;
 }
 bool luciole::BatchRenameService::apply() {
+  if (m_state->remote) {
+    if (busy() || !m_state->remote->view.snapshot.canApply) {
+      return false;
+    }
+    auto results = std::make_shared<std::vector<BatchRenameResult>>();
+    for (const auto& source : m_state->remoteInputs) {
+      results->push_back({.source = source, .actual = source, .outcome = BatchRenameOutcome::Cancelled, .error = {}});
+    }
+    m_state->remote->view.snapshot.results = std::move(results);
+    return m_state->remote->invoke("apply", NetworkMessage::object(), true);
+  }
   if (busy() || !m_state->snapshot.canApply || !m_state->prepared) {
     return false;
   }
@@ -759,6 +820,18 @@ bool luciole::BatchRenameService::apply() {
 }
 
 bool luciole::BatchRenameService::replay(std::shared_ptr<const BatchRenameReceipt> receipt) {
+  if (m_state->remote) {
+    if (busy() || !receipt) {
+      return false;
+    }
+    const auto history = historyHandle(receipt);
+    if (!history) {
+      return false;
+    }
+    m_state->remote->retain(receipt);
+    m_state->remote->useProcess(history->process);
+    return m_state->remote->invoke("replay", {{"receipt", history->id}}, true);
+  }
   if (busy() || !receipt) {
     return false;
   }
@@ -789,4 +862,15 @@ bool luciole::BatchRenameService::replay(std::shared_ptr<const BatchRenameReceip
     return State::executePlan(owner, plan, std::move(rows), token);
   });
   return true;
+}
+
+std::shared_ptr<luciole::NetworkHistory>
+luciole::historyHandle(const std::shared_ptr<const BatchRenameReceipt>& receipt) {
+  return receipt ? receipt->remote : nullptr;
+}
+std::shared_ptr<const luciole::BatchRenameReceipt>
+luciole::remoteBatchReceipt(std::shared_ptr<NetworkHistory> history) {
+  auto receipt = std::make_shared<BatchRenameReceipt>();
+  receipt->remote = std::move(history);
+  return receipt;
 }

@@ -1,4 +1,5 @@
 #include "fs/gio_interop.h"
+#include "fs/system_mounts.h"
 #include "platform/program_launcher.h"
 #include "platform/terminal_command.h"
 #include "platform/terminal_launcher.h"
@@ -297,6 +298,18 @@ namespace {
     }
     fails(FileErrorKind::Missing, [&] { (void)prepareProgram(Location::fromPath((f.root / "missing").native()), {}); });
   }
+  void testStoppedMount(Fixture& f) {
+    const auto path = fs::path(*f.cwd.nativePath()) / "program";
+    write(path, f.recorder, true);
+    const auto location = Location::fromPath(path.native());
+    const auto prepared = prepareProgram(location, {});
+    publishNativeMounts(
+        {{.path = *f.cwd.nativePath(), .source = "nas:/export", .type = "nfs", .options = "", .automount = true}}
+    );
+    fails(FileErrorKind::NotMounted, [&] { (void)prepareProgram(location, {}); });
+    fails(FileErrorKind::NotMounted, [&] { f.run(prepared, {}); });
+    publishNativeMounts({});
+  }
   void testDesktop(Fixture& f) {
     const auto worker = f.root / "desktop-recorder.py";
     write(worker, f.recorder);
@@ -400,6 +413,7 @@ int main() {
     testTerminalPolicy(fixture);
     testPrograms(fixture);
     testRefusals(fixture);
+    testStoppedMount(fixture);
     testDesktop(fixture);
     testScripts(fixture);
     fs::remove_all(root);

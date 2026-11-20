@@ -161,7 +161,7 @@ namespace {
     TEST_CHECK(workspace.hub.canRedo());
     TEST_CHECK(single->service<luciole::RenameService>().rename("single"));
     TEST_CHECK(!workspace.hub.canRedo());
-    pump.until([&] { return !single->running(); });
+    pump.until([&] { return !workspace.hub.busy(); });
     TEST_CHECK(workspace.hub.canUndo() && !workspace.hub.batchRenameHistory());
     TEST_CHECK(workspace.hub.replayHistory(workspace.page, false));
     pump.until([&] { return !workspace.hub.busy(); });
@@ -234,16 +234,16 @@ namespace {
     TEST_CHECK(workspace.hub.canRedo());
     TEST_CHECK(rename->service<luciole::RenameService>().rename("renamed"));
     TEST_CHECK(!workspace.hub.canRedo());
-    pump.until([&] { return !rename->running(); });
+    pump.until([&] { return !workspace.hub.busy(); });
     TEST_CHECK(workspace.hub.canUndo() && workspace.hub.historyLabel(false) == "Undo Rename");
     auto create = workspace.hub.create<luciole::CreateService>(workspace.page);
     TEST_CHECK(
         create->service<luciole::CreateService>().prepare(fixture.at("destination"), luciole::CreateKind::Folder)
     );
-    pump.until([&] { return !create->running(); });
+    pump.until([&] { return !workspace.hub.busy(); });
     TEST_CHECK(workspace.hub.canUndo());
     TEST_CHECK(create->service<luciole::CreateService>().create("last"));
-    pump.until([&] { return !create->running(); });
+    pump.until([&] { return !workspace.hub.busy(); });
     TEST_CHECK(workspace.hub.canUndo() && workspace.hub.historyLabel(false) == "Undo Create Folder");
     TEST_CHECK(workspace.hub.replayHistory(workspace.page, false));
     pump.until([&] { return !workspace.hub.busy(); });
@@ -332,7 +332,7 @@ namespace {
     TEST_CHECK(copy->service<luciole::TransferService>().start(
         {{fixture.at("b")}, fixture.at("destination"), luciole::TransferAction::Copy}
     ));
-    pump.until([&] { return !copy->running(); });
+    pump.until([&] { return !workspace.hub.busy(); });
     TEST_CHECK(workspace.hub.canUndo() && workspace.hub.historyLabel(false) == "Undo Copy");
   }
 

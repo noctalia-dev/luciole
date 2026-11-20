@@ -57,6 +57,12 @@ luciole::FileError luciole::errnoError(int code) {
   case ENOTCONN:
   case ESTALE:
   case EHOSTUNREACH:
+  case EHOSTDOWN:
+  case ENETUNREACH:
+  case ENETDOWN:
+  case ECONNRESET:
+  case ECONNREFUSED:
+  case ETIMEDOUT:
     kind = Kind::Unavailable;
     break;
   case ECANCELED:

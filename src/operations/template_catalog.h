@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fs/cancel_token.h"
 #include "fs/file_error.h"
 #include "fs/location.h"
 
@@ -29,6 +30,7 @@ namespace luciole {
     std::optional<FileError> error;
     bool truncated = false;
   };
+  TemplateListing readTemplates(const CancelToken& token);
   // Reads the configured XDG Templates directory on a worker; obsolete replies are discarded.
   class TemplateCatalog {
   public:

@@ -4,7 +4,10 @@
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
 #include "fs/native_listing.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 #include "fs/posix_fd.h"
+#include "thumbnails/network_preview.h"
 #include "thumbnails/thumbnail_codec.h"
 #include "thumbnails/thumbnail_provider.h"
 #include "thumbnails/thumbnail_store.h"
@@ -68,11 +71,37 @@ namespace {
     bool decodeNeeded = false;
   };
   LoadResult load(
-      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options,
-      const luciole::ThumbnailService::NetworkFilesystemCheck& networkFilesystem, GCancellable* cancel, bool generate,
-      luciole::ThumbnailPurpose purpose
+      const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options, GCancellable* cancel,
+      bool generate, luciole::ThumbnailPurpose purpose, std::optional<bool> networkOverride,
+      const std::filesystem::path& workspace = {}
   ) {
     using namespace luciole;
+    if (!inNetworkWorker()) {
+      auto value = previewRequest(
+          "thumbnail", source, cancellationToken(cancel),
+          {{"side", side},
+           {"options", options},
+           {"generate", generate},
+           {"purpose", purpose},
+           {"network", networkOverride}}
+      );
+      LoadResult result;
+      result.decodeNeeded = value.at("decodeNeeded").get<bool>();
+      if (!value.at("pixels").is_null()) {
+        result.image.pixels = std::make_shared<const LoadedImageFile>(decodePixels(std::move(value.at("pixels"))));
+      }
+      if (result.image.pixels && !value.at("write").is_null()) {
+        const auto& write = value.at("write");
+        result.write.emplace(
+            ThumbnailCacheWrite{
+                .thumbnail =
+                    {.image = *result.image.pixels, .text = write.at("text").get<std::map<std::string, std::string>>()},
+                .side = write.at("side").get<int>()
+            }
+        );
+      }
+      return result;
+    }
     LoadResult result;
     ThumbnailStore store;
     const auto location = source.location();
@@ -90,7 +119,8 @@ namespace {
     if (g_cancellable_is_cancelled(cancel)) {
       return result;
     }
-    if (options.policy == ThumbnailPolicy::Local && networkFilesystem(*native)) {
+    const bool remote = networkOverride ? *networkOverride : networkFilesystem(*native);
+    if (options.policy == ThumbnailPolicy::Local && remote) {
       return result;
     }
     const std::string mime(source.contentType.value_or(""));
@@ -155,8 +185,14 @@ namespace {
       return result;
     }
     std::expected<LoadedImageFile, std::string> decoded = std::unexpected("no thumbnail decoder");
+    Fd staged;
+    if (remote) {
+      staged = stagePreviewSource(file.get(), static_cast<std::uint64_t>(before.st_size));
+    }
     if (mime.starts_with("image/") || !insideCache) {
-      decoded = renderThumbnailProvider(file.get(), mime, side, options, cancel, purpose);
+      decoded = renderThumbnailProvider(
+          staged.valid() ? staged.get() : file.get(), mime, side, options, cancel, purpose, workspace
+      );
     }
     if (!decoded && !g_cancellable_is_cancelled(cancel)) {
       logDebug("[thumbnail] mime={} size={}: {}", mime, side, decoded.error());
@@ -207,7 +243,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     std::chrono::steady_clock::time_point seen;
     int side = 128;
     ThumbnailPurpose purpose = ThumbnailPurpose::Thumbnail;
-    bool visible = false, failed = false;
+    bool visible = false, failed = false, network = false;
     Stage stage = Stage::ProbeQueued;
     std::chrono::steady_clock::time_point retry;
   };
@@ -230,6 +266,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     std::vector<ThumbnailCacheWrite> writes;
     std::uint64_t budget;
   };
+  static constexpr std::size_t kMaxProbes = 4;
   static constexpr std::size_t kWriteBudget = 64U * 1024U * 1024U;
   ThumbnailOptions options;
   NetworkFilesystemCheck networkFilesystem;
@@ -248,6 +285,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   struct Running {
     GioPtr<GCancellable> cancel;
     Location source;
+    bool network, generate;
   };
   std::vector<Running> running;
   void notify() {
@@ -428,6 +466,12 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   }
   // Previews first, then visible cells, then the least recently requested.
   auto next(Stage stage) {
+    const bool generate = stage == Stage::DecodeQueued;
+    const auto remote = std::ranges::count_if(running, [generate](const Running& job) {
+      return job.network && job.generate == generate;
+    });
+    // Keep one slot available for local artwork when a share stops answering.
+    const bool allowNetwork = static_cast<std::size_t>(remote) + 1 < (generate ? decoders() : kMaxProbes);
     const auto before = [](const Item& a, const Item& b) {
       const bool aPreview = a.purpose == ThumbnailPurpose::Preview, bPreview = b.purpose == ThumbnailPurpose::Preview;
       if (aPreview != bPreview) {
@@ -440,7 +484,9 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     };
     auto result = cache.end();
     for (auto it = cache.begin(); it != cache.end(); ++it) {
-      if (it->second.stage == stage && (result == cache.end() || before(it->second, result->second))) {
+      if (it->second.stage == stage
+          && (!it->second.network || allowNetwork)
+          && (result == cache.end() || before(it->second, result->second))) {
         result = it;
       }
     }
@@ -455,7 +501,8 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
       ++probes;
     }
     running.push_back(
-        {GioPtr<GCancellable>(static_cast<GCancellable*>(g_object_ref(item.cancel.get()))), item.source.location()}
+        {GioPtr<GCancellable>(static_cast<GCancellable*>(g_object_ref(item.cancel.get()))), item.source.location(),
+         item.network, generate}
     );
     const GioPtr<GTask> task(g_task_new(
         nullptr, item.cancel.get(),
@@ -464,7 +511,11 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
           const auto* request = static_cast<Request*>(g_task_get_task_data(task));
           const auto owner = request->owner;
           GError* error = nullptr;
-          const std::unique_ptr<Result> loaded(static_cast<Result*>(g_task_propagate_pointer(task, &error)));
+          auto loaded = std::unique_ptr<Result>(static_cast<Result*>(g_task_propagate_pointer(task, &error)));
+          if (!loaded && !g_cancellable_is_cancelled(g_task_get_cancellable(task))) {
+            loaded = std::make_unique<Result>();
+            loaded->error = error ? error->message : "Thumbnail unavailable.";
+          }
           g_clear_error(&error);
           if (request->generate) {
             --owner->active;
@@ -525,19 +576,27 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
         },
         [](gpointer data) { delete static_cast<Request*>(data); }
     );
-    g_task_run_in_thread(task.get(), [](GTask* task, gpointer, gpointer data, GCancellable* cancel) {
-      const auto& request = *static_cast<Request*>(data);
-      auto result = std::make_unique<Result>();
-      try {
-        result->loaded = load(
-            request.source, request.side, request.options, request.owner->networkFilesystem, cancel, request.generate,
-            request.purpose
-        );
-      } catch (const std::exception& error) {
-        result->error = error.what();
-      }
-      g_task_return_pointer(task, result.release(), [](gpointer data) { delete static_cast<Result*>(data); });
-    });
+    runIoTask(
+        task.get(),
+        item.network ? (generate ? IoLane::NetworkPreviewDecode : IoLane::NetworkPreviewProbe)
+                     : (generate ? IoLane::PreviewDecode : IoLane::PreviewProbe),
+        [](GTask* task, gpointer, gpointer data, GCancellable* cancel) {
+          const auto& request = *static_cast<Request*>(data);
+          auto result = std::make_unique<Result>();
+          try {
+            const auto path = request.source.location().nativePath();
+            std::optional<bool> network;
+            if (path && request.owner->networkFilesystem) {
+              network = request.owner->networkFilesystem(*path);
+            }
+            result->loaded =
+                load(request.source, request.side, request.options, cancel, request.generate, request.purpose, network);
+          } catch (const std::exception& error) {
+            result->error = error.what();
+          }
+          g_task_return_pointer(task, result.release(), [](gpointer data) { delete static_cast<Result*>(data); });
+        }
+    );
   }
   void pump() {
     if (!alive || clearing) {
@@ -552,7 +611,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
         ++it;
       }
     }
-    while (probes < 4) {
+    while (probes < kMaxProbes) {
       const auto item = next(Stage::ProbeQueued);
       if (item == cache.end()) {
         break;
@@ -569,8 +628,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   }
 };
 
-luciole::ThumbnailService::ThumbnailService()
-    : ThumbnailService([](const std::string& path) { return luciole::networkFilesystem(path); }) {}
+luciole::ThumbnailService::ThumbnailService() : ThumbnailService(NetworkFilesystemCheck{}) {}
 luciole::ThumbnailService::ThumbnailService(NetworkFilesystemCheck networkFilesystem)
     : m_state(std::make_shared<State>()) {
   m_state->networkFilesystem = std::move(networkFilesystem);
@@ -623,6 +681,7 @@ luciole::ThumbnailService::request(const DirectoryEntry& source, int pixels, boo
       return {};
     }
     State::Item item(source);
+    item.network = ioLane(location) == IoLane::Network;
     item.image = std::make_shared<FileIconImage>();
     item.serial = ++state.serial;
     item.bytes = bytes;
@@ -812,4 +871,23 @@ std::size_t luciole::ThumbnailService::queuedJobs() const {
   return static_cast<std::size_t>(std::ranges::count_if(m_state->cache, [](const auto& item) {
     return item.second.stage != State::Stage::Ready && item.second.stage != State::Stage::Decoding;
   }));
+}
+
+luciole::NetworkMessage luciole::networkThumbnailRequest(const NetworkMessage& request) {
+  const CancelToken token;
+  const auto result = load(
+      request.at("source").get<DirectoryEntry>(), request.at("side").get<int>(),
+      request.at("options").get<ThumbnailOptions>(), gioCancellable(token), request.at("generate").get<bool>(),
+      request.at("purpose").get<ThumbnailPurpose>(), request.at("network").get<std::optional<bool>>(),
+      request.value("workspace", std::string{})
+  );
+  NetworkMessage value{
+      {"decodeNeeded", result.decodeNeeded},
+      {"pixels", result.image.pixels ? encodePixels(*result.image.pixels) : NetworkMessage(nullptr)},
+      {"write", nullptr}
+  };
+  if (result.write) {
+    value["write"] = {{"text", result.write->thumbnail.text}, {"side", result.write->side}};
+  }
+  return value;
 }

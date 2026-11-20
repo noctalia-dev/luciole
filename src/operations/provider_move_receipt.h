@@ -10,6 +10,7 @@ namespace luciole {
     static std::shared_ptr<const MoveReceipt>
     capture(const std::vector<std::shared_ptr<const ProviderCopyEffect>>& effects, const CancelToken& token);
     MoveReplayResult reverse(const CancelToken& token, std::atomic<std::size_t>& completed) const override;
+    std::vector<TransferResult> failedLocations(const FileError& error) const override;
     std::vector<TransferResult> unconfirmed(const FileError& error) const override;
     std::size_t size() const override;
     bool usesMount(const HistoryMount& mount) const override;

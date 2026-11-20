@@ -10,6 +10,7 @@
 #include "operations/copy_receipt.h"
 #include "operations/history_revisions.h"
 #include "operations/move_receipt.h"
+#include "operations/network_history.h"
 #include "operations/provider_transfer.h"
 #include "operations/transfer_copy.h"
 #include "operations/transfer_staging.h"
@@ -97,6 +98,8 @@ namespace {
 } // namespace
 
 struct luciole::TransferService::State {
+  std::unique_ptr<NetworkService<TransferView>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<TransferView>>("transfer");
   std::function<void()> changed;
   bool active = false;
   TransferAction action = TransferAction::Move;
@@ -416,20 +419,66 @@ luciole::TransferService::~TransferService() {
   cancel();
 }
 void luciole::TransferService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
-bool luciole::TransferService::busy() const { return m_state->active; }
-std::size_t luciole::TransferService::total() const { return m_state->total; }
-std::size_t luciole::TransferService::completed() const { return m_state->completed.load(); }
-std::uint64_t luciole::TransferService::bytes() const { return m_state->bytes.load(); }
-luciole::TransferAction luciole::TransferService::action() const { return m_state->action; }
-const std::vector<luciole::TransferResult>& luciole::TransferService::results() const { return m_state->results; }
+bool luciole::TransferService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
+std::size_t luciole::TransferService::total() const {
+  if (m_state->remote) {
+    return m_state->remote->view.total;
+  }
+  return m_state->total;
+}
+std::size_t luciole::TransferService::completed() const {
+  if (m_state->remote) {
+    return m_state->remote->view.completed;
+  }
+  return m_state->completed.load();
+}
+std::uint64_t luciole::TransferService::bytes() const {
+  if (m_state->remote) {
+    return m_state->remote->view.bytes;
+  }
+  return m_state->bytes.load();
+}
+luciole::TransferAction luciole::TransferService::action() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.action;
+  }
+  return m_state->action;
+}
+const std::vector<luciole::TransferResult>& luciole::TransferService::results() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.results;
+  }
+  return m_state->results;
+}
 void luciole::TransferService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   m_state->gate.wake();
 }
-std::optional<luciole::TransferConflict> luciole::TransferService::conflict() const { return m_state->gate.pending(); }
+std::optional<luciole::TransferConflict> luciole::TransferService::conflict() const {
+  if (m_state->remote) {
+    return m_state->remote->conflict();
+  }
+  return m_state->gate.pending();
+}
 bool luciole::TransferService::resolve(std::uint64_t id, TransferConflictChoice choice, bool applyToAll) {
+  if (m_state->remote) {
+    return m_state->remote->answer(id, {{"choice", choice}, {"applyToAll", applyToAll}});
+  }
   if (choice < TransferConflictChoice::Replace || choice > TransferConflictChoice::Merge) {
     return false;
   }
@@ -446,22 +495,77 @@ bool luciole::TransferService::resolve(std::uint64_t id, TransferConflictChoice 
   });
 }
 
-std::size_t luciole::TransferService::retryable() const { return busy() ? 0 : m_state->retryable; }
-const std::string& luciole::TransferService::report() const { return m_state->report; }
-std::uint64_t luciole::TransferService::jobId() const { return m_state->jobId; }
-std::shared_ptr<const luciole::MoveReceipt> luciole::TransferService::receipt() const { return m_state->receipt; }
+std::size_t luciole::TransferService::retryable() const {
+  if (m_state->remote) {
+    return busy() ? 0 : m_state->remote->view.snapshot.retryable;
+  }
+  return busy() ? 0 : m_state->retryable;
+}
+const std::string& luciole::TransferService::report() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.report;
+  }
+  return m_state->report;
+}
+std::uint64_t luciole::TransferService::jobId() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.jobId;
+  }
+  return m_state->jobId;
+}
+std::shared_ptr<const luciole::MoveReceipt> luciole::TransferService::receipt() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.receipt;
+  }
+  return m_state->receipt;
+}
 std::shared_ptr<const luciole::MoveReceipt> luciole::TransferService::takeReceipt() {
+  if (m_state->remote) {
+    return std::exchange(m_state->remote->view.snapshot.receipt, nullptr);
+  }
   return std::move(m_state->receipt);
 }
-bool luciole::TransferService::historyRetired() const { return m_state->historyRetired; }
+bool luciole::TransferService::historyRetired() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.historyRetired;
+  }
+  return m_state->historyRetired;
+}
 std::shared_ptr<const luciole::CopyReceipt> luciole::TransferService::copyReceipt() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.copyReceipt;
+  }
   return m_state->copyReceipt;
 }
 std::shared_ptr<const luciole::CopyReceipt> luciole::TransferService::takeCopyReceipt() {
+  if (m_state->remote) {
+    return std::exchange(m_state->remote->view.snapshot.copyReceipt, nullptr);
+  }
   return std::move(m_state->copyReceipt);
 }
-bool luciole::TransferService::start(TransferRequest request) { return launch(std::move(request), false); }
+bool luciole::TransferService::start(TransferRequest request) {
+  if (m_state->remote) {
+    if (busy() || request.sources.empty()) {
+      return false;
+    }
+    m_state->remote->targets.set(request.sources, request.destination);
+    m_state->remote->view.total = request.sources.size();
+    m_state->remote->view.snapshot.action = request.action;
+    auto& results = m_state->remote->view.snapshot.results;
+    results.clear();
+    results.reserve(request.sources.size());
+    for (const auto& source : request.sources) {
+      auto& result = results.emplace_back(source, TransferOutcome::Cancelled);
+      result.destination = request.destination;
+    }
+    return m_state->remote->invoke("start", {{"request", request}}, true);
+  }
+  return launch(std::move(request), false);
+}
 bool luciole::TransferService::retryFailed() {
+  if (m_state->remote) {
+    return retryable() > 0 && m_state->remote->invoke("retryFailed", NetworkMessage::object(), true);
+  }
   return m_state->job && retryable() > 0 ? launch(m_state->job->request, true) : false;
 }
 namespace {
@@ -1048,6 +1152,23 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
 }
 
 bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& receipt) {
+  if (m_state->remote) {
+    if (busy() || !receipt) {
+      return false;
+    }
+    const auto history = historyHandle(receipt);
+    if (!history) {
+      // A receipt captured by an in-process backend keeps that backend's descriptor ownership.
+      m_state->changed = std::move(m_state->remote->changed);
+      m_state->remote.reset();
+      return replay(receipt);
+    }
+    m_state->remote->view.snapshot.action = TransferAction::Move;
+    m_state->remote->view.total = receipt->size();
+    m_state->remote->retain(receipt);
+    m_state->remote->useProcess(history->process);
+    return m_state->remote->invoke("replay", {{"receipt", history->id}}, true);
+  }
   if (busy() || !receipt || receipt->size() == 0) {
     return false;
   }
@@ -1092,6 +1213,22 @@ bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& 
 }
 
 bool luciole::TransferService::replayCopy(const std::shared_ptr<const CopyReceipt>& receipt) {
+  if (m_state->remote) {
+    if (busy() || !receipt) {
+      return false;
+    }
+    const auto history = historyHandle(receipt);
+    if (!history) {
+      m_state->changed = std::move(m_state->remote->changed);
+      m_state->remote.reset();
+      return replayCopy(receipt);
+    }
+    m_state->remote->view.snapshot.action = receipt->action();
+    m_state->remote->view.total = receipt->size();
+    m_state->remote->retain(receipt);
+    m_state->remote->useProcess(history->process);
+    return m_state->remote->invoke("replayCopy", {{"receipt", history->id}}, true);
+  }
   if (busy() || !receipt || receipt->size() == 0) {
     return false;
   }

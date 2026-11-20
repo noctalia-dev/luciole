@@ -114,8 +114,9 @@ namespace {
     luciole::EmptyTrashService service;
     TEST_CHECK(service.prepareDeletion({selected}));
     pump.until([&] { return !service.busy(); });
-    TEST_CHECK(service.canEmpty() && read(folder / "nested/file") == "delete");
+    TEST_CHECK(service.canEmpty() && service.pending() && read(folder / "nested/file") == "delete");
     service.cancel();
+    TEST_CHECK(!service.pending());
     TEST_CHECK(service.deleteSelection({selected}));
     service.cancel();
     pump.until([&] { return !service.busy(); });
