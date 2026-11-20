@@ -98,6 +98,10 @@ app_icon = configure_file(
   configuration: {'APP_ICON': fs.read('assets/icons/dev.noctalia.luciole.svg')},
 )
 src_inc = include_directories('src')
+configure_file(
+  input: 'src/fs/network_worker_path.h.in', output: 'network_worker_path.h',
+  configuration: {'IO_WORKER_PATH': get_option('prefix') / get_option('libdir') / 'luciole/luciole-io-worker'},
+)
 
 # One static library per module. A module's dependencies list only the modules
 # its sources include, following the layering in CONTRIBUTING.md. Modules that
@@ -142,7 +146,13 @@ fs_lib = static_library('luciole-fs',
     'src/fs/location_mount.cpp',
     'src/fs/mount_interaction.cpp',
     'src/fs/native_listing.cpp',
+    'src/fs/system_mounts.cpp',
+    'src/fs/systemd_mounts.cpp',
+    'src/fs/system_mount_monitor.cpp',
     'src/fs/network_listing.cpp',
+    'src/fs/network_process.cpp',
+    'src/fs/network_job.cpp',
+    'src/fs/network_wire.cpp',
     'src/fs/ws_discovery.cpp',
     'src/fs/ws_discovery_metadata.cpp',
     'src/fs/ws_discovery_protocol.cpp',
@@ -154,9 +164,9 @@ fs_lib = static_library('luciole-fs',
     'src/fs/xdg_dirs.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [gio, libarchive, liblzma, curl, xml],
+  dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml, dependency('nlohmann_json')],
 )
-fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, libarchive, liblzma, curl, xml])
+fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml, dependency('nlohmann_json')])
 
 config_lib = static_library('luciole-config',
   files(

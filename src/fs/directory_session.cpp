@@ -5,6 +5,7 @@
 #include "fs/heap_trim.h"
 #include "fs/native_listing.h"
 #include "fs/network_listing.h"
+#include "fs/system_mounts.h"
 
 #include <algorithm>
 #include <bit>
@@ -285,6 +286,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   std::deque<std::size_t> factsOrder;
   FileIconPool icons;
   struct Scan {
+    CancelToken preparation;
     GioPtr<GCancellable> cancellable{g_cancellable_new()};
     GioPtr<GFileEnumerator> enumerator;
     std::vector<DirectoryEntry> entries;
@@ -525,6 +527,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void stopScan() {
+    if (scan) {
+      scan->preparation.cancel();
+    }
     if (factsIdle != 0) {
       g_source_remove(std::exchange(factsIdle, 0));
     }
@@ -824,10 +829,38 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     const GString localPath(scan->local ? g_file_get_path(scan->parent.get()) : nullptr);
     scan->local = scan->local && localPath;
     icons.setLocalFolder(localPath.get());
-    queryMetadata();
     if (scan->local) {
-      listNatively(localPath.get());
+      runJob<bool>(
+          scan->preparation,
+          [location = *snapshot.location, token = scan->preparation] { return prepareSystemMount(location, token); },
+          [weak = weak_from_this(), pending = scan, path = std::string(localPath.get())](JobResult<bool> result) {
+            const auto state = weak.lock();
+            if (!state || state->scan != pending || pending->preparation.cancelled()) {
+              return;
+            }
+            if (!result) {
+              state->complete(result.error());
+              return;
+            }
+            if (*result) {
+              if (state->monitor) {
+                g_file_monitor_cancel(state->monitor.get());
+                state->monitor.reset();
+              }
+              state->snapshot.monitorError =
+                  FileError{FileErrorKind::Unsupported, "Refresh to update this network folder."};
+            } else if (!state->monitor) {
+              state->watch();
+            }
+            state->queryMetadata();
+            state->listNatively(path);
+          }
+      );
     } else {
+      if (!monitor) {
+        watch();
+      }
+      queryMetadata();
       enumerate();
     }
     notify();
@@ -1364,7 +1397,6 @@ void luciole::DirectorySession::open(const Location& location) {
     state->openNetwork();
     return;
   }
-  state->watch();
   state->begin();
 }
 
@@ -1378,7 +1410,6 @@ void luciole::DirectorySession::refresh() {
   if (state->snapshot.location) {
     if (!state->monitor) {
       state->snapshot.monitorError.reset();
-      state->watch();
       // Changes before this new watch were not observed.
       state->identities.clear();
     }

@@ -13,6 +13,8 @@ activation_server = custom_target('launch-activation-server-header',
 )
 
 test_table = [
+  {'name': 'network-process', 'deps': [fs_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'system-mounts', 'deps': [fs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'ws-discovery', 'deps': [fs_dep], 'env': gio_env, 'wrapper': files('ws_discovery_test.py')},
   {'name': 'input-lifetime', 'deps': [noctalia_ui_dep]},
   {'name': 'window-move-gesture', 'deps': [model_dep]},
