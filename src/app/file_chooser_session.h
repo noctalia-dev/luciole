@@ -1,6 +1,7 @@
 #pragma once
 
 #include "browser/chooser_policy.h"
+#include "fs/cancel_token.h"
 #include "fs/file_filter.h"
 #include "platform/file_chooser_portal.h"
 #include "ui/controls/select_dropdown_popup.h"
@@ -60,13 +61,25 @@ public:
 private:
   bool saving() const { return m_request.mode != luciole::FileChooserMode::Open; }
   luciole::ChooserMode mode() const;
-  luciole::ChooserDecision decision(const std::vector<luciole::DirectoryEntry>& entries) const;
+  luciole::ChooserDecision decision(const std::vector<luciole::DirectoryEntry>& entries);
   void selectFilter(std::size_t index);
   void apply(const luciole::ChooserDecision& decision);
   void open(const std::vector<luciole::DirectoryEntry>& targets);
   // Save: answers with the destinations, or asks first when one exists.
   void save();
   void syncSave();
+  void savedTargets(std::vector<luciole::Location> targets, std::vector<luciole::Location> existing);
+  luciole::CancelToken m_typeToken, m_saveToken;
+  std::vector<luciole::DirectoryEntry> m_typeSources, m_typeResolved;
+  std::optional<luciole::Location> m_typeFolder;
+  std::string m_typeError, m_saveError;
+  struct PendingOpen {
+    std::vector<luciole::DirectoryEntry> targets;
+    std::vector<luciole::EntryId> selection;
+  };
+  std::optional<PendingOpen> m_openAfterTypes;
+  std::uint64_t m_typeGeneration = 0;
+  bool m_typesPending = false, m_savePending = false;
   void cancel();
 
   luciole::FileChooserRequest m_request;

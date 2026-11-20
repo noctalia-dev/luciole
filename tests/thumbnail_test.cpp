@@ -2,6 +2,8 @@
 #include "directory_fixture.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 #include "imaging/pixbuf_image_decoder.h"
 #include "imaging/png_decoder.h"
 #include "imaging/raster_decoder.h"
@@ -21,6 +23,7 @@
 #include <format>
 #include <fstream>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <latch>
 #include <png.h>
 #include <print>
 #include <stdexcept>
@@ -1097,7 +1100,14 @@ namespace {
     fs::create_directory(bin);
     const luciole::GString shell(g_find_program_in_path("sh")), sleep(g_find_program_in_path("sleep"));
     TEST_CHECK(shell && sleep);
-    std::ofstream(bin / "pdftoppm") << "#!" << shell.get() << "\nexec " << sleep.get() << " 30\n";
+    const auto outputs = fixture.root / "provider-outputs";
+    ::setenv("LUCIOLE_TEST_PROVIDER_OUTPUTS", outputs.c_str(), 1);
+    std::ofstream(bin / "pdftoppm")
+        << "#!"
+        << shell.get()
+        << "\nfor output do :; done\nprintf '%s\\n' \"$output\" >> \"$LUCIOLE_TEST_PROVIDER_OUTPUTS\"\nexec "
+        << sleep.get()
+        << " 30\n";
     TEST_CHECK(::chmod((bin / "pdftoppm").c_str(), 0700) == 0);
     const std::string path = std::getenv("PATH");
     // The blocking pdftoppm shadows the real one; glycin still needs bwrap from the system PATH.
@@ -1133,6 +1143,10 @@ namespace {
     const auto preview = service.request(warm, 512, true, luciole::ThumbnailPurpose::Preview);
     TEST_CHECK(preview != nullptr);
     pump.until([&] { return completions == queued.size() + 1; });
+    pump.until([&] {
+      std::ifstream stream(outputs);
+      return static_cast<std::size_t>(std::count(std::istreambuf_iterator<char>(stream), {}, '\n')) >= decoders;
+    });
     busy.erase(busy.begin());
     service.endFrame();
     pump.until([&] { return preview->ready; });
@@ -1151,6 +1165,11 @@ namespace {
     busy.clear();
     service.endFrame();
     pump.until([&] { return service.activeJobs() == 0; });
+    std::ifstream recorded(outputs);
+    for (std::string output; std::getline(recorded, output);) {
+      TEST_CHECK(!fs::exists(fs::path(output).parent_path()));
+    }
+    ::unsetenv("LUCIOLE_TEST_PROVIDER_OUTPUTS");
     ::setenv("PATH", path.c_str(), 1);
     service.clearCache();
     pump.until([&] { return !service.clearing(); });
@@ -1324,6 +1343,51 @@ namespace {
     pump.drain();
     TEST_CHECK(!retiring->pixels);
   }
+  void testLocalArtworkDuringNetworkStall(const Fixture& fixture) {
+    using namespace luciole;
+    Pump pump;
+    const auto remote = fixture.root / "share.png", local = fixture.root / "local-art.png";
+    write(remote, png(picture()));
+    fs::copy_file(remote, local);
+    const auto remoteEntry = source(remote, pump), localEntry = source(local, pump);
+    registerNetworkFolder(remoteEntry.location());
+    std::latch reconnect(1);
+    int finished = 0;
+    const auto workers = workerLimit(IoLane::NetworkPreviewProbe);
+    for (int i = 0; i < workers; ++i) {
+      runIoJob<bool>(
+          IoLane::NetworkPreviewProbe,
+          [&] {
+            reconnect.wait();
+            return true;
+          },
+          [&](auto result) {
+            TEST_CHECK(result && *result);
+            ++finished;
+          }
+      );
+    }
+    ThumbnailService thumbnails;
+    thumbnails.setOptions({.policy = ThumbnailPolicy::All});
+    FileIconCache icons;
+    std::vector<std::shared_ptr<const FileIconImage>> waiting;
+    for (int size : {128, 256, 512, 1024}) {
+      waiting.push_back(thumbnails.request(remoteEntry, size));
+      waiting.push_back(icons.request({.names = {}, .filePath = remote.native(), .desktopFile = {}}, size));
+    }
+    // Dispatch the queued remote probes before the user opens the local folder.
+    while (g_main_context_iteration(nullptr, FALSE)) {
+    }
+    const auto thumbnail = thumbnails.request(localEntry, 128);
+    const auto icon = icons.request({.names = {}, .filePath = local.native(), .desktopFile = {}}, 48);
+    pump.until([&] { return thumbnail->ready && icon->ready; });
+    TEST_CHECK(thumbnail->pixels && icon->pixels);
+    TEST_CHECK(std::ranges::none_of(waiting, [](const auto& image) { return image->ready; }));
+    reconnect.count_down();
+    pump.until([&] {
+      return finished == workers && std::ranges::all_of(waiting, [](const auto& image) { return image->ready; });
+    });
+  }
   void testNetworkFilesystemPolicy(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "network.png";
@@ -1374,6 +1438,7 @@ int main(int argc, char** argv) {
     testPublicationAndSourceChanges(fixture);
     testService(fixture);
     testNetworkFilesystemPolicy(fixture);
+    testLocalArtworkDuringNetworkStall(fixture);
     std::println("thumbnail checks passed");
     return 0;
   } catch (const std::exception& error) {

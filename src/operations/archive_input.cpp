@@ -1,5 +1,7 @@
 #include "operations/archive_input.h"
 
+#include "fs/network_process.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <dirent.h>
@@ -148,6 +150,7 @@ std::size_t luciole::archive_work::Input::read(std::span<char> buffer) {
     count += bytes;
     m_position += bytes;
     m_readBytes += bytes;
+    noteWorkerIoProgress();
   }
   return count;
 }

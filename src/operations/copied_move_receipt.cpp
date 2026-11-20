@@ -404,10 +404,14 @@ void luciole::CopiedMoveReceipt::retainAll(std::vector<TransferResult>& values) 
   retain(copied);
   std::ranges::move(copied, firstCopied);
 }
-std::vector<luciole::TransferResult> luciole::CopiedMoveReceipt::unconfirmed(const FileError& error) const {
+std::vector<luciole::TransferResult> luciole::CopiedMoveReceipt::failedLocations(const FileError& error) const {
   auto values = nativeResults(TransferOutcome::Partial, error);
   auto copied = results(TransferOutcome::Partial, error);
   values.insert(values.end(), copied.begin(), copied.end());
+  return values;
+}
+std::vector<luciole::TransferResult> luciole::CopiedMoveReceipt::unconfirmed(const FileError& error) const {
+  auto values = failedLocations(error);
   const std::unique_lock lock(m_state->mutex, std::try_to_lock);
   if (lock.owns_lock() && m_generation == m_state->generation) {
     ++m_state->generation;

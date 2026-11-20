@@ -1,7 +1,8 @@
 #include "platform/extraction_launcher.h"
 
-#include "fs/background_job.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <utility>
 
@@ -44,8 +45,9 @@ bool luciole::ExtractionLauncher::request(
   }
   m_state->busy = true;
   m_state->token = CancelToken{};
-  runJob<bool>(
-      m_state->token,
+  const auto lane = ioLane(destination);
+  runIoJob<bool>(
+      lane, m_state->token,
       [offer = std::move(offer), destination = std::move(destination), token = m_state->token] {
         if (!valid(offer)) {
           throwFileError(FileErrorKind::InvalidArgument, "Invalid archive extraction offer.");
@@ -55,11 +57,10 @@ bool luciole::ExtractionLauncher::request(
           throwFileError(FileErrorKind::Unsupported, "This extraction offer requires a local UTF-8 folder path.");
         }
         GError* error = nullptr;
-        const GioPtr<GFileInfo> info(g_file_query_info(
-            gioFile(destination).get(), G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE,
-            G_FILE_QUERY_INFO_NONE, gioCancellable(token), &error
-        ));
-        checkError(error);
+        const auto info = isolatedInfo(
+            destination, G_FILE_ATTRIBUTE_STANDARD_TYPE "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE, G_FILE_QUERY_INFO_NONE,
+            token
+        );
         if (!info || g_file_info_get_file_type(info.get()) != G_FILE_TYPE_DIRECTORY) {
           throwFileError(FileErrorKind::NotDirectory, "The extraction destination is not a folder.");
         }

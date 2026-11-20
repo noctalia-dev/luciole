@@ -45,6 +45,9 @@ namespace luciole {
       const Location& location, const CancelToken& token,
       std::move_only_function<void(std::expected<FileIconSource, FileError>)> done
   );
+  enum class FollowSymlinks : std::uint8_t { No, Yes };
+  FileType
+  readFileType(const Location& location, const CancelToken& token, FollowSymlinks follow = FollowSymlinks::Yes);
   // Follows symlinks. done runs on the main context unless token was cancelled first.
   void queryFileType(
       const Location& location, const CancelToken& token,

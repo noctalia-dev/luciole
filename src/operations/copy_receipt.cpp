@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/filename.h"
+#include "fs/network_process.h"
 #include "fs/posix_fd.h"
 #include "operations/copy_history_tree.h"
 #include "operations/creation_stage.h"
@@ -834,7 +835,7 @@ std::vector<luciole::Location> luciole::CopyEffect::retainForRecovery() const {
   return retained;
 }
 
-std::vector<luciole::TransferResult> luciole::CopyReceipt::unconfirmed(const FileError& error) const {
+std::vector<luciole::TransferResult> luciole::CopyReceipt::failedLocations(const FileError& error) const {
   std::vector<TransferResult> results;
   for (const auto& effect : m_effects) {
     auto& result = results.emplace_back(effect->m_destination, TransferOutcome::Partial, error);
@@ -844,14 +845,25 @@ std::vector<luciole::TransferResult> luciole::CopyReceipt::unconfirmed(const Fil
   return results;
 }
 bool luciole::CopyReceipt::cleanupPending() {
+  if (networkCleanupPending()) {
+    return true;
+  }
   return pendingCleanup.load() != 0 || ProviderCopyReceipt::cleanupPending();
 }
 std::vector<luciole::FileError> luciole::CopyReceipt::takeCleanupErrors() {
+  auto networkErrors = takeNetworkCleanupErrors();
   const std::scoped_lock lock(cleanupMutex);
   auto errors = std::exchange(cleanupErrors, {});
+  errors.insert(
+      errors.end(), std::make_move_iterator(networkErrors.begin()), std::make_move_iterator(networkErrors.end())
+  );
   auto providerErrors = ProviderCopyReceipt::takeCleanupErrors();
   for (auto& error : providerErrors) {
     errors.push_back(std::move(error));
   }
   return errors;
+}
+
+std::vector<luciole::TransferResult> luciole::CopyReceipt::unconfirmed(const FileError& error) const {
+  return failedLocations(error);
 }

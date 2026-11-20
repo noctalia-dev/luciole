@@ -534,7 +534,7 @@ namespace {
     }
   }
 
-  IconThemePlan buildThemePlan() {
+  IconThemePlan buildThemePlan(std::optional<std::string_view> theme = std::nullopt) {
     IconThemePlan plan;
     const auto dataDirs = xdgDataDirs();
     plan.baseDirs = iconBaseDirs(dataDirs);
@@ -544,7 +544,8 @@ namespace {
     std::unordered_set<std::string> seenDirs;
 
     // Use the first candidate theme that actually exists on disk
-    for (const auto& candidate : readGtkThemeCandidates()) {
+    const auto candidates = theme ? std::vector<std::string>{std::string(*theme)} : readGtkThemeCandidates();
+    for (const auto& candidate : candidates) {
       bool exists = false;
       for (const auto& base : plan.baseDirs) {
         if (pathIsDirectory(std::format("{}/{}", base, candidate))) {
@@ -617,6 +618,23 @@ namespace {
 } // namespace
 
 IconResolver::IconResolver(bool cacheMissing) : m_cacheMissing(cacheMissing) { rebuild(); }
+
+IconResolver::IconResolver(std::string theme, std::uint64_t generation) : m_cacheMissing(true), m_fixedTheme(true) {
+  struct CapturedTheme {
+    std::mutex mutex;
+    std::string name;
+    std::uint64_t generation = 0;
+    std::shared_ptr<const IconThemePlan> plan;
+  };
+  static CapturedTheme captured;
+  const std::scoped_lock lock(captured.mutex);
+  if (!captured.plan || captured.name != theme || captured.generation != generation) {
+    captured.plan = std::make_shared<const IconThemePlan>(buildThemePlan(theme));
+    captured.name = std::move(theme);
+    captured.generation = generation;
+  }
+  m_plan = captured.plan;
+}
 
 IconResolver::IconResolver() : IconResolver(false) {}
 
@@ -697,7 +715,7 @@ void IconResolver::rebuild() {
 }
 
 void IconResolver::ensureFresh() {
-  if (m_generation != themeGeneration()) {
+  if (!m_fixedTheme && m_generation != themeGeneration()) {
     rebuild();
   }
 }

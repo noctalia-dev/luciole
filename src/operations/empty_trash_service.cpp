@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
+#include "operations/network_history.h"
 #include "operations/trash_item.h"
 
 #include <atomic>
@@ -124,6 +125,8 @@ namespace {
 } // namespace
 
 struct luciole::EmptyTrashService::State {
+  std::unique_ptr<NetworkService<EmptyTrashSnapshot>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<EmptyTrashSnapshot>>("emptyTrash");
   EmptyTrashSnapshot snapshot;
   std::shared_ptr<Targets> targets;
   CancelToken token;
@@ -215,18 +218,45 @@ luciole::EmptyTrashService::~EmptyTrashService() {
   cancel();
 }
 void luciole::EmptyTrashService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
-bool luciole::EmptyTrashService::busy() const { return m_state->active; }
-bool luciole::EmptyTrashService::pending() const {
-  return busy() || m_state->snapshot.status == EmptyTrashStatus::Ready;
+bool luciole::EmptyTrashService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
 }
+bool luciole::EmptyTrashService::pending() const { return busy() || snapshot().status == EmptyTrashStatus::Ready; }
 bool luciole::EmptyTrashService::canEmpty() const {
+  if (m_state->remote) {
+    return !busy() && m_state->remote->view.ready;
+  }
   return m_state->snapshot.status == EmptyTrashStatus::Ready && m_state->targets && !m_state->targets->empty();
 }
-std::size_t luciole::EmptyTrashService::completed() const { return m_state->completed.load(); }
-const luciole::EmptyTrashSnapshot& luciole::EmptyTrashService::snapshot() const { return m_state->snapshot; }
+std::size_t luciole::EmptyTrashService::completed() const {
+  if (m_state->remote) {
+    return m_state->remote->view.completed;
+  }
+  return m_state->completed.load();
+}
+const luciole::EmptyTrashSnapshot& luciole::EmptyTrashService::snapshot() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot;
+  }
+  return m_state->snapshot;
+}
 void luciole::EmptyTrashService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    if (!busy() && snapshot().status != EmptyTrashStatus::Finished) {
+      m_state->remote->view.snapshot.status = EmptyTrashStatus::Cancelled;
+    }
+    return;
+  }
   m_state->emptyRequested = false;
   m_state->token.cancel();
   m_state->targets.reset();
@@ -257,6 +287,22 @@ bool luciole::EmptyTrashService::deleteSelection(std::vector<DirectoryEntry> sel
 bool luciole::EmptyTrashService::prepareTargets(
     std::optional<std::vector<DirectoryEntry>> selection, bool outsideTrash, bool immediate
 ) {
+  if (m_state->remote) {
+    if (busy()) {
+      return false;
+    }
+    if (!selection) {
+      m_state->remote->targets.set({Location::fromUri("trash:///")});
+      return m_state->remote->invoke("prepare");
+    }
+    m_state->remote->targets.set(*selection);
+    return m_state->remote->invoke(
+        immediate          ? "deleteSelection"
+            : outsideTrash ? "prepareDeletion"
+                           : "prepareSelection",
+        {{"entries", *selection}}, immediate
+    );
+  }
   if (busy()) {
     return false;
   }
@@ -301,6 +347,9 @@ bool luciole::EmptyTrashService::prepareTargets(
   return true;
 }
 bool luciole::EmptyTrashService::empty() {
+  if (m_state->remote) {
+    return canEmpty() && m_state->remote->invoke("empty", NetworkMessage::object(), true);
+  }
   if (!canEmpty()) {
     return false;
   }

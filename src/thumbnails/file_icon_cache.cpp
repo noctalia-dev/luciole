@@ -2,8 +2,11 @@
 
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 #include "imaging/svg_rasterizer.h"
 #include "system/icon_resolver.h"
+#include "thumbnails/network_preview.h"
 
 #include <algorithm>
 #include <array>
@@ -56,8 +59,11 @@ namespace {
     });
   }
 
-  luciole::FileIconImage load(const luciole::FileIconSource& source, int size, const IconColorScheme* scheme) {
-    IconResolver resolver(true);
+  luciole::FileIconImage loadIcon(
+      const luciole::FileIconSource& source, int size, std::string theme, std::uint64_t generation,
+      const IconColorScheme& scheme
+  ) {
+    IconResolver resolver(std::move(theme), generation);
     std::vector<std::string> candidates;
     if (const auto icon = desktopIcon(source.desktopFile); !icon.empty()) {
       candidates.push_back(icon);
@@ -71,8 +77,8 @@ namespace {
       if (path.empty()) {
         continue;
       }
-      auto image = scheme != nullptr && path.ends_with(".svg") && insideRoot(path, scheme->roots)
-          ? luciole::rasterizeSvg(path, size, false, scheme->stylesheet)
+      auto image = path.ends_with(".svg") && insideRoot(path, scheme.roots)
+          ? luciole::rasterizeSvg(path, size, false, scheme.stylesheet)
           : loadImageFile(path, size);
       if (image) {
         return {
@@ -104,11 +110,13 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
   struct Item {
     std::shared_ptr<FileIconImage> image;
     std::uint64_t used = 0;
+    std::chrono::steady_clock::time_point retry = std::chrono::steady_clock::time_point::max();
   };
   struct Request {
     std::shared_ptr<State> owner;
     FileIconSource source;
     std::shared_ptr<FileIconImage> image;
+    IoLane lane;
     int pixels = 0;
     std::uint64_t generation = 0;
     std::shared_ptr<const IconColorScheme> colorScheme;
@@ -120,7 +128,8 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
   std::shared_ptr<const IconColorScheme> colorScheme;
   std::uint64_t clock = 0;
   std::size_t active = 0;
-  bool alive = true;
+  CancelToken cancel;
+  bool alive = true, networkActive = false;
 
   void trim(bool reserveEntry) {
     std::erase_if(cache, [](const auto& item) {
@@ -147,21 +156,41 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
 
   void pump() {
     while (alive && active < 2 && !pending.empty()) {
-      auto* request = new Request(std::move(pending.front()));
-      pending.pop_front();
+      const auto next = std::ranges::find_if(pending, [this](const Request& item) {
+        return !networkActive || item.lane == IoLane::PreviewProbe;
+      });
+      if (next == pending.end()) {
+        break;
+      }
+      auto* request = new Request(std::move(*next));
+      pending.erase(next);
+      if (request->lane == IoLane::NetworkPreviewProbe) {
+        networkActive = true;
+      }
       ++active;
       GioPtr<GTask> task(g_task_new(
-          nullptr, nullptr,
+          nullptr, gioCancellable(cancel),
           [](GObject*, GAsyncResult* result, gpointer) {
             auto* task = G_TASK(result);
             const auto* request = static_cast<Request*>(g_task_get_task_data(task));
             const auto owner = request->owner;
-            const std::unique_ptr<FileIconImage> image(
-                static_cast<FileIconImage*>(g_task_propagate_pointer(task, nullptr))
-            );
+            auto image =
+                std::unique_ptr<FileIconImage>(static_cast<FileIconImage*>(g_task_propagate_pointer(task, nullptr)));
+            const bool failed = !image;
+            if (failed) {
+              image = std::make_unique<FileIconImage>();
+              image->ready = true;
+            }
             --owner->active;
-            if (owner->alive && owner->generation == request->generation && image) {
-              image->sourceKey = "icon:" + keyFor(request->source, request->pixels);
+            if (request->lane == IoLane::NetworkPreviewProbe) {
+              owner->networkActive = false;
+            }
+            if (owner->alive && owner->generation == request->generation) {
+              const auto key = keyFor(request->source, request->pixels);
+              if (failed) {
+                owner->cache.at(key).retry = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+              }
+              image->sourceKey = "icon:" + key;
               image->revision = "artwork-v1:" + std::to_string(request->generation);
               *request->image = std::move(*image);
               owner->trim(false);
@@ -175,14 +204,27 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
           nullptr
       ));
       g_task_set_task_data(task.get(), request, [](gpointer data) { delete static_cast<Request*>(data); });
-      g_task_run_in_thread(task.get(), [](GTask* task, gpointer, gpointer data, GCancellable*) {
+      runIoTask(task.get(), request->lane, [](GTask* task, gpointer, gpointer data, GCancellable* cancel) {
         const auto& request = *static_cast<Request*>(data);
         auto image = std::make_unique<FileIconImage>();
-        try {
-          *image = load(request.source, request.pixels, request.colorScheme.get());
-        } catch (const std::exception&) {
-          image->ready = true;
+        NetworkMessage args{
+            {"action", "icon"},
+            {"source", request.source},
+            {"size", request.pixels},
+            {"theme", IconResolver::activeThemeName()},
+            {"generation", IconResolver::themeGeneration()}
+        };
+        if (request.colorScheme) {
+          args["roots"] = request.colorScheme->roots;
+          args["stylesheet"] = request.colorScheme->stylesheet;
         }
+        auto value = NetworkProcess::acquire(request.lane)->call(std::move(args), cancellationToken(cancel));
+        if (!value.at("pixels").is_null()) {
+          image->pixels = std::make_shared<const LoadedImageFile>(decodePixels(std::move(value.at("pixels"))));
+        }
+        image->path = value.at("path").get<std::string>();
+        image->symbolic = value.at("symbolic").get<bool>();
+        image->ready = true;
         g_task_return_pointer(task, image.release(), [](gpointer data) { delete static_cast<FileIconImage*>(data); });
       });
     }
@@ -192,6 +234,7 @@ struct luciole::FileIconCache::State : std::enable_shared_from_this<State> {
 luciole::FileIconCache::FileIconCache() : m_state(std::make_shared<State>()) {}
 luciole::FileIconCache::~FileIconCache() {
   m_state->alive = false;
+  m_state->cancel.cancel();
   m_state->changed = {};
   m_state->pending.clear();
 }
@@ -207,6 +250,8 @@ void luciole::FileIconCache::setColorScheme(std::vector<std::string> roots, std:
 }
 void luciole::FileIconCache::invalidate() {
   ++m_state->generation;
+  m_state->cancel.cancel();
+  m_state->cancel = CancelToken{};
   m_state->pending.clear();
   m_state->cache.clear();
 }
@@ -216,8 +261,11 @@ luciole::FileIconCache::request(const FileIconSource& source, int pixels) {
   pixels = std::clamp(pixels, 1, 512);
   const auto key = keyFor(source, pixels);
   if (const auto found = m_state->cache.find(key); found != m_state->cache.end()) {
-    found->second.used = ++m_state->clock;
-    return found->second.image;
+    if (std::chrono::steady_clock::now() < found->second.retry) {
+      found->second.used = ++m_state->clock;
+      return found->second.image;
+    }
+    m_state->cache.erase(found);
   }
   m_state->trim(true);
   if (m_state->cache.size() >= kMaxEntries) {
@@ -225,7 +273,12 @@ luciole::FileIconCache::request(const FileIconSource& source, int pixels) {
   }
   auto image = std::make_shared<FileIconImage>();
   m_state->cache.emplace(key, State::Item{image, ++m_state->clock});
-  m_state->pending.push_back({m_state, source, image, pixels, m_state->generation, m_state->colorScheme});
+  const auto& path = !source.desktopFile.empty() ? source.desktopFile : source.filePath;
+  const bool network = !path.empty() && ioLane(Location::fromPath(path)) == IoLane::Network;
+  m_state->pending.push_back(
+      {m_state, source, image, network ? IoLane::NetworkPreviewProbe : IoLane::PreviewProbe, pixels,
+       m_state->generation, m_state->colorScheme}
+  );
   m_state->pump();
   return image;
 }
@@ -234,4 +287,18 @@ void luciole::FileIconCache::imageChanged() {
   if (m_state->alive && m_state->changed) {
     m_state->changed();
   }
+}
+
+luciole::NetworkMessage luciole::networkIconRequest(const NetworkMessage& request) {
+  const auto value = loadIcon(
+      request.at("source").get<FileIconSource>(), request.at("size").get<int>(), request.at("theme").get<std::string>(),
+      request.at("generation").get<std::uint64_t>(),
+      {.roots = request.value("roots", std::vector<std::string>{}),
+       .stylesheet = request.value("stylesheet", std::string{})}
+  );
+  return {
+      {"pixels", value.pixels ? encodePixels(*value.pixels) : NetworkMessage(nullptr)},
+      {"path", value.path},
+      {"symbolic", value.symbolic}
+  };
 }

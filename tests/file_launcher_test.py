@@ -60,6 +60,10 @@ def run_case(binary, mode, names):
             "[MIME Cache]\ntext/plain=fixture.desktop;\n"
             "inode/directory=file-manager.desktop;\nx-scheme-handler/file=file-manager.desktop;\n"
         )
+        if mode == "scheme":
+            associations += "x-scheme-handler/luciole-test=fixture.desktop;\n"
+            mime_cache += "x-scheme-handler/luciole-test=fixture.desktop;\n"
+            desktop.write_text(desktop.read_text().replace("MimeType=text/plain;", "MimeType=text/plain;x-scheme-handler/luciole-test;"))
         if mode == "grouped-open":
             associations += "image/png=other.desktop;\n"
             mime_cache += "image/png=other.desktop;\n"
@@ -136,10 +140,10 @@ def run_case(binary, mode, names):
         if mode == "symlink":
             (root / "target.txt").write_text("private link target\n")
         for name in names:
-            path = os.fsencode(root) + b"/" + name
+            path = name if mode == "scheme" else os.fsencode(root) + b"/" + name
             if mode == "symlink":
                 os.symlink(b"target.txt", path)
-            elif mode != "error":
+            elif mode not in ("error", "scheme"):
                 with open(path, "wb") as stream:
                     stream.write(
                         b"\x89PNG\r\n\x1a\n"
@@ -181,7 +185,7 @@ def run_case(binary, mode, names):
         )
         if result.returncode != 0:
             raise AssertionError((result.returncode, result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace")))
-        if mode in ("open", "native-files", "remote", "symlink", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
+        if mode in ("open", "scheme", "native-files", "remote", "symlink", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
             deadline = time.monotonic() + 5
             expected = [b"sftp://fixture.invalid/private.txt".hex()] if mode == "remote" else sorted(path.hex() for path in paths)
             while True:
@@ -206,7 +210,7 @@ def run_case(binary, mode, names):
             if len(invocations) != expected_count:
                 raise AssertionError("desktop multi/single-URI dispatch ignored")
             if mode == "grouped-open":
-                expected_groups = [[paths[0].hex(), paths[2].hex()], [paths[1].hex()]]
+                expected_groups = [[path.hex() for path in paths if path.endswith(ext)] for ext in (b".txt", b".png")]
                 if sorted(invocations) != sorted(expected_groups):
                     raise AssertionError((invocations, expected_groups))
         if mode == "terminal-missing" and log.exists():
@@ -257,6 +261,7 @@ def main():
     run_case(binary, "native-files", [b"file-only.txt", "space café.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "remote", [b"unused.txt"])
     run_case(binary, "symlink", [b"linked-document"])
+    run_case(binary, "scheme", [b"luciole-test:///example"])
     run_case(binary, "sequential", [b"first.txt", b"second.txt", b"third.txt"])
     run_case(binary, "with", [b"explicit.txt", "space ' $() café\n.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "other", ["other space café.txt".encode(), b"other-raw-\xff.txt"])
@@ -265,7 +270,7 @@ def main():
     run_case(binary, "catalog", [b"unused.txt"])
     run_case(binary, "batch", [b"grouped.txt", "space ' $() café\n.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "batch-single", [b"individual1.txt", b"individual2.txt"])
-    run_case(binary, "grouped-open", [b"episode-01.txt", b"artwork.png", b"episode-02.txt"])
+    run_case(binary, "grouped-open", [b"first.txt", b"artwork.png", *(f"entry-{i}.txt".encode() for i in range(80))])
     run_case(binary, "mixed-catalog", [b"unused.txt"])
     run_case(binary, "dbus", [b"via-bus.txt", "space café.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "tokens", [b"explicit-token.txt", b"default-token.txt"])

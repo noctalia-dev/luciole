@@ -2,9 +2,10 @@
 
 #include "browser/entry_details.h"
 #include "browser/location_presentation.h"
-#include "fs/background_job.h"
 #include "fs/file_query.h"
 #include "fs/gio_ptr.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <algorithm>
 #include <format>
@@ -163,7 +164,10 @@ struct luciole::SelectionDetailsService::State : std::enable_shared_from_this<St
     pending = false;
     running = true;
     cancel = CancelToken{};
-    runJob<SelectionFacts>(
+    runIoJob<SelectionFacts>(
+        std::ranges::any_of(entries, [](const auto& entry) { return ioLane(entry.location()) == IoLane::Network; })
+            ? IoLane::Network
+            : IoLane::Native,
         cancel, [entries = entries, total = total, token = cancel] { return inspect(entries, total, token); },
         [self = shared_from_this(), serial = serial](auto reply) {
           self->running = false;

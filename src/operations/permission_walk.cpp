@@ -25,9 +25,6 @@ namespace {
     using luciole::FileErrorException::FileErrorException;
   };
   [[noreturn]] void limit(luciole::FileErrorKind kind, const char* message) { throw CollectionLimit({kind, message}); }
-  [[noreturn]] void descriptorLimit(int code) {
-    limit(luciole::errnoError(code).kind, "Not enough file descriptors to collect this job. Select smaller folders.");
-  }
   [[noreturn]] void throwErrnoWithContext(int code, const std::string& context) {
     auto error = luciole::errnoError(code);
     luciole::throwFileError(error.kind, context + error.message);
@@ -81,6 +78,16 @@ namespace {
     }
 
   private:
+    void checkDescriptorLimit(int code) {
+      if (code == EMFILE || code == ENFILE) {
+        // Collection is atomic. Only the result rows are needed to report the failure.
+        m_plan.targets.clear();
+        limit(
+            luciole::errnoError(code).kind, "Not enough file descriptors to collect this job. Select smaller folders."
+        );
+      }
+    }
+
     void append(const luciole::PermissionResult& row, std::shared_ptr<PermissionTarget> target) {
       if (m_plan.results->size() >= maxItems) {
         limit(luciole::FileErrorKind::Unsupported, "The recursive job exceeds 16384 items. Select smaller folders.");
@@ -154,10 +161,9 @@ namespace {
     void walkChildren(const std::shared_ptr<PermissionTarget>& target, std::uint64_t rootMount, std::size_t depth) {
       const int descriptor = ::openat(target->fd.get(), ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
       if (descriptor < 0) {
-        if (errno == EMFILE || errno == ENFILE) {
-          descriptorLimit(errno);
-        }
-        throwErrnoWithContext(errno, "Contents not inspected: ");
+        const int code = errno;
+        checkDescriptorLimit(code);
+        throwErrnoWithContext(code, "Contents not inspected: ");
       }
       // fdopendir owns the descriptor only on success.
       const std::unique_ptr<DIR, CloseDirectory> directory(::fdopendir(descriptor));
@@ -203,15 +209,14 @@ namespace {
         }
         const int fd = ::openat(::dirfd(directory.get()), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
         if (fd < 0) {
-          if (errno == EMFILE || errno == ENFILE) {
-            descriptorLimit(errno);
-          }
+          const int code = errno;
+          checkDescriptorLimit(code);
           append(
               {.location = location,
                .name = entry.displayName(),
                .info = {},
                .outcome = PermissionOutcome::Failed,
-               .error = luciole::errnoError(errno),
+               .error = luciole::errnoError(code),
                .message = {}},
               {}
           );

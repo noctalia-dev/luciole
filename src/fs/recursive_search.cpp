@@ -3,8 +3,11 @@
 #include "fs/file_visibility.h"
 #include "fs/gio_interop.h"
 #include "fs/name_matching.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <deque>
+#include <future>
 #include <unordered_set>
 #include <utility>
 
@@ -18,17 +21,6 @@ namespace {
   constexpr unsigned int kMaxDepth = 256;
   constexpr std::size_t kMaxPending = 65536;
 
-  void closeEnumerator(GFileEnumerator* enumerator) {
-    if (enumerator != nullptr && !g_file_enumerator_is_closed(enumerator)) {
-      g_file_enumerator_close_async(
-          enumerator, G_PRIORITY_DEFAULT, nullptr,
-          [](GObject* source, GAsyncResult* result, gpointer) {
-            g_file_enumerator_close_finish(G_FILE_ENUMERATOR(source), result, nullptr);
-          },
-          nullptr
-      );
-    }
-  }
 } // namespace
 
 struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
@@ -39,8 +31,10 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     std::shared_ptr<const Location> shared = nullptr;
   };
   struct Scan {
+    std::unique_ptr<GMainContext, decltype(&g_main_context_unref)> context{
+        g_main_context_ref_thread_default(), g_main_context_unref
+    };
     GioPtr<GCancellable> cancellable{g_cancellable_new()};
-    GioPtr<GFileEnumerator> enumerator;
     std::deque<Folder> pending;
     std::optional<Folder> current;
     std::optional<Location> root;
@@ -49,13 +43,7 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     std::vector<DirectoryEntry> entries;
     bool showHidden = false;
     bool showBackups = true;
-    ~Scan() { closeEnumerator(enumerator.get()); }
   };
-  struct Request {
-    std::shared_ptr<State> owner;
-    std::shared_ptr<Scan> scan;
-  };
-
   DirectorySnapshot snapshot;
   std::size_t skipped = 0;
   std::uint64_t nextId = std::uint64_t{1} << 63;
@@ -81,8 +69,6 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     if (!current(scan)) {
       return;
     }
-    closeEnumerator(scan->enumerator.get());
-    scan->enumerator.reset();
     if (scan->pending.empty()) {
       scan->visited.clear();
       scan->current.reset();
@@ -93,37 +79,76 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     scan->current = std::move(scan->pending.front());
     scan->pending.pop_front();
     scan->current->shared = std::make_shared<const Location>(scan->current->location);
-    const auto file = gioFile(scan->current->location);
-    auto* request = new Request{shared_from_this(), scan};
-    g_file_enumerate_children_async(
-        file.get(), kAttributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, G_PRIORITY_DEFAULT, scan->cancellable.get(),
-        [](GObject* source, GAsyncResult* result, gpointer data) {
-          const std::unique_ptr<Request> request(static_cast<Request*>(data));
-          GError* error = nullptr;
-          GioPtr<GFileEnumerator> enumerator(g_file_enumerate_children_finish(G_FILE(source), result, &error));
-          auto& owner = *request->owner;
-          if (!owner.current(request->scan)) {
-            closeEnumerator(enumerator.get());
-            g_clear_error(&error);
-            return;
+    const auto token = cancellationToken(scan->cancellable.get());
+    runIoJob<bool>(
+        ioLane(scan->current->location), token,
+        [owner = shared_from_this(), scan, location = scan->current->location, token] {
+          std::vector<GioPtr<GFileInfo>> batch;
+          isolatedChildren(location, kAttributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, token, [&](GFileInfo* info) {
+            batch.emplace_back(G_FILE_INFO(g_object_ref(info)));
+            if (batch.size() == 64) {
+              owner->publishBatch(scan, std::exchange(batch, {}), token);
+            }
+            return !token.cancelled();
+          });
+          if (!batch.empty() && !token.cancelled()) {
+            owner->publishBatch(scan, std::move(batch), token);
           }
-          if (error != nullptr) {
-            owner.failed(request->scan, *error);
-            g_error_free(error);
-            return;
-          }
-          request->scan->enumerator = std::move(enumerator);
-          owner.batch(request->scan);
+          return true;
         },
-        request
+        [owner = shared_from_this(), scan](JobResult<bool> result) {
+          if (owner->current(scan)) {
+            if (result) {
+              owner->next(scan);
+            } else {
+              owner->failed(scan, result.error());
+            }
+          }
+        }
     );
   }
-  void failed(const std::shared_ptr<Scan>& scan, const GError& error) {
+
+  // Let the UI consume one batch before asking the helper to read more.
+  void publishBatch(const std::shared_ptr<Scan>& scan, std::vector<GioPtr<GFileInfo>> infos, const CancelToken& token) {
+    using Batch = std::packaged_task<void()>;
+    auto task = std::make_unique<Batch>([owner = shared_from_this(), scan, infos = std::move(infos)] {
+      if (!owner->current(scan)) {
+        return;
+      }
+      for (const auto& info : infos) {
+        owner->consume(scan, info.get());
+      }
+      if (!scan->entries.empty()) {
+        owner->snapshot.entries =
+            DirectoryEntries::concatenate({owner->snapshot.entries, DirectoryEntries(std::move(scan->entries))});
+        scan->entries.clear();
+        owner->notify();
+      }
+    });
+    auto consumed = task->get_future();
+    auto* source = g_idle_source_new();
+    g_source_set_priority(source, G_PRIORITY_DEFAULT);
+    g_source_set_callback(
+        source,
+        [](gpointer data) -> gboolean {
+          (*static_cast<Batch*>(data))();
+          return G_SOURCE_REMOVE;
+        },
+        task.release(), [](gpointer data) { delete static_cast<Batch*>(data); }
+    );
+    g_source_attach(source, scan->context.get());
+    g_source_unref(source);
+    while (consumed.wait_for(std::chrono::milliseconds(25)) != std::future_status::ready) {
+      if (token.cancelled()) {
+        return;
+      }
+    }
+    consumed.get();
+  }
+  void failed(const std::shared_ptr<Scan>& scan, const FileError& error) {
     if (scan->current->depth == 0) {
-      closeEnumerator(scan->enumerator.get());
-      scan->enumerator.reset();
       scan->pending.clear();
-      snapshot.error = fileError(error);
+      snapshot.error = error;
       snapshot.status = DirectoryStatus::Error;
       notify();
     } else {
@@ -131,43 +156,6 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
       notify();
       next(scan);
     }
-  }
-  void batch(const std::shared_ptr<Scan>& scan) {
-    if (!current(scan)) {
-      return;
-    }
-    auto* request = new Request{shared_from_this(), scan};
-    g_file_enumerator_next_files_async(
-        scan->enumerator.get(), 64, G_PRIORITY_DEFAULT, scan->cancellable.get(),
-        [](GObject* source, GAsyncResult* result, gpointer data) {
-          const std::unique_ptr<Request> request(static_cast<Request*>(data));
-          GError* error = nullptr;
-          GList* infos = g_file_enumerator_next_files_finish(G_FILE_ENUMERATOR(source), result, &error);
-          auto& owner = *request->owner;
-          if (owner.current(request->scan)) {
-            if (error != nullptr) {
-              owner.failed(request->scan, *error);
-            } else if (infos == nullptr) {
-              owner.next(request->scan);
-            } else {
-              for (GList* item = infos; item != nullptr; item = item->next) {
-                owner.consume(request->scan, G_FILE_INFO(item->data));
-              }
-              if (!request->scan->entries.empty()) {
-                owner.snapshot.entries = DirectoryEntries::concatenate(
-                    {owner.snapshot.entries, DirectoryEntries(std::move(request->scan->entries))}
-                );
-                request->scan->entries.clear();
-              }
-              owner.notify();
-              owner.batch(request->scan);
-            }
-          }
-          g_list_free_full(infos, g_object_unref);
-          g_clear_error(&error);
-        },
-        request
-    );
   }
   void consume(const std::shared_ptr<Scan>& scan, GFileInfo* info) {
     const char* name = g_file_info_get_name(info);

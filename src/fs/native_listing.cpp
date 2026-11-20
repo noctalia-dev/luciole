@@ -1,6 +1,8 @@
 #include "fs/native_listing.h"
 
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/posix_fd.h"
 
 #include <cerrno>
 #include <cstring>
@@ -24,8 +26,7 @@
 namespace {
   constexpr std::uint32_t kFuse = 0x65735546;
 
-  // Filesystems whose per-file calls may block on a network or a userspace server keep GIO's enumeration, which
-  // reads every fact on its worker; deferred access checks would otherwise run on the main thread.
+  // Use GIO enumeration for network and userspace filesystems.
   bool remoteFilesystem(const struct statfs& info) {
     constexpr std::uint32_t kCifs = 0xFF534D42;
     constexpr std::uint32_t kSmb2 = 0xFE534D42;
@@ -97,20 +98,27 @@ namespace {
   // GLib's read_hidden_file: one name per line of the folder's .hidden file.
   std::unordered_set<std::string> hiddenNames(int folder) {
     std::unordered_set<std::string> names;
-    const int fd = ::openat(folder, ".hidden", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0) {
+    constexpr std::size_t kMaxHiddenBytes = 4 * 1024 * 1024;
+    const luciole::Fd fd(::openat(folder, ".hidden", O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
+    struct stat info{};
+    if (!fd.valid()
+        || ::fstat(fd.get(), &info) != 0
+        || !S_ISREG(info.st_mode)
+        || std::cmp_greater(info.st_size, kMaxHiddenBytes)) {
       return names;
     }
     std::string contents;
     char buffer[4096];
     for (;;) {
-      const auto count = ::read(fd, buffer, sizeof(buffer));
+      const auto count = ::read(fd.get(), buffer, sizeof(buffer));
       if (count <= 0) {
         break;
       }
+      if (contents.size() + static_cast<std::size_t>(count) > kMaxHiddenBytes) {
+        return names;
+      }
       contents.append(buffer, static_cast<std::size_t>(count));
     }
-    ::close(fd);
     std::size_t start = 0;
     while (start <= contents.size()) {
       const auto end = contents.find('\n', start);
@@ -224,6 +232,19 @@ namespace {
 
 luciole::NativeListing
 luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCancellable* cancellable, bool catalogue) {
+  if (!inNetworkWorker()) {
+    const auto token = cancellationToken(cancellable);
+    if (token.cancelled()) {
+      return {};
+    }
+    try {
+      return isolatedListing(Location::fromPath(path), nullptr, entryLimit, catalogue, token);
+    } catch (const FileErrorException&) {
+      NativeListing failed;
+      failed.unsupported = true;
+      return failed;
+    }
+  }
   NativeListing result;
   const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0) {
@@ -257,10 +278,6 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
   folder.mountRoot = path == "/" || (::fstatat(fd, "..", &parentInfo, 0) == 0 && parentInfo.st_dev != folder.device);
   const auto hidden = hiddenNames(fd);
   Names names;
-  FileIconPool icons;
-  if (!catalogue) {
-    icons.setLocalFolder(path.c_str());
-  }
   const auto folderLocation = std::make_shared<const Location>(Location::fromPath(path));
   BrowseCatalogue browse{
       .folder = folderLocation,
@@ -381,7 +398,12 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
         },
     };
     entry.setDisplayName(displayName(folder, name, full));
-    entry.accessDeferred = true;
+    // Checking target permissions follows the link and can stall an otherwise local listing.
+    if (!entry.symlink) {
+      entry.access.read = ::faccessat(fd, name, R_OK, 0) == 0;
+      entry.access.write = ::faccessat(fd, name, W_OK, 0) == 0;
+      entry.access.execute = ::faccessat(fd, name, X_OK, 0) == 0;
+    }
     // GIO's local etag::value and id::filesystem/id::file, kept as numbers.
     entry.tags = LocalTags{
         .etagSeconds = static_cast<std::uint64_t>(info.stx_mtime.tv_sec),
@@ -406,9 +428,6 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
     entry.contentRevision = ChangeRevision{
         .seconds = static_cast<std::uint64_t>(info.stx_ctime.tv_sec), .nanoseconds = info.stx_ctime.tv_nsec
     };
-    entry.icon = icons.getLocal(
-        name, gioFileType(mode), entry.contentType ? entry.contentType->c_str() : nullptr, *folderLocation
-    );
     if (uncertain) {
       result.uncertain.push_back(static_cast<std::uint32_t>(result.entries.size()));
     }
@@ -430,9 +449,45 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
 luciole::CatalogueValidation luciole::validateCatalogueRows(
     const BrowseCatalogue& catalogue, std::span<const std::size_t> rows, GCancellable* cancellable
 ) {
+  if (!inNetworkWorker()) {
+    try {
+      auto request = filesystemRequest("validate", *catalogue.folder);
+      request["device"] = catalogue.device;
+      request["inode"] = catalogue.inode;
+      request["rows"] = NetworkMessage::array();
+      for (const auto index : rows) {
+        request["rows"].push_back(
+            NetworkMessage::array({catalogue.brief(index).name, catalogue.items[index].inodeHint})
+        );
+      }
+      const auto reply =
+          NetworkProcess::acquire(ioLane(*catalogue.folder))->call(std::move(request), cancellationToken(cancellable));
+      CatalogueValidation result{
+          .parentChanged = reply.at("parentChanged").get<bool>(),
+          .unavailable = reply.at("unavailable").get<bool>(),
+          .changed = {}
+      };
+      for (const auto& value : reply.at("changed")) {
+        const auto index = value.get<std::size_t>();
+        if (index >= rows.size()) {
+          throwFileError(FileErrorKind::Unavailable, "Invalid catalogue validation response.");
+        }
+        result.changed.push_back(rows[index]);
+      }
+      return result;
+    } catch (const FileErrorException&) {
+      CatalogueValidation result;
+      result.unavailable = true;
+      return result;
+    }
+  }
   CatalogueValidation result;
   const auto path = catalogue.folder->nativePath();
-  const std::unique_ptr<DIR, DirCloser> directory(path ? ::opendir(path->c_str()) : nullptr);
+  if (!path) {
+    result.unavailable = true;
+    return result;
+  }
+  const std::unique_ptr<DIR, DirCloser> directory(::opendir(path->c_str()));
   if (!directory) {
     result.parentChanged = errno == ENOENT || errno == ENOTDIR;
     result.unavailable = !result.parentChanged;
@@ -442,7 +497,8 @@ luciole::CatalogueValidation luciole::validateCatalogueRows(
     return static_cast<std::uint64_t>(info.st_dev) == catalogue.device && info.st_ino == catalogue.inode;
   };
   struct stat info{};
-  if (::fstat(::dirfd(directory.get()), &info) != 0) {
+  const int fd = ::dirfd(directory.get());
+  if (fd < 0 || ::fstat(fd, &info) != 0) {
     result.unavailable = true;
     return result;
   }
@@ -505,10 +561,22 @@ bool luciole::networkFilesystem(const struct statfs& filesystem, dev_t device) {
   return remoteFilesystem(filesystem);
 }
 
-std::optional<std::string> luciole::sniffContentType(const std::string& path) {
+std::optional<std::string> luciole::sniffContentType(const std::string& path, GCancellable* cancellable) {
+  if (!inNetworkWorker()) {
+    try {
+      const auto info = isolatedInfo(
+          Location::fromPath(path), G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+          cancellationToken(cancellable)
+      );
+      const auto* type = infoString(info.get(), G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE);
+      return type ? std::optional<std::string>(type) : std::nullopt;
+    } catch (const FileErrorException&) {
+      return std::nullopt;
+    }
+  }
   const GioPtr<GFile> file(g_file_new_for_path(path.c_str()));
   const GioPtr<GFileInfo> sniffed(g_file_query_info(
-      file.get(), G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
+      file.get(), G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancellable, nullptr
   ));
   const char* type = sniffed ? infoString(sniffed.get(), G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE) : nullptr;
   return type != nullptr ? std::optional<std::string>(type) : std::nullopt;

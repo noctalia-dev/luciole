@@ -53,11 +53,20 @@ namespace {
     }
     std::size_t held() const {
       std::size_t count = 0;
-      for (const auto& file : fs::directory_iterator("/proc/self/fd")) {
+      // History descriptors can belong to the UI or one of its filesystem helpers.
+      const auto countProcess = [&](pid_t pid) {
+        const auto process = fs::path("/proc") / std::to_string(pid);
         std::error_code error;
-        const auto target = fs::read_symlink(file.path(), error).native();
-        count +=
-            !error && (target == (root / "volume").native() || target.starts_with((root / "volume").native() + "/"));
+        for (const auto& file : fs::directory_iterator(process / "fd", error)) {
+          const auto target = fs::read_symlink(file.path(), error).native();
+          count +=
+              !error && (target == (root / "volume").native() || target.starts_with((root / "volume").native() + "/"));
+        }
+      };
+      countProcess(getpid());
+      std::ifstream children("/proc/thread-self/children");
+      for (pid_t pid; children >> pid;) {
+        countProcess(pid);
       }
       return count;
     }

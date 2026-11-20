@@ -1,26 +1,9 @@
 #include "browser/chooser_policy.h"
 
 #include <algorithm>
-#include <sys/stat.h>
 
 namespace {
   using luciole::FileType;
-
-  // Listings report links without following them, so a link counts as its native target's type.
-  FileType chosenType(const luciole::DirectoryEntry& entry) {
-    if (!entry.symlink && entry.type != FileType::Symlink) {
-      return entry.type;
-    }
-    const auto path = entry.location().nativePath();
-    struct stat info{};
-    if (!path || ::stat(path->c_str(), &info) != 0) {
-      return FileType::Symlink;
-    }
-    if (S_ISDIR(info.st_mode)) {
-      return FileType::Directory;
-    }
-    return S_ISREG(info.st_mode) ? FileType::Regular : FileType::Special;
-  }
 
   luciole::ChooserDecision unavailable(std::string_view reason) {
     return {.kind = luciole::ChooserDecision::Kind::Unavailable, .locations = {}, .reason = reason};
@@ -50,7 +33,7 @@ luciole::ChooserDecision luciole::chooserDecision(
   std::vector<FileType> types;
   types.reserve(entries.size());
   for (const auto& entry : entries) {
-    types.push_back(chosenType(entry));
+    types.push_back(entry.type);
   }
   const auto every = [&](FileType type) {
     return std::ranges::all_of(types, [type](FileType t) { return t == type; });

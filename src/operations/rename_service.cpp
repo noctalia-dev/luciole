@@ -3,6 +3,7 @@
 #include "fs/background_job.h"
 #include "fs/filename.h"
 #include "fs/posix_fd.h"
+#include "operations/network_history.h"
 
 #include <cerrno>
 #include <fcntl.h>
@@ -31,6 +32,8 @@ namespace {
 } // namespace
 
 struct luciole::RenameService::State {
+  std::unique_ptr<NetworkService<RenameSnapshot>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<RenameSnapshot>>("rename");
   RenameSnapshot snapshot;
   std::shared_ptr<Target> target;
   CancelToken token;
@@ -79,15 +82,38 @@ luciole::RenameService::~RenameService() {
   cancel();
 }
 void luciole::RenameService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
-bool luciole::RenameService::busy() const { return m_state->active; }
-bool luciole::RenameService::canRename() const { return !busy() && m_state->target != nullptr; }
-const luciole::RenameSnapshot& luciole::RenameService::snapshot() const { return m_state->snapshot; }
+bool luciole::RenameService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
+bool luciole::RenameService::canRename() const {
+  if (m_state->remote) {
+    return !busy() && m_state->remote->view.ready;
+  }
+  return !busy() && m_state->target != nullptr;
+}
+const luciole::RenameSnapshot& luciole::RenameService::snapshot() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot;
+  }
+  return m_state->snapshot;
+}
 std::shared_ptr<const luciole::RenameReceipt> luciole::RenameService::takeReceipt() {
-  return std::move(m_state->snapshot.receipt);
+  return std::move(m_state->remote ? m_state->remote->view.snapshot.receipt : m_state->snapshot.receipt);
 }
 void luciole::RenameService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   m_state->target.reset();
   if (!busy() && m_state->snapshot.status != RenameStatus::Succeeded) {
@@ -95,6 +121,15 @@ void luciole::RenameService::cancel() {
   }
 }
 bool luciole::RenameService::prepare(const Location& source) {
+  if (m_state->remote) {
+    if (busy()) {
+      return false;
+    }
+    m_state->remote->targets.set({source});
+    m_state->remote->view.snapshot.source = source;
+    m_state->remote->view.snapshot.destination.reset();
+    return m_state->remote->invoke("prepare", {{"source", source}});
+  }
   if (busy()) {
     return false;
   }
@@ -116,6 +151,19 @@ bool luciole::RenameService::prepare(const Location& source) {
   return true;
 }
 bool luciole::RenameService::rename(std::string name) {
+  if (m_state->remote) {
+    if (!canRename()) {
+      return false;
+    }
+    if (const auto error = filenameProblem(name)) {
+      failRemote(m_state->remote->view.snapshot, {FileErrorKind::InvalidArgument, *error});
+      if (m_state->remote->changed) {
+        m_state->remote->changed();
+      }
+      return false;
+    }
+    return m_state->remote->invoke("rename", {{"name", name}}, true);
+  }
   if (!canRename()) {
     return false;
   }
@@ -171,6 +219,18 @@ bool luciole::RenameService::rename(std::string name) {
 }
 
 bool luciole::RenameService::replay(std::shared_ptr<const RenameReceipt> receipt) {
+  if (m_state->remote) {
+    if (busy() || !receipt) {
+      return false;
+    }
+    const auto history = historyHandle(receipt);
+    if (!history) {
+      return false;
+    }
+    m_state->remote->retain(receipt);
+    m_state->remote->useProcess(history->process);
+    return m_state->remote->invoke("replay", {{"receipt", history->id}}, true);
+  }
   if (busy() || !receipt) {
     return false;
   }

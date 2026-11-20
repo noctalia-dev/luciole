@@ -3,6 +3,7 @@
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
 #include "operations/conflict_gate.h"
+#include "operations/network_history.h"
 #include "operations/trash_item.h"
 
 #include <atomic>
@@ -64,6 +65,8 @@ namespace {
 } // namespace
 
 struct luciole::RestoreService::State {
+  std::unique_ptr<NetworkService<RestoreView>> remote =
+      inNetworkWorker() ? nullptr : std::make_unique<NetworkService<RestoreView>>("restore");
   CancelToken token;
   bool active = false;
   std::optional<Location> destination;
@@ -211,34 +214,70 @@ luciole::RestoreService::~RestoreService() {
   m_state->changed = {};
   cancel();
 }
-bool luciole::RestoreService::busy() const { return m_state->active; }
+bool luciole::RestoreService::busy() const {
+  if (m_state->remote) {
+    return m_state->remote->busy();
+  }
+  return m_state->active;
+}
+std::size_t luciole::RestoreService::total() const {
+  if (m_state->remote) {
+    return m_state->remote->view.total;
+  }
+  return m_state->total;
+}
+std::size_t luciole::RestoreService::completed() const {
+  if (m_state->remote) {
+    return m_state->remote->view.completed;
+  }
+  return m_state->completed.load();
+}
+const std::vector<luciole::RestoreResult>& luciole::RestoreService::results() const {
+  if (m_state->remote) {
+    return m_state->remote->view.snapshot.results;
+  }
+  return m_state->results;
+}
 bool luciole::RestoreService::moving() const { return m_state->destination.has_value(); }
-std::size_t luciole::RestoreService::total() const { return m_state->total; }
-std::size_t luciole::RestoreService::completed() const { return m_state->completed.load(); }
-const std::vector<luciole::RestoreResult>& luciole::RestoreService::results() const { return m_state->results; }
 std::vector<luciole::TransferResult> luciole::RestoreService::transferResults() const {
-  std::vector<TransferResult> results;
-  results.reserve(m_state->results.size());
-  for (const auto& item : m_state->results) {
+  std::vector<TransferResult> transfers;
+  transfers.reserve(results().size());
+  for (const auto& item : results()) {
     const auto outcome = item.outcome == RestoreOutcome::Restored ? TransferOutcome::Moved
         : item.outcome == RestoreOutcome::Skipped                 ? TransferOutcome::Skipped
         : item.outcome == RestoreOutcome::Cancelled               ? TransferOutcome::Cancelled
         : item.outcome == RestoreOutcome::Unconfirmed             ? TransferOutcome::Partial
                                                                   : TransferOutcome::Failed;
-    auto& result = results.emplace_back(item.source, outcome, item.error);
+    auto& result = transfers.emplace_back(item.source, outcome, item.error);
     result.destination = item.destination;
   }
-  return results;
+  return transfers;
 }
 void luciole::RestoreService::setChangedCallback(std::function<void()> callback) {
+  if (m_state->remote) {
+    m_state->remote->changed = std::move(callback);
+    return;
+  }
   m_state->changed = std::move(callback);
 }
 void luciole::RestoreService::cancel() {
+  if (m_state->remote) {
+    m_state->remote->cancel();
+    return;
+  }
   m_state->token.cancel();
   m_state->gate.wake();
 }
-std::optional<luciole::TransferConflict> luciole::RestoreService::conflict() const { return m_state->gate.pending(); }
+std::optional<luciole::TransferConflict> luciole::RestoreService::conflict() const {
+  if (m_state->remote) {
+    return m_state->remote->conflict();
+  }
+  return m_state->gate.pending();
+}
 bool luciole::RestoreService::resolve(std::uint64_t id, TransferConflictChoice choice) {
+  if (m_state->remote) {
+    return m_state->remote->answer(id, {{"choice", choice}});
+  }
   return m_state->gate.resolve(id, choice, [&](const TransferConflict&) {
     if (choice == TransferConflictChoice::Merge) {
       return false;
@@ -278,8 +317,28 @@ bool luciole::RestoreService::startSelection(
       return false;
     }
   }
-  m_state->active = true;
   m_state->destination = destination;
+  if (m_state->remote) {
+    m_state->remote->targets.set(selection, !destination);
+    if (destination) {
+      m_state->remote->targets.add(*destination);
+    }
+    m_state->remote->view.total = selection.size();
+    auto& results = m_state->remote->view.snapshot.results;
+    results.clear();
+    results.reserve(selection.size());
+    for (const auto& entry : selection) {
+      results.push_back(
+          {.source = entry.location(),
+           .destination = std::nullopt,
+           .displayName = entry.displayName(),
+           .outcome = RestoreOutcome::Cancelled,
+           .error = std::nullopt}
+      );
+    }
+    return m_state->remote->invoke("start", {{"entries", selection}, {"destination", destination}}, true);
+  }
+  m_state->active = true;
   m_state->total = selection.size();
   m_state->completed.store(0);
   m_state->results.clear();
