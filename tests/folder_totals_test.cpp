@@ -2,6 +2,7 @@
 #include "fs/folder_totals.h"
 #include "fs/folder_totals_walk.h"
 #include "fs/gio_interop.h"
+#include "fs/system_mounts.h"
 #include "test_check.h"
 
 #include <chrono>
@@ -88,6 +89,20 @@ namespace {
     trash.place = luciole::Location::trash();
     const auto unsupported = walk({remote, trash});
     TEST_CHECK(unsupported.unsupported == 2 && unsupported.partial() && unsupported.bytes == 0);
+  }
+  void stoppedMount(const fs::path& root) {
+    const auto share = root / "share";
+    fs::create_directory(share);
+    std::ofstream(share / "underlying") << "hidden";
+    std::ofstream(root / "local") << "ok";
+    const auto remote = entry(share);
+    const auto local = entry(root / "local");
+    luciole::publishNativeMounts(
+        {{.path = share.native(), .source = "nas:/export", .type = "nfs", .options = "", .automount = true}}
+    );
+    const auto result = walk({remote, local});
+    TEST_CHECK(result.unavailable == 1 && result.files == 1 && result.bytes == 2);
+    luciole::publishNativeMounts({});
   }
   void progressAndRaces(const fs::path& root) {
     const auto tree = root / "many";
@@ -191,6 +206,7 @@ int main() {
   TEST_CHECK(temporary);
   const fs::path root(temporary.get());
   basic(root);
+  stoppedMount(root);
   progressAndRaces(root);
   unreadable(root);
   lifecycle(root);

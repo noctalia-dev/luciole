@@ -45,6 +45,7 @@ namespace luciole {
       const Location& location, const CancelToken& token,
       std::move_only_function<void(std::expected<FileIconSource, FileError>)> done
   );
+  FileType readFileType(const Location& location, const CancelToken& token);
   // Follows symlinks. done runs on the main context unless token was cancelled first.
   void queryFileType(
       const Location& location, const CancelToken& token,

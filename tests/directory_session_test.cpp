@@ -1,6 +1,5 @@
 #include "event_loop/glib_poll_source.h"
 #include "fs/directory_session.h"
-#include "fs/entry_access.h"
 #include "fs/file_query.h"
 #include "fs/gio_interop.h"
 #include "fs/native_listing.h"
@@ -277,7 +276,7 @@ namespace {
     Fixture fixture;
     const std::string unusual = "raw#%\n" + std::string(1, static_cast<char>(0xFF));
     fixture.write(unusual);
-    fixture.write(".hidden");
+    TEST_CHECK(::mkfifo((fixture.path / ".hidden").c_str(), 0600) == 0);
     fs::create_directory(fixture.path / "folder");
     fs::create_symlink("missing-target", fixture.path / "broken-link");
     // Cross several asynchronous batches without turning hard links into one entry.
@@ -482,8 +481,7 @@ namespace {
       const std::ofstream file(fixture.path / std::format("file-{:05d}", index));
     }
     DirectorySession session;
-    std::size_t published = 0;
-    session.setChangedCallback([&] { published += session.snapshot().status == DirectoryStatus::Ready ? 1 : 0; });
+
     // Creations and deletions are not rate-limited by GIO, unlike content changes.
     const std::jthread writer([&fixture](const std::stop_token& stop) {
       for (int index = 0; !stop.stop_requested(); ++index) {
@@ -495,13 +493,13 @@ namespace {
     });
     const auto start = std::chrono::steady_clock::now();
     session.open(fixture.location());
-    pump.until([&published] { return published > 0; });
+    pump.until([&] { return session.snapshot().status == DirectoryStatus::Ready; });
+    const auto firstGeneration = session.snapshot().generation;
     TEST_CHECK(std::chrono::steady_clock::now() - start < 3s);
-    while (std::chrono::steady_clock::now() - start < 4s) {
-      pump.once();
-    }
-    TEST_CHECK(published >= 2);
-    session.setChangedCallback({});
+    // A slow first scan can schedule a two-second debounce before the next scan starts.
+    pump.until([&] {
+      return session.snapshot().generation > firstGeneration && session.snapshot().status == DirectoryStatus::Ready;
+    });
   }
 
   bool unknown(const luciole::FileAccess& access) {
@@ -564,13 +562,8 @@ namespace {
     );
     TEST_CHECK(session.snapshot().metadata.filesystem.readOnly == false);
     TEST_CHECK(session.snapshot().metadata.filesystem.freeBytes.has_value());
-    // Local listings defer read/write/execute to entryAccess(), which asks the filesystem.
-    TEST_CHECK(entry(session, "plain").accessDeferred && !entry(session, "plain").access.read.has_value());
-    TEST_CHECK(
-        luciole::entryAccess(entry(session, "plain")).read == true
-        && luciole::entryAccess(entry(session, "plain")).write == true
-        && luciole::entryAccess(entry(session, "plain")).execute == false
-    );
+    const auto access = entry(session, "plain").access;
+    TEST_CHECK(access.read == true && access.write == true && access.execute == false);
     const auto id = entry(session, "plain").id;
     const auto published = session.snapshot();
     const auto* retainedEntry = &published.entries.front();
@@ -595,7 +588,7 @@ namespace {
     TEST_CHECK(invalidated && entry(session, "plain").id == id);
     TEST_CHECK(published.status == DirectoryStatus::Ready && retainedEntry->access.rename == true);
     TEST_CHECK(&published.entries.front() == retainedEntry && retainedEntry->access.remove == true);
-    TEST_CHECK(luciole::entryAccess(entry(session, "plain")).execute == (::access(file.c_str(), X_OK) == 0));
+    TEST_CHECK(entry(session, "plain").access.execute == (::access(file.c_str(), X_OK) == 0));
     session.setChangedCallback({});
     fs::permissions(file, fs::perms::owner_read);
     session.refresh();
@@ -607,7 +600,7 @@ namespace {
     );
     ready(pump, session);
     pump.until([&session] { return !session.snapshot().metadataLoading; });
-    TEST_CHECK(luciole::entryAccess(entry(session, "plain")).write == (::access(file.c_str(), W_OK) == 0));
+    TEST_CHECK(entry(session, "plain").access.write == (::access(file.c_str(), W_OK) == 0));
     session.cancel();
     TEST_CHECK(
         !session.snapshot().metadataLoading
@@ -641,7 +634,6 @@ namespace {
         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
     ));
     TEST_CHECK(info);
-    TEST_CHECK(entry.accessDeferred);
     TEST_CHECK(entry.name == g_file_info_get_name(info.get()));
     TEST_CHECK(entry.displayName() == g_file_info_get_display_name(info.get()));
     TEST_CHECK(entry.type == luciole::fileType(g_file_info_get_file_type(info.get())));
@@ -661,9 +653,12 @@ namespace {
     TEST_CHECK(entry.access.rename == expected.rename);
     TEST_CHECK(entry.access.remove == expected.remove);
     TEST_CHECK(entry.access.trash == expected.trash);
-    const auto deferred = luciole::entryAccess(entry);
-    TEST_CHECK(deferred.read == expected.read && deferred.write == expected.write);
-    TEST_CHECK(deferred.execute == expected.execute);
+    if (entry.symlink) {
+      TEST_CHECK(!entry.access.read && !entry.access.write && !entry.access.execute);
+    } else {
+      TEST_CHECK(entry.access.read == expected.read && entry.access.write == expected.write);
+      TEST_CHECK(entry.access.execute == expected.execute);
+    }
   }
 
   void testNativeMatchesGio(Pump& pump) {
@@ -911,7 +906,7 @@ namespace {
     DirectorySession session;
     session.open(Location::fromPath(folder.native()));
     ready(pump, session);
-    TEST_CHECK(session.snapshot().entries.size() == 1 && !session.snapshot().entries.front().accessDeferred);
+    TEST_CHECK(session.snapshot().entries.size() == 1);
     TEST_CHECK(session.snapshot().entries.front().name == "inside");
     fs::permissions(fixture.path / "closed", fs::perms::owner_all);
   }

@@ -1,6 +1,5 @@
 #include "thumbnails/preview_service.h"
 
-#include "fs/entry_access.h"
 #include "fs/gio_interop.h"
 
 #include <algorithm>
@@ -305,7 +304,7 @@ void luciole::PreviewService::show(
   // The view shows the type icon while loading or when nothing renders, and the Details card names the type, so
   // only real failures need a message.
   state.view.message.clear();
-  if (entry->type == luciole::FileType::Regular && !entry->symlink && luciole::entryAccess(*entry).read != false) {
+  if (entry->type == luciole::FileType::Regular && !entry->symlink && entry->access.read != false) {
     state.view.status = PreviewStatus::Loading;
     if (entry->contentType && luciole::contentTypeIsText(*entry->contentType)) {
       state.pending = true;

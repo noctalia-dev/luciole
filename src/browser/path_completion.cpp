@@ -1,8 +1,9 @@
 #include "browser/path_completion.h"
 
-#include "fs/background_job.h"
 #include "fs/file_query.h"
 #include "fs/gio_ptr.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <algorithm>
 #include <exception>
@@ -62,8 +63,8 @@ void luciole::PathCompletion::enumerate(
 ) {
   cancel();
   const CancelToken token = m_state->token;
-  runJob<PathSuggestions>(
-      token,
+  runIoJob<PathSuggestions>(
+      ioLane(parent), token,
       [token, parent, prefix = std::move(prefix), showHidden] {
         constexpr std::size_t limit = 256;
         PathSuggestions result;

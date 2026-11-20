@@ -1,6 +1,8 @@
 #include "fs/trash_availability.h"
 
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <utility>
 
@@ -25,30 +27,25 @@ void luciole::TrashAvailability::cancel() {
 void luciole::TrashAvailability::query(std::function<void(std::optional<std::uint32_t>)> completed) {
   cancel();
   m_state->cancellable.reset(g_cancellable_new());
-  struct Request {
-    std::shared_ptr<State> state;
-    std::uint64_t revision;
-    std::function<void(std::optional<std::uint32_t>)> completed;
-  };
-  const auto file = gioFile(Location::trash());
-  g_file_query_info_async(
-      file.get(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT, G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT,
-      m_state->cancellable.get(),
-      [](GObject* source, GAsyncResult* result, gpointer data) {
-        const std::unique_ptr<Request> request(static_cast<Request*>(data));
-        const GioPtr<GFileInfo> info(g_file_query_info_finish(G_FILE(source), result, nullptr));
-        if (!request->state->active || request->revision != request->state->revision) {
+  const auto state = m_state;
+  const auto token = cancellationToken(state->cancellable.get());
+  runIoJob<std::optional<std::uint32_t>>(
+      IoLane::Network, token,
+      [token] -> std::optional<std::uint32_t> {
+        const auto info =
+            isolatedInfo(Location::trash(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT, G_FILE_QUERY_INFO_NONE, token);
+        if (g_file_info_get_attribute_type(info.get(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT)
+            == G_FILE_ATTRIBUTE_TYPE_UINT32) {
+          return g_file_info_get_attribute_uint32(info.get(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT);
+        }
+        return std::nullopt;
+      },
+      [state, revision = state->revision, completed = std::move(completed)](auto result) {
+        if (!state->active || revision != state->revision) {
           return;
         }
-        request->state->cancellable.reset();
-        std::optional<std::uint32_t> count;
-        if (info
-            && g_file_info_get_attribute_type(info.get(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT)
-                == G_FILE_ATTRIBUTE_TYPE_UINT32) {
-          count = g_file_info_get_attribute_uint32(info.get(), G_FILE_ATTRIBUTE_TRASH_ITEM_COUNT);
-        }
-        request->completed(count);
-      },
-      new Request{m_state, m_state->revision, std::move(completed)}
+        state->cancellable.reset();
+        completed(result ? *result : std::nullopt);
+      }
   );
 }

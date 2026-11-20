@@ -41,6 +41,7 @@ namespace {
     TEST_CHECK(luciole::errnoError(ENOENT).kind == luciole::FileErrorKind::Missing);
     TEST_CHECK(luciole::errnoError(EPERM).kind == luciole::FileErrorKind::Denied);
     TEST_CHECK(luciole::errnoError(ENOTEMPTY).kind == luciole::FileErrorKind::NotEmpty);
+    TEST_CHECK(luciole::errnoError(ETIMEDOUT).kind == luciole::FileErrorKind::Unavailable);
     TEST_CHECK(luciole::errnoError(EIO).kind == luciole::FileErrorKind::Other);
     try {
       throw std::runtime_error("plain");

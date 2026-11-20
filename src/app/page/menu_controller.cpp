@@ -22,7 +22,6 @@
 #include "core/input/key_modifiers.h"
 #include "core/input/key_symbols.h"
 #include "fs/archive_type.h"
-#include "fs/entry_access.h"
 #include "platform/desktop_integration.h"
 #include "platform/terminal_launcher.h"
 #include "render/scene/input_dispatcher.h"
@@ -149,8 +148,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
       && singleLocation->isNative()
       && !trash
       && (single->type == luciole::FileType::Regular || single->symlink)
-      && (luciole::entryAccess(*single).execute == true
-          || singleLocation->basename().value_or("").ends_with(".desktop"))) {
+      && (single->access.execute == true || singleLocation->basename().value_or("").ends_with(".desktop"))) {
     add(Action::RunProgram);
     if (!singleLocation->basename().value_or("").ends_with(".desktop")) {
       add(Action::RunInTerminal);
@@ -178,7 +176,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
          .label = "Paste into Folder",
          .enabled = !m_page.operationsBusy()
              && luciole::transferLocationSupported(*singleLocation)
-             && luciole::entryAccess(*single).write != false}
+             && single->access.write != false}
     );
   }
   if (m_page.hasOtherPane()) {

@@ -1,6 +1,5 @@
 #include "thumbnails/metadata_probe.h"
 
-#include "fs/entry_access.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
 #include "imaging/image_limits.h"
@@ -193,7 +192,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   auto fields = commonFields(current.get());
   if (entry.type != FileType::Regular
       || entry.symlink
-      || entryAccess(entry).read == false
+      || entry.access.read == false
       || (!image && !media && !launcher && mime != "application/pdf")) {
     return fields;
   }
