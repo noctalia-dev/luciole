@@ -158,6 +158,7 @@ struct luciole::CopyStorage {
       transfer::CopyWork work({}, bytes);
       work.history = revisions;
       transfer::removeSource(stage->fd(), tree, work);
+      item = Fd(); // On NFS this pin would keep the removed item as `.nfsXXXX` and block clear().
       if (stage->clear()) {
         return;
       }
