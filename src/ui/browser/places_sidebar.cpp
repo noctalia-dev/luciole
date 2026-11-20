@@ -382,13 +382,13 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
       m_separatorContext(before, x, y);
     }
   });
-  raw->setOnPress([this, before, raw](float, float localY, bool pressed) {
+  // While held, the button's own pressed state marks the separator being dragged.
+  raw->setOnPress([this, before](float, float localY, bool pressed) {
     if (pressed) {
       m_separatorDrag = SeparatorDrag{.from = before, .pressY = localY, .moved = false, .target = std::nullopt};
       return;
     }
     auto drag = std::exchange(m_separatorDrag, std::nullopt);
-    raw->setOpacity(1.0F);
     showSeparatorIndicator(std::nullopt);
     if (drag && drag->moved && drag->target && m_separatorMove) {
       m_separatorMove(drag->from, *drag->target);
@@ -401,7 +401,6 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
     auto& drag = *m_separatorDrag;
     if (!drag.moved && std::abs(localY - drag.pressY) >= Style::dragStartThreshold) {
       drag.moved = true;
-      raw->setOpacity(0.4F);
     }
     if (!drag.moved) {
       return;
@@ -411,9 +410,8 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
     drag.target = separatorTarget(y + localY, drag.from);
     showSeparatorIndicator(drag.target);
   });
-  raw->inputArea()->setOnCancel([this, raw] {
+  raw->inputArea()->setOnCancel([this] {
     m_separatorDrag.reset();
-    raw->setOpacity(1.0F);
     showSeparatorIndicator(std::nullopt);
   });
   m_scroll->content()->addChild(std::move(button));
