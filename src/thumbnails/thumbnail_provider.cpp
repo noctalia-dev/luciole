@@ -174,9 +174,19 @@ namespace {
   }
 } // namespace
 
+void luciole::RemoveThumbnailDirectory::operator()(char* path) const {
+  std::error_code error;
+  std::filesystem::remove_all(path, error);
+  g_free(path);
+}
+
+luciole::ThumbnailDirectory luciole::makeThumbnailDirectory() {
+  return ThumbnailDirectory(g_dir_make_tmp("luciole-thumbnail-XXXXXX", nullptr));
+}
+
 std::expected<LoadedImageFile, std::string> luciole::renderThumbnailProvider(
     int sourceFd, const std::string& mime, int side, const ThumbnailOptions& options, GCancellable* cancellable,
-    ThumbnailPurpose purpose
+    ThumbnailPurpose purpose, const std::filesystem::path& workspace
 ) {
   const bool image = mime.starts_with("image/");
   if (side < 1 || side > (image ? kMaxPreviewImageSide : 1024)) {
@@ -185,18 +195,11 @@ std::expected<LoadedImageFile, std::string> luciole::renderThumbnailProvider(
   const std::size_t outputLimit = image
       ? std::max(std::size_t{8U * 1024U * 1024U}, 12 + static_cast<std::size_t>(side) * side * 4)
       : 8U * 1024U * 1024U;
-  const GString temporary(g_dir_make_tmp("luciole-thumbnail-XXXXXX", nullptr));
-  if (!temporary) {
+  const auto temporary = workspace.empty() ? makeThumbnailDirectory() : ThumbnailDirectory{};
+  if (workspace.empty() && !temporary) {
     return std::unexpected("cannot prepare thumbnail provider");
   }
-  const std::filesystem::path directory(temporary.get());
-  struct Cleanup {
-    std::filesystem::path path;
-    ~Cleanup() {
-      std::error_code error;
-      std::filesystem::remove_all(path, error);
-    }
-  } cleanup{directory};
+  const std::filesystem::path directory = temporary ? std::filesystem::path(temporary.get()) : workspace;
   const auto output = directory / (mime.starts_with("image/") ? "result.rgba" : "result.png");
   std::expected<void, std::string> success = std::unexpected("no supported thumbnail provider");
   if (mime.starts_with("image/")) {

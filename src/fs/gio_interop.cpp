@@ -48,7 +48,11 @@ luciole::FileError luciole::fileError(const GError& error) {
       break;
     case G_IO_ERROR_HOST_NOT_FOUND:
     case G_IO_ERROR_HOST_UNREACHABLE:
+    case G_IO_ERROR_NETWORK_UNREACHABLE:
+    case G_IO_ERROR_CONNECTION_REFUSED:
     case G_IO_ERROR_CONNECTION_CLOSED:
+    case G_IO_ERROR_NOT_CONNECTED:
+    case G_IO_ERROR_TIMED_OUT:
       kind = Kind::Unavailable;
       break;
     case G_IO_ERROR_NOT_SUPPORTED:

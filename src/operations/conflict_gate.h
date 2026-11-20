@@ -40,10 +40,11 @@ namespace luciole {
     bool resolve(std::uint64_t id, Choice choice, const std::function<bool(const Conflict&)>& accept) {
       {
         const std::scoped_lock lock(m_mutex);
-        if (!m_conflict || m_conflict->id != id || m_choice || !accept(*m_conflict)) {
+        if (!m_conflict || m_conflict->id != id || !accept(*m_conflict)) {
           return false;
         }
         m_choice = std::move(choice);
+        m_conflict.reset();
       }
       m_decision.notify_all();
       return true;

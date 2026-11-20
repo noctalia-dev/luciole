@@ -170,7 +170,7 @@ bool PermissionResultsView::navigate(std::uint32_t key, std::uint32_t modifiers,
   }
   const auto last = m_results->size() - 1;
   const auto current = std::min(m_grid->selectedIndex().value_or(0), last);
-  auto next = current;
+  std::size_t next;
   const auto page = m_grid->pageItemStride();
   if (KeySymbol::isHome(key)) {
     next = 0;

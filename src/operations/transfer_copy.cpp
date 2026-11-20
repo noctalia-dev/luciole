@@ -1,5 +1,6 @@
 #include "operations/transfer_copy.h"
 
+#include "fs/network_process.h"
 #include "operations/history_revisions.h"
 
 #include <cerrno>
@@ -105,6 +106,7 @@ namespace luciole::transfer {
         work.check();
         const auto copied = ::copy_file_range(input, nullptr, output, nullptr, kChunk, 0);
         if (copied > 0) {
+          noteWorkerIoProgress();
           work.bytes.fetch_add(static_cast<std::uint64_t>(copied));
           continue;
         }
@@ -147,6 +149,7 @@ namespace luciole::transfer {
             throwFileError(FileErrorKind::Other, "The destination stopped accepting data.");
           }
           offset += static_cast<std::size_t>(written);
+          noteWorkerIoProgress();
           work.bytes.fetch_add(static_cast<std::uint64_t>(written));
         }
       }
@@ -177,6 +180,7 @@ namespace luciole::transfer {
     if (::fstatat(parent, name.c_str(), &value, AT_SYMLINK_NOFOLLOW) != 0) {
       fail("Could not inspect item");
     }
+    noteWorkerIoProgress();
     return value;
   }
 
@@ -238,6 +242,7 @@ namespace luciole::transfer {
           throwFileError(FileErrorKind::Unsupported, "The merge exceeds its 16384-item limit. Select smaller folders.");
         }
         result.push_back(name);
+        noteWorkerIoProgress();
       }
     }
     return result;

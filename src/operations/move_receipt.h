@@ -109,6 +109,8 @@ namespace luciole {
         std::size_t& remaining, const CancelToken& token, const std::vector<std::shared_ptr<const MoveFolder>>& folders
     );
     virtual MoveReplayResult reverse(const CancelToken& token, std::atomic<std::size_t>& completed) const;
+    // Pure affected-location facts; unconfirmed() may also retire a proof and retain data for recovery.
+    virtual std::vector<TransferResult> failedLocations(const FileError& error) const;
     virtual std::vector<TransferResult> unconfirmed(const FileError& error) const;
     virtual std::size_t size() const { return m_effects.size() + m_folders.size(); }
     virtual bool usesMount(const HistoryMount& mount) const;

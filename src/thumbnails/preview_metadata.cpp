@@ -1,7 +1,8 @@
 #include "thumbnails/preview_metadata.h"
 
-#include "fs/background_job.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 #include "thumbnails/metadata_probe.h"
 
 #include <utility>
@@ -44,8 +45,8 @@ struct luciole::PreviewMetadataService::State : std::enable_shared_from_this<Sta
     pending = false;
     running = true;
     cancel = CancelToken{};
-    runJob<MetadataFields>(
-        cancel,
+    runIoJob<MetadataFields>(
+        ioLane(entry->location()) == IoLane::Network ? IoLane::NetworkPreviewProbe : IoLane::PreviewProbe, cancel,
         [source = *entry, options = options, token = cancel] {
           return probePreviewMetadata(source, options, gioCancellable(token));
         },

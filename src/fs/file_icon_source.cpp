@@ -34,11 +34,11 @@ luciole::FileIconSource luciole::readIconSource(GIcon* icon) {
 namespace {
   // `location` yields the entry's location; it is only resolved for desktop entries.
   luciole::FileIconSource
-  fileIcon(GIcon* icon, GFileType type, const char* name, const std::function<luciole::Location()>& location) {
+  fileIcon(GIcon* icon, luciole::FileType type, const char* name, const std::function<luciole::Location()>& location) {
     auto result = luciole::readIconSource(icon);
-    result.names.emplace_back(type == G_FILE_TYPE_DIRECTORY ? "folder" : "text-x-generic");
+    result.names.emplace_back(type == luciole::FileType::Directory ? "folder" : "text-x-generic");
     result.names.emplace_back("application-octet-stream");
-    if (type == G_FILE_TYPE_REGULAR && name != nullptr && std::string_view(name).ends_with(".desktop")) {
+    if (type == luciole::FileType::Regular && name != nullptr && std::string_view(name).ends_with(".desktop")) {
       if (const auto path = location().nativePath()) {
         result.desktopFile = *path;
       }
@@ -46,15 +46,16 @@ namespace {
     return result;
   }
 
-  bool desktopEntry(GFileType type, const char* name) {
-    return type == G_FILE_TYPE_REGULAR && name != nullptr && std::string_view(name).ends_with(".desktop");
+  bool desktopEntry(luciole::FileType type, const char* name) {
+    return type == luciole::FileType::Regular && name != nullptr && std::string_view(name).ends_with(".desktop");
   }
 } // namespace
 
 luciole::FileIconSource luciole::readFileIcon(GFileInfo* info, const Location& location) {
-  return fileIcon(g_file_info_get_icon(info), g_file_info_get_file_type(info), g_file_info_get_name(info), [&] {
-    return location;
-  });
+  return fileIcon(
+      g_file_info_get_icon(info), fileType(g_file_info_get_file_type(info)), g_file_info_get_name(info),
+      [&] { return location; }
+  );
 }
 
 const luciole::FileIconSource& luciole::emptyFileIcon() {
@@ -65,14 +66,11 @@ const luciole::FileIconSource& luciole::emptyFileIcon() {
 luciole::SharedFileIcon luciole::FileIconPool::get(GFileInfo* info, const Location& folder) {
   const auto location = [&] { return folder.child(g_file_info_get_name(info)); };
   GIcon* icon = g_file_info_get_icon(info);
-  if (desktopEntry(g_file_info_get_file_type(info), g_file_info_get_name(info))
-      || icon == nullptr
-      || !G_IS_THEMED_ICON(icon)) {
-    return std::make_shared<const FileIconSource>(
-        fileIcon(icon, g_file_info_get_file_type(info), g_file_info_get_name(info), location)
-    );
+  const auto type = fileType(g_file_info_get_file_type(info));
+  if (desktopEntry(type, g_file_info_get_name(info)) || icon == nullptr || !G_IS_THEMED_ICON(icon)) {
+    return std::make_shared<const FileIconSource>(fileIcon(icon, type, g_file_info_get_name(info), location));
   }
-  m_key.assign(g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY ? "ID" : "IF");
+  m_key.assign(type == FileType::Directory ? "ID" : "IF");
   const auto* names = g_themed_icon_get_names(G_THEMED_ICON(icon));
   for (std::size_t i = 0; names != nullptr && names[i] != nullptr; ++i) {
     m_key.push_back('\n');
@@ -81,9 +79,7 @@ luciole::SharedFileIcon luciole::FileIconPool::get(GFileInfo* info, const Locati
   if (const auto found = m_icons.find(m_key); found != m_icons.end()) {
     return found->second;
   }
-  auto shared = std::make_shared<const FileIconSource>(
-      fileIcon(icon, g_file_info_get_file_type(info), g_file_info_get_name(info), location)
-  );
+  auto shared = std::make_shared<const FileIconSource>(fileIcon(icon, type, g_file_info_get_name(info), location));
   m_icons.emplace(m_key, shared);
   return shared;
 }
@@ -123,7 +119,7 @@ void luciole::FileIconPool::setLocalFolder(const char* path) {
 }
 
 luciole::SharedFileIcon
-luciole::FileIconPool::getLocal(const char* name, GFileType type, const char* contentType, const Location& folder) {
+luciole::FileIconPool::getLocal(const char* name, FileType type, const char* contentType, const Location& folder) {
   const SpecialIcon* special = nullptr;
   if (!m_special.empty() && name != nullptr) {
     if (const auto found = m_special.find(name); found != m_special.end()) {
@@ -149,7 +145,7 @@ luciole::FileIconPool::getLocal(const char* name, GFileType type, const char* co
   if (desktopEntry(type, name)) {
     return build();
   }
-  m_key.assign(type == G_FILE_TYPE_DIRECTORY ? "LD" : "LF");
+  m_key.assign(type == luciole::FileType::Directory ? "LD" : "LF");
   if (special != nullptr) {
     m_key.append("S").append(special->name);
   } else if (contentType != nullptr) {

@@ -2,6 +2,8 @@
 
 #include "fs/file_query.h"
 #include "fs/gio_interop.h"
+#include "fs/network_info.h"
+#include "fs/network_types.h"
 #include "fs/posix_fd.h"
 
 #include <algorithm>
@@ -29,9 +31,15 @@ namespace {
   public:
     Walker(
         std::vector<luciole::DirectoryEntry> roots, const luciole::CancelToken& token,
-        const std::function<void(const luciole::FolderTotalsSnapshot&)>& progress, luciole::FolderTotalsLimits limits
+        const std::function<void(const luciole::FolderTotalsSnapshot&)>& progress, luciole::FolderTotalsLimits limits,
+        const std::vector<luciole::MountConfiguration>& mounts
     )
-        : m_roots(std::move(roots)), m_token(token), m_progress(progress), m_limits(limits) {
+        : m_roots(std::move(roots)), m_token(token), m_progress(progress), m_limits(limits), m_mounts(mounts) {
+      for (const auto& mount : mounts) {
+        if (mount.automount) {
+          m_boundaries.emplace(luciole::Location::fromPath(mount.path).uri(), &mount);
+        }
+      }
       std::ranges::stable_sort(m_roots, {}, [](const auto& entry) { return entry.location().uri().size(); });
       for (const auto& root : m_roots) {
         m_selected.emplace(root.location().uri(), &root);
@@ -53,6 +61,8 @@ namespace {
             ++m_result.unsupported;
             continue;
           }
+          const auto expected = luciole::automountFor(location, m_mounts);
+          const auto guard = expected ? luciole::openSystemMount(location, m_token, expected) : luciole::Fd{};
           const auto fd = luciole::checkedFd(::open(location.nativePath()->c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
           const auto value = luciole::statFd(fd.get());
           visit(fd.get(), value, location, 0);
@@ -186,10 +196,15 @@ namespace {
           continue;
         }
         try {
+          const auto childLocation = location.child(name);
+          const auto boundary = m_boundaries.find(childLocation.uri());
+          const auto guard = boundary != m_boundaries.end()
+              ? luciole::openSystemMount(childLocation, m_token, *boundary->second)
+              : luciole::Fd{};
           const auto child =
               luciole::checkedFd(::openat(::dirfd(directory.get()), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
           const auto value = luciole::statFd(child.get());
-          visit(child.get(), value, location.child(name), depth + 1);
+          visit(child.get(), value, childLocation, depth + 1);
           struct stat current{};
           if (::fstatat(::dirfd(directory.get()), name.c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0
               || !sameStamp(value, current)) {
@@ -207,6 +222,8 @@ namespace {
     const luciole::CancelToken& m_token;
     const std::function<void(const luciole::FolderTotalsSnapshot&)>& m_progress;
     luciole::FolderTotalsLimits m_limits;
+    const std::vector<luciole::MountConfiguration>& m_mounts;
+    std::map<std::string, const luciole::MountConfiguration*> m_boundaries;
     luciole::FolderTotalsSnapshot m_result;
     std::size_t m_items = 0;
     std::map<std::string, const luciole::DirectoryEntry*> m_selected;
@@ -219,5 +236,46 @@ luciole::FolderTotalsSnapshot luciole::walkFolderTotals(
     std::vector<DirectoryEntry> roots, const CancelToken& token,
     const std::function<void(const FolderTotalsSnapshot&)>& progress, FolderTotalsLimits limits
 ) {
-  return Walker(std::move(roots), token, progress, limits).run();
+  const auto lane =
+      std::ranges::any_of(roots, [](const auto& root) { return ioLane(root.location()) == IoLane::Network; })
+      ? IoLane::Network
+      : IoLane::Native;
+  bool known = false;
+  const auto mounts = configuredSystemMounts(&known);
+  FolderTotalsSnapshot last;
+  try {
+    return NetworkProcess::acquire(lane)
+        ->call(
+            {{"action", "totals"},
+             {"roots", roots},
+             {"items", limits.items},
+             {"depth", limits.depth},
+             {"mounts", known ? NetworkMessage(mounts) : NetworkMessage(nullptr)}},
+            token,
+            [&](const NetworkMessage& value) {
+              last = value.get<FolderTotalsSnapshot>();
+              progress(last);
+              return NetworkMessage{};
+            }
+        )
+        .get<FolderTotalsSnapshot>();
+  } catch (const FileErrorException& error) {
+    if (error.error().kind != FileErrorKind::Cancelled) {
+      throw;
+    }
+    last.phase = FolderTotalsPhase::Cancelled;
+    return last;
+  }
+}
+luciole::NetworkMessage luciole::networkFolderTotals(const NetworkMessage& request, const NetworkEvent& event) {
+  const CancelToken token;
+  const auto& snapshot = request.at("mounts");
+  const auto mounts =
+      snapshot.is_null() ? discoverSystemMounts(token) : snapshot.get<std::vector<MountConfiguration>>();
+  const std::function<void(const FolderTotalsSnapshot&)> progress = [&](const auto& value) { (void)event(value); };
+  Walker walk(
+      request.at("roots").get<std::vector<DirectoryEntry>>(), token, progress,
+      {request.at("items").get<std::size_t>(), request.at("depth").get<std::size_t>()}, mounts
+  );
+  return walk.run();
 }

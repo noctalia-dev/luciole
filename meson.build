@@ -98,6 +98,10 @@ app_icon = configure_file(
   configuration: {'APP_ICON': fs.read('assets/icons/dev.noctalia.luciole.svg')},
 )
 src_inc = include_directories('src')
+configure_file(
+  input: 'src/fs/network_worker_path.h.in', output: 'network_worker_path.h',
+  configuration: {'IO_WORKER_PATH': get_option('prefix') / get_option('libdir') / 'luciole/luciole-io-worker'},
+)
 
 # One static library per module. A module's dependencies list only the modules
 # its sources include, following the layering in CONTRIBUTING.md. Modules that
@@ -126,7 +130,6 @@ fs_lib = static_library('luciole-fs',
     'src/fs/directory_session.cpp',
     'src/fs/directory_watch.cpp',
     'src/fs/drive_monitor.cpp',
-    'src/fs/entry_access.cpp',
     'src/fs/file_error.cpp',
     'src/fs/file_icon_source.cpp',
     'src/fs/file_filter.cpp',
@@ -142,7 +145,15 @@ fs_lib = static_library('luciole-fs',
     'src/fs/location_mount.cpp',
     'src/fs/mount_interaction.cpp',
     'src/fs/native_listing.cpp',
+    'src/fs/system_mounts.cpp',
+    'src/fs/systemd_mounts.cpp',
+    'src/fs/system_mount_monitor.cpp',
     'src/fs/network_listing.cpp',
+    'src/fs/network_process.cpp',
+    'src/fs/network_job.cpp',
+    'src/fs/network_wire.cpp',
+    'src/fs/network_info.cpp',
+    'src/fs/network_listing_process.cpp',
     'src/fs/ws_discovery.cpp',
     'src/fs/ws_discovery_metadata.cpp',
     'src/fs/ws_discovery_protocol.cpp',
@@ -154,9 +165,9 @@ fs_lib = static_library('luciole-fs',
     'src/fs/xdg_dirs.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [gio, libarchive, liblzma, curl, xml],
+  dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml, dependency('nlohmann_json')],
 )
-fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, libarchive, liblzma, curl, xml])
+fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml, dependency('nlohmann_json')])
 
 config_lib = static_library('luciole-config',
   files(
@@ -213,6 +224,10 @@ operations_lib = static_library('luciole-operations',
     'src/operations/archive_support.cpp',
     'src/operations/archive_writer.cpp',
     'src/operations/batch_rename_service.cpp',
+    'src/operations/network_operation.cpp',
+    'src/operations/network_service.cpp',
+    'src/operations/network_history.cpp',
+    'src/operations/network_worker.cpp',
     'src/operations/create_service.cpp',
     'src/operations/create_receipt.cpp',
     'src/operations/move_receipt.cpp',
@@ -283,6 +298,7 @@ thumbnails_lib = static_library('luciole-thumbnails',
     'src/thumbnails/preview_service.cpp',
     'src/thumbnails/preview_metadata.cpp',
     'src/thumbnails/metadata_probe.cpp',
+    'src/thumbnails/network_preview.cpp',
     'src/thumbnails/metadata_parse.cpp',
     'src/thumbnails/metadata_worker.cpp',
     'src/thumbnails/provider_process.cpp',
@@ -332,6 +348,10 @@ platform_lib = static_library('luciole-platform',
 platform_dep = declare_dependency(link_with: platform_lib, include_directories: src_inc,
   dependencies: [fs_dep, noctalia_ui_dep, wayland_client, gio_unix],
   sources: protocol_headers,
+)
+
+network_worker = executable('luciole-io-worker', 'src/app/network_worker.cpp',
+  dependencies: [operations_dep, thumbnails_dep], install: true, install_dir: get_option('libdir') / 'luciole',
 )
 
 ui_lib = static_library('luciole-ui',

@@ -1,7 +1,8 @@
 #include "fs/folder_totals.h"
 
-#include "fs/background_job.h"
 #include "fs/folder_totals_walk.h"
+#include "fs/network_info.h"
+#include "fs/network_job.h"
 
 #include <algorithm>
 #include <glib.h>
@@ -88,8 +89,12 @@ bool luciole::FolderTotalsService::start(std::span<const DirectoryEntry> entries
   state->progress->value = state->snapshot;
   state->running = true;
   state->startTimer();
-  runJob<FolderTotalsSnapshot>(
-      state->cancel,
+  const auto lane =
+      std::ranges::any_of(roots, [](const auto& entry) { return ioLane(entry.location()) == IoLane::Network; })
+      ? IoLane::Network
+      : IoLane::Native;
+  runIoJob<FolderTotalsSnapshot>(
+      lane, state->cancel,
       [roots = std::move(roots), token = state->cancel, progress = state->progress,
        limited = state->snapshot.limited] mutable {
         return walkFolderTotals(std::move(roots), token, [progress, limited](const FolderTotalsSnapshot& value) {

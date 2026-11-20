@@ -1,0 +1,2 @@
+#pragma once
+#define LUCIOLE_IO_WORKER_PATH "@IO_WORKER_PATH@"

@@ -51,7 +51,7 @@ _option m name:
 
 [arg("m", pattern="debug|release|asan")]
 build m=mode: (_ensure-configured m)
-    meson compile -C "build-$1" luciole
+    meson compile -C "build-$1" luciole luciole-io-worker
 
 [arg("m", pattern="debug|release|asan")]
 run m=mode: (build m)

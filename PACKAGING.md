@@ -128,6 +128,7 @@ With relative `datadir=share`, Meson installs:
 
 ```text
 <prefix>/bin/luciole
+<prefix>/<libdir>/luciole/luciole-io-worker
 <prefix>/share/luciole/assets/fonts/noctalia-tabler.ttf
 <prefix>/share/luciole/assets/fonts/tabler.json
 <prefix>/share/luciole/assets/fonts/tabler-icons-license.txt
@@ -142,6 +143,8 @@ With relative `datadir=share`, Meson installs:
 <prefix>/share/fish/vendor_completions.d/luciole.fish
 <prefix>/share/licenses/luciole/LICENSE
 ```
+
+Package `luciole-io-worker` with the matching Luciole binary. Luciole looks beside the build-tree executable before using the compiled-in install path. To test another worker, set `LUCIOLE_IO_WORKER` to its absolute path.
 
 Ship the fonts directory and its license together. The palette template is an integration resource, not per-user configuration. No AppStream/metainfo file, manual page or systemd unit is currently installed.
 

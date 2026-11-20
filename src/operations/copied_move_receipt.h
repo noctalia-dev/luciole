@@ -31,6 +31,7 @@ namespace luciole {
         std::shared_ptr<const MoveReceipt> native = {}
     );
     MoveReplayResult reverse(const CancelToken& token, std::atomic<std::size_t>& completed) const override;
+    std::vector<TransferResult> failedLocations(const FileError& error) const override;
     std::vector<TransferResult> unconfirmed(const FileError& error) const override;
     std::size_t size() const override;
     bool usesMount(const HistoryMount& mount) const override;

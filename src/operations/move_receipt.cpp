@@ -873,7 +873,7 @@ std::size_t luciole::transferHistoryBudget(std::size_t descriptorsPerRoot) {
   return static_cast<std::size_t>(std::min<rlim_t>(4096, (limit.rlim_cur - used - 128) / descriptorsPerRoot));
 }
 
-std::vector<luciole::TransferResult> luciole::MoveReceipt::unconfirmed(const FileError& error) const {
+std::vector<luciole::TransferResult> luciole::MoveReceipt::failedLocations(const FileError& error) const {
   std::vector<TransferResult> results;
   for (const auto& effect : m_effects) {
     auto& result = results.emplace_back(effect->m_destination, TransferOutcome::Partial, error);
@@ -887,4 +887,8 @@ std::vector<luciole::TransferResult> luciole::MoveReceipt::unconfirmed(const Fil
         + result.error->message;
   }
   return results;
+}
+
+std::vector<luciole::TransferResult> luciole::MoveReceipt::unconfirmed(const FileError& error) const {
+  return failedLocations(error);
 }

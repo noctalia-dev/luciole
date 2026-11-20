@@ -41,6 +41,7 @@ namespace {
     TEST_CHECK(luciole::errnoError(ENOENT).kind == luciole::FileErrorKind::Missing);
     TEST_CHECK(luciole::errnoError(EPERM).kind == luciole::FileErrorKind::Denied);
     TEST_CHECK(luciole::errnoError(ENOTEMPTY).kind == luciole::FileErrorKind::NotEmpty);
+    TEST_CHECK(luciole::errnoError(ETIMEDOUT).kind == luciole::FileErrorKind::Unavailable);
     TEST_CHECK(luciole::errnoError(EIO).kind == luciole::FileErrorKind::Other);
     try {
       throw std::runtime_error("plain");
@@ -111,6 +112,12 @@ namespace {
     TEST_CHECK(gate.resolve(id, 3, [](const Question&) { return true; }));
     worker.join();
     TEST_CHECK(answer == 3 && !gate.pending());
+
+    answer = gate.ask({}, token, [&] {
+      TEST_CHECK(gate.resolve(gate.pending()->id, 4, [](const Question&) { return true; }));
+      TEST_CHECK(!gate.pending());
+    });
+    TEST_CHECK(answer == 4);
 
     std::thread cancelled([&] { answer = gate.ask({}, token, [] {}); });
     while (!gate.pending()) {

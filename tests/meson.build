@@ -13,6 +13,9 @@ activation_server = custom_target('launch-activation-server-header',
 )
 
 test_table = [
+  {'name': 'network-service', 'deps': [operations_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'network-process', 'deps': [operations_dep, thumbnails_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'system-mounts', 'deps': [fs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'ws-discovery', 'deps': [fs_dep], 'env': gio_env, 'wrapper': files('ws_discovery_test.py')},
   {'name': 'input-lifetime', 'deps': [noctalia_ui_dep]},
   {'name': 'window-move-gesture', 'deps': [model_dep]},
@@ -79,9 +82,9 @@ foreach entry : test_table
     override_options: ['b_ndebug=false'],
   )
   if 'wrapper' in entry
-    test(name, python, args: [entry['wrapper'], exe], timeout: entry.get('timeout', 30), env: entry.get('env', []))
+    test(name, python, args: [entry['wrapper'], exe], timeout: entry.get('timeout', 30), env: entry.get('env', []), depends: network_worker)
   else
-    test(name, exe, timeout: entry.get('timeout', 30), env: entry.get('env', []))
+    test(name, exe, timeout: entry.get('timeout', 30), env: entry.get('env', []), depends: network_worker)
   endif
 endforeach
 
