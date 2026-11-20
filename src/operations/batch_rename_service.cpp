@@ -15,14 +15,12 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <iterator>
-#include <linux/fs.h>
 #include <map>
 #include <ranges>
 #include <regex>
 #include <set>
 #include <string_view>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -246,7 +244,7 @@ namespace {
     if (!item.current(from, oldName)) {
       luciole::throwFileError(FileErrorKind::Changed, "An item changed during the operation.");
     }
-    if (::syscall(SYS_renameat2, from, oldName.c_str(), to, newName.c_str(), RENAME_NOREPLACE) != 0) {
+    if (luciole::renameNoReplace(from, oldName.c_str(), to, newName.c_str()) != 0) {
       luciole::throwErrno(errno);
     }
     if (item.revision) {

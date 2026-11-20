@@ -8,8 +8,6 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <glib.h>
-#include <linux/fs.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -80,8 +78,7 @@ void luciole::CreationStage::requireItem() const {
 
 void luciole::CreationStage::publish(const std::string& name, int parent) {
   requireItem();
-  if (::syscall(SYS_renameat2, fd(), "item", parent >= 0 ? parent : m_parent.get(), name.c_str(), RENAME_NOREPLACE)
-      != 0) {
+  if (renameNoReplace(fd(), "item", parent >= 0 ? parent : m_parent.get(), name.c_str()) != 0) {
     throwErrno(errno);
   }
 }
@@ -100,7 +97,7 @@ void luciole::CreationStage::exchange(const std::string& name, int parent, int v
       || !sameIdentity(current, statFd(visibleItem))) {
     throwFileError(FileErrorKind::Changed, "The item to exchange changed.");
   }
-  if (::syscall(SYS_renameat2, fd(), "item", parent, name.c_str(), RENAME_EXCHANGE) != 0) {
+  if (renameExchange(fd(), "item", parent, name.c_str()) != 0) {
     throwErrno(errno);
   }
 }

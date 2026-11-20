@@ -34,4 +34,11 @@ namespace luciole {
   bool sameIdentity(const struct stat& a, const struct stat& b);
   // Rename history ignores access time; metadata/content changes invalidate a captured revision.
   bool sameFileRevision(const struct stat& a, const struct stat& b);
+
+  // renameat2 with RENAME_NOREPLACE. Where the filesystem rejects the flag (NFS, many FUSE filesystems), checks
+  // that `to` is vacant and renames, which is not atomic. Returns 0, or -1 with errno set.
+  int renameNoReplace(int fromDir, const char* from, int toDir, const char* to);
+  // renameat2 with RENAME_EXCHANGE. Where the filesystem rejects the flag, swaps through a temporary name beside
+  // `from` and restores both names on failure; `to` is briefly absent. Returns 0, or -1 with errno set.
+  int renameExchange(int fromDir, const char* from, int toDir, const char* to);
 } // namespace luciole

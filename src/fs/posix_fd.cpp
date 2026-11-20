@@ -1,11 +1,38 @@
 #include "fs/posix_fd.h"
 
 #include "fs/file_error.h"
+#include "fs/gio_ptr.h"
 
 #include <cerrno>
 #include <fcntl.h>
+#include <glib.h>
+#include <linux/fs.h>
+#include <string>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
+
+namespace {
+  // NFS and FUSE filesystems without rename flag support report EINVAL; ENOSYS covers kernels without renameat2.
+  bool flagsRejected(int error) { return error == EINVAL || error == ENOSYS; }
+
+  int renameVacant(int fromDir, const char* from, int toDir, const char* to) {
+    struct stat existing{};
+    if (::fstatat(toDir, to, &existing, AT_SYMLINK_NOFOLLOW) == 0) {
+      errno = EEXIST;
+      return -1;
+    }
+    if (errno != ENOENT) {
+      return -1;
+    }
+    return ::renameat(fromDir, from, toDir, to);
+  }
+
+  int failWith(int error) {
+    errno = error;
+    return -1;
+  }
+} // namespace
 
 luciole::Fd::~Fd() {
   if (m_fd >= 0) {
@@ -69,4 +96,52 @@ bool luciole::sameFileRevision(const struct stat& a, const struct stat& b) {
       && a.st_mtim.tv_nsec == b.st_mtim.tv_nsec
       && a.st_ctim.tv_sec == b.st_ctim.tv_sec
       && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
+}
+
+int luciole::renameNoReplace(int fromDir, const char* from, int toDir, const char* to) {
+  if (::syscall(SYS_renameat2, fromDir, from, toDir, to, RENAME_NOREPLACE) == 0) {
+    return 0;
+  }
+  if (!flagsRejected(errno)) {
+    return -1;
+  }
+  return renameVacant(fromDir, from, toDir, to);
+}
+
+int luciole::renameExchange(int fromDir, const char* from, int toDir, const char* to) {
+  if (::syscall(SYS_renameat2, fromDir, from, toDir, to, RENAME_EXCHANGE) == 0) {
+    return 0;
+  }
+  if (!flagsRejected(errno)) {
+    return -1;
+  }
+  struct stat present{};
+  if (::fstatat(fromDir, from, &present, AT_SYMLINK_NOFOLLOW) != 0
+      || ::fstatat(toDir, to, &present, AT_SYMLINK_NOFOLLOW) != 0) {
+    return -1;
+  }
+  // The swap renames `from` before it can learn that `to` cannot move; restoring it still changes its ctime, which
+  // callers treat as a changed item. Refuse up front where renameat2 would refuse without touching either name.
+  if (::faccessat(fromDir, ".", W_OK | X_OK, AT_EACCESS) != 0
+      || ::faccessat(toDir, ".", W_OK | X_OK, AT_EACCESS) != 0) {
+    return -1;
+  }
+  const GString uuid(g_uuid_string_random());
+  const auto aside = ".luciole-exchange-" + std::string(uuid.get());
+  if (::renameat(fromDir, from, fromDir, aside.c_str()) != 0) {
+    return -1;
+  }
+  if (renameVacant(toDir, to, fromDir, from) != 0) {
+    const int error = errno;
+    (void)::renameat(fromDir, aside.c_str(), fromDir, from);
+    return failWith(error);
+  }
+  if (renameVacant(fromDir, aside.c_str(), toDir, to) != 0) {
+    const int error = errno;
+    if (renameVacant(fromDir, from, toDir, to) == 0) {
+      (void)::renameat(fromDir, aside.c_str(), fromDir, from);
+    }
+    return failWith(error);
+  }
+  return 0;
 }
