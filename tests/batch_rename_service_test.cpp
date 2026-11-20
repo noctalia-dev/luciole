@@ -211,6 +211,45 @@ namespace {
     TEST_CHECK(service.snapshot().receipt);
     TEST_CHECK(std::distance(fs::directory_iterator(f.root), fs::directory_iterator{}) == 2);
   }
+  void regexRename(Pump& pump) {
+    using luciole::FileErrorKind;
+    luciole::BatchRenameOptions options{
+        .mode = luciole::BatchRenameMode::Regex, .find = "[0-9]", .replacement = "[$&]"
+    };
+    TEST_CHECK(luciole::batchRenameName("a12.3", false, 0, options) == "a[1][2].3");
+    options.keepExtensions = false;
+    TEST_CHECK(luciole::batchRenameName("a12.3", false, 0, options) == "a[1][2].[3]");
+
+    Fixture f;
+    write(f.root / "IMG_42.jpg", "photo");
+    write(f.root / "other.jpg", "other");
+    S service;
+    pump.prepare(service, {entry(f.root / "IMG_42.jpg"), entry(f.root / "other.jpg")});
+    options.keepExtensions = true;
+    options.find = "[";
+    pump.preview(service, options);
+    TEST_CHECK(service.snapshot().phase == P::Error && service.snapshot().error);
+    TEST_CHECK(service.snapshot().error->kind == FileErrorKind::InvalidArgument && !service.apply());
+
+    options.find = "^IMG_([0-9]+)$";
+    options.replacement.assign(4094, 'x');
+    options.replacement += "$&";
+    pump.preview(service, options);
+    TEST_CHECK(service.snapshot().phase == P::Error && service.snapshot().error);
+    TEST_CHECK(service.snapshot().error->kind == FileErrorKind::NameTooLong && !service.apply());
+
+    options.replacement = "other";
+    pump.preview(service, options);
+    TEST_CHECK(service.snapshot().phase == P::Ready && !service.snapshot().canApply);
+    options.replacement = "Photo-$1";
+    pump.preview(service, options);
+    TEST_CHECK(service.snapshot().canApply && (*service.snapshot().rows)[0].after == "Photo-42.jpg");
+    TEST_CHECK(!(*service.snapshot().rows)[1].changed);
+    pump.apply(service);
+    TEST_CHECK(service.snapshot().phase == P::Finished && service.snapshot().receipt);
+    TEST_CHECK(read(f.root / "Photo-42.jpg") == "photo" && !fs::exists(f.root / "IMG_42.jpg"));
+    TEST_CHECK(read(f.root / "other.jpg") == "other");
+  }
   void cyclesAndKinds(Pump& pump) {
     Fixture f;
     S service;
@@ -617,6 +656,7 @@ int main() {
   Pump pump;
   names();
   basicAndValidation(pump);
+  regexRename(pump);
   cyclesAndKinds(pump);
   replayGuards(pump);
   replayAliasesAndUnchanged(pump);

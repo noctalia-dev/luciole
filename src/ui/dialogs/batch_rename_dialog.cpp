@@ -16,6 +16,8 @@
 #include <format>
 
 namespace {
+  using luciole::BatchRenameMode;
+  constexpr std::array renameModes{BatchRenameMode::Numbering, BatchRenameMode::Replace, BatchRenameMode::Regex};
   constexpr std::array outcomeNames{"Renamed", "Unchanged", "Failed", "Cancelled", "Needs attention", "Unconfirmed"};
   class PreviewRow final : public Flex {
   public:
@@ -127,7 +129,10 @@ BatchRenameDialog::BatchRenameDialog(
                .options =
                    std::vector<ui::SegmentedOption>{
                        {.label = "Numbering", .glyph = {}, .tooltip = {}},
-                       {.label = "Find/replace", .glyph = {}, .tooltip = {}}
+                       {.label = "Find/replace", .glyph = {}, .tooltip = {}},
+                       {.label = "Regex",
+                        .glyph = {},
+                        .tooltip = "Use an ECMAScript regular expression. In Replace, use $1, $2, … for captures."}
                    },
                .equalSegmentWidths = true,
                .flexGrow = 1.0F,
@@ -254,7 +259,7 @@ BatchRenameDialog::~BatchRenameDialog() { m_grid->setAdapter(nullptr); }
 Input* BatchRenameDialog::firstInput() const { return m_mode->selectedIndex() == 0 ? m_pattern : m_find; }
 luciole::BatchRenameOptions BatchRenameDialog::options() const {
   return {
-      .mode = m_mode->selectedIndex() == 0 ? luciole::BatchRenameMode::Numbering : luciole::BatchRenameMode::Replace,
+      .mode = renameModes[m_mode->selectedIndex()],
       .pattern = m_pattern->value().substr(0, 4097),
       .find = m_find->value().substr(0, 4097),
       .replacement = m_replacement->value().substr(0, 4097),

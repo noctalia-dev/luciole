@@ -14,7 +14,7 @@ namespace luciole {
   struct BatchRenameReceipt;
   class HistoryMount;
   bool batchRenameUsesMount(const BatchRenameReceipt& receipt, const HistoryMount& mount);
-  enum class BatchRenameMode { Numbering, Replace };
+  enum class BatchRenameMode { Numbering, Replace, Regex };
   struct BatchRenameOptions {
     BatchRenameMode mode = BatchRenameMode::Numbering;
     std::string pattern = "{name}_{number}", find, replacement;

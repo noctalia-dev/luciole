@@ -14,10 +14,13 @@
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
+#include <iterator>
 #include <linux/fs.h>
 #include <map>
 #include <ranges>
+#include <regex>
 #include <set>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -491,10 +494,36 @@ namespace {
     }
     return plan;
   }
+
+  constexpr std::size_t maxGeneratedName = 4096;
+
+  struct GeneratedName {
+    using value_type = char;
+    std::string text;
+
+    void append(std::string_view suffix) {
+      if (suffix.size() > maxGeneratedName - text.size()) {
+        luciole::throwFileError(FileErrorKind::NameTooLong, "Generated name is too long.");
+      }
+      text += suffix;
+    }
+
+    // Let regex_replace enforce the same bound as literal replacement during expansion.
+    void push_back(char byte) { append(std::string_view(&byte, 1)); }
+  };
+
+  class NameGenerator {
+  public:
+    explicit NameGenerator(const luciole::BatchRenameOptions& options);
+    std::string operator()(const std::string& name, bool directory, std::size_t index) const;
+
+  private:
+    const luciole::BatchRenameOptions& m_options;
+    std::optional<std::regex> m_regex;
+  };
 } // namespace
 
-std::string
-luciole::batchRenameName(const std::string& name, bool directory, std::size_t index, const BatchRenameOptions& o) {
+NameGenerator::NameGenerator(const luciole::BatchRenameOptions& o) : m_options(o) {
   if (o.pattern.size() > 4096
       || o.find.size() > 4096
       || o.replacement.size() > 4096
@@ -502,17 +531,35 @@ luciole::batchRenameName(const std::string& name, bool directory, std::size_t in
       || o.start > 1000000000
       || o.digits < 1
       || o.digits > 9) {
-    throwFileError(FileErrorKind::InvalidArgument, "Rename options exceed their limits.");
+    luciole::throwFileError(FileErrorKind::InvalidArgument, "Rename options exceed their limits.");
   }
-  const auto stemLength = o.keepExtensions ? filenameStemLength(name, directory) : name.size();
-  const auto stem = name.substr(0, stemLength), extension = name.substr(stemLength);
-  std::string result;
-  const auto append = [&](std::string_view text) {
-    if (result.size() + text.size() > 4096) {
-      throwFileError(FileErrorKind::NameTooLong, "Generated name is too long.");
+  if (o.mode == luciole::BatchRenameMode::Regex) {
+    if (o.find.empty()) {
+      luciole::throwFileError(FileErrorKind::InvalidArgument, "Enter a regular expression to find.");
     }
-    result += text;
-  };
+    auto flags = std::regex_constants::ECMAScript;
+#ifdef __GLIBCXX__
+    // The default backtracking matcher can take exponential time and cannot be cancelled mid-match.
+    // Polynomial mode bounds it, at the cost of rejecting back-references.
+    flags |= std::regex_constants::__polynomial;
+#endif
+    try {
+      m_regex.emplace(o.find, flags);
+    } catch (const std::regex_error& error) {
+      luciole::throwFileError(
+          FileErrorKind::InvalidArgument, std::string("Invalid regular expression: ") + error.what()
+      );
+    }
+  }
+}
+
+std::string NameGenerator::operator()(const std::string& name, bool directory, std::size_t index) const {
+  using luciole::BatchRenameMode;
+  using luciole::throwFileError;
+  const auto& o = m_options;
+  const auto stemLength = o.keepExtensions ? luciole::filenameStemLength(name, directory) : name.size();
+  const auto stem = std::string_view(name).substr(0, stemLength), extension = std::string_view(name).substr(stemLength);
+  GeneratedName result;
   if (o.mode == BatchRenameMode::Numbering) {
     auto number = std::to_string(static_cast<std::uint64_t>(o.start) + index);
     number.insert(
@@ -522,18 +569,18 @@ luciole::batchRenameName(const std::string& name, bool directory, std::size_t in
     for (std::size_t pos = 0; pos < o.pattern.size();) {
       const auto tail = std::string_view(o.pattern).substr(pos);
       if (tail.starts_with("{name}")) {
-        append(stem);
+        result.append(stem);
         pos += 6;
       } else if (tail.starts_with("{number}")) {
-        append(number);
+        result.append(number);
         pos += 8;
       } else if (tail.starts_with("{{") || tail.starts_with("}}")) {
-        append(tail.substr(0, 1));
+        result.append(tail.substr(0, 1));
         pos += 2;
       } else if (tail[0] == '{' || tail[0] == '}') {
         throwFileError(FileErrorKind::InvalidArgument, "Use {name}, {number}, {{ or }} in the pattern.");
       } else {
-        append(tail.substr(0, 1));
+        result.append(tail.substr(0, 1));
         ++pos;
       }
     }
@@ -544,19 +591,32 @@ luciole::batchRenameName(const std::string& name, bool directory, std::size_t in
     std::size_t start = 0;
     for (;;) {
       const auto found = stem.find(o.find, start);
-      if (found == std::string::npos) {
-        append(std::string_view(stem).substr(start));
+      if (found == std::string_view::npos) {
+        result.append(stem.substr(start));
         break;
       }
-      append(std::string_view(stem).substr(start, found - start));
-      append(o.replacement);
+      result.append(stem.substr(start, found - start));
+      result.append(o.replacement);
       start = found + o.find.size();
+    }
+  } else if (m_regex) {
+    try {
+      std::regex_replace(std::back_inserter(result), stem.begin(), stem.end(), *m_regex, o.replacement);
+    } catch (const std::regex_error& error) {
+      throwFileError(
+          FileErrorKind::InvalidArgument, std::string("Regular expression matching failed: ") + error.what()
+      );
     }
   } else {
     throwFileError(FileErrorKind::InvalidArgument, "Unknown rename mode.");
   }
-  append(extension);
-  return result;
+  result.append(extension);
+  return std::move(result.text);
+}
+
+std::string
+luciole::batchRenameName(const std::string& name, bool directory, std::size_t index, const BatchRenameOptions& o) {
+  return NameGenerator(o)(name, directory, index);
 }
 
 struct luciole::BatchRenameService::State {
@@ -624,12 +684,14 @@ struct luciole::BatchRenameService::State {
     owner->snapshot.canApply = false;
     owner->previewToken = CancelToken{};
     launch(owner, Kind::Preview, [plan = owner->prepared, options = owner->options, token = owner->previewToken] {
+      if (token.cancelled()) {
+        return Reply{};
+      }
+      const NameGenerator generateName(options);
       std::vector<std::string> names;
       for (std::size_t i = 0; i < plan->items.size() && !token.cancelled(); ++i) {
         const auto& entry = plan->items[i]->entry;
-        names.push_back(
-            batchRenameName(plan->items[i]->name, entry.type == FileType::Directory && !entry.symlink, i, options)
-        );
+        names.push_back(generateName(plan->items[i]->name, entry.type == FileType::Directory && !entry.symlink, i));
       }
       if (token.cancelled()) {
         return Reply{};
