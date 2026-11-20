@@ -6,6 +6,7 @@
 #include "fs/file_metadata.h"
 #include "fs/location.h"
 
+#include <cstdint>
 #include <expected>
 #include <functional>
 #include <optional>
@@ -49,6 +50,17 @@ namespace luciole {
   void queryFileType(
       const Location& location, const CancelToken& token,
       std::move_only_function<void(std::expected<FileType, FileError>)> done
+  );
+  struct FilesystemFacts {
+    std::string type;
+    std::uint64_t size = 0;
+    std::uint64_t free = 0;
+  };
+  // Live total/free/type for a mounted location. Cancelled replies are
+  // suppressed; done runs on the initiating main context.
+  void queryFilesystemFacts(
+      const Location& root, const CancelToken& token,
+      std::move_only_function<void(std::expected<FilesystemFacts, FileError>)> done
   );
 
   struct ChildInfo {

@@ -1,15 +1,18 @@
 #include "fs/drive_monitor.h"
 
+#include "fs/disk_partitions.h"
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
 #include "fs/location_mount.h"
 
 #include <algorithm>
+#include <fcntl.h>
 #include <format>
 #include <fstream>
 #include <gio/gio.h>
 #include <map>
 #include <set>
+#include <unistd.h>
 
 namespace {
   // Owned references to the GVolume or GMount behind one Drive, and the device holding it.
@@ -40,6 +43,31 @@ namespace {
     std::getline(file, name);
     return name.empty() ? std::format("process {}", pid) : name;
   }
+
+  std::string readMounts() {
+    const int fd = ::open("/proc/self/mounts", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+      return {};
+    }
+    std::string contents;
+    char buffer[4096];
+    for (;;) {
+      const auto count = ::read(fd, buffer, sizeof(buffer));
+      if (count <= 0) {
+        break;
+      }
+      contents.append(buffer, static_cast<std::size_t>(count));
+    }
+    ::close(fd);
+    return contents;
+  }
+
+  std::string normalizedPath(const std::string& path) {
+    if (path.size() > 1 && path.back() == '/') {
+      return path.substr(0, path.size() - 1);
+    }
+    return path;
+  }
 } // namespace
 
 struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
@@ -57,6 +85,8 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
         {.key = "root",
          .label = "File System",
          .glyph = "database",
+         .device = {},
+         .filesystem = {},
          .root = Location::fromPath("/"),
          .removal = luciole::DriveRemoval::None,
          .usage = std::nullopt}
@@ -70,6 +100,10 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
       drive.key = "volume:" + identifier(handle.volume.get());
       const GString name(g_volume_get_name(handle.volume.get()));
       drive.label = name ? name.get() : "Volume";
+      const GString unixDevice(g_volume_get_identifier(handle.volume.get(), G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE));
+      if (unixDevice) {
+        drive.device = unixDevice.get();
+      }
       if (!mount) {
         handle.mount.reset(g_volume_get_mount(handle.volume.get()));
         mount = handle.mount.get();
@@ -107,6 +141,47 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
     drives.push_back(std::move(drive));
   }
 
+  // Mounted disk partitions GIO's volume monitor does not report (internal and
+  // system mounts): one row per mountpoint with the filesystem label, so every
+  // partition shows by name while mounted. GIO's own rows win on overlap.
+  void addUncoveredPartitions() {
+    std::set<std::string> covered;
+    for (const auto& drive : drives) {
+      if (drive.root) {
+        if (const auto path = drive.root->nativePath()) {
+          covered.insert(normalizedPath(*path));
+        }
+      }
+    }
+    for (auto& partition : luciole::listMountedPartitions(readMounts(), "/dev/disk/by-label")) {
+      if (!covered.insert(normalizedPath(partition.mountpoint)).second) {
+        continue;
+      }
+      Drive drive;
+      drive.key = "disk:" + partition.device;
+      drive.label = std::move(partition.name);
+      drive.device = partition.device;
+      drive.filesystem = partition.fstype;
+      drive.glyph = luciole::diskRemovable(partition.device) ? "device-usb" : "database";
+      drive.root = luciole::Location::fromPath(partition.mountpoint);
+      Handle handle;
+      if (drive.root) {
+        GError* rawError = nullptr;
+        handle.mount.reset(g_file_find_enclosing_mount(gioFile(*drive.root).get(), nullptr, &rawError));
+        if (rawError != nullptr) {
+          g_clear_error(&rawError);
+        }
+        if (handle.mount && g_mount_can_unmount(handle.mount.get()) != FALSE) {
+          drive.removal = DriveRemoval::Unmount;
+        }
+      }
+      if (handle.mount) {
+        handles.insert_or_assign(drive.key, std::move(handle));
+      }
+      drives.push_back(std::move(drive));
+    }
+  }
+
   void refresh() {
     auto previous = std::move(drives);
     drives.clear();
@@ -126,6 +201,7 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
       }
     }
     g_list_free(mounts);
+    addUncoveredPartitions();
     // Mounted drives first, keeping GIO's order within each group; the root entry stays at the top.
     std::ranges::stable_partition(drives, [](const Drive& drive) { return drive.root.has_value(); });
     // Keep the last known usage until the next query answers, so bars do not flicker on rebuilds.

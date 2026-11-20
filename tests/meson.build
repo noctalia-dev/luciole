@@ -45,6 +45,7 @@ test_table = [
   {'name': 'places', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'icon-theme', 'deps': [thumbnails_dep, imaging_dep, system_dep, event_loop_dep], 'wrapper': files('icon_theme_test.py')},
   {'name': 'file-icon', 'deps': [thumbnails_dep, imaging_dep, system_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'disk-partitions', 'deps': [fs_dep], 'env': gio_env},
   {'name': 'file-tooltip', 'deps': [ui_dep, fs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'view-preference-writer', 'deps': [config_dep, event_loop_dep], 'env': ['G_DEBUG=fatal-warnings']},
   {'name': 'directory-session', 'deps': [fs_dep, event_loop_dep], 'env': gio_env},

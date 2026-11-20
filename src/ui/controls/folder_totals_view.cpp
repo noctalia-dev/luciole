@@ -39,6 +39,7 @@ FolderTotalsView::FolderTotalsView(
           )
       )
   );
+  addChild(ui::label({.out = &m_freeSpace, .fontSize = Style::fontSizeCaption, .maxLines = 2, .configure = literal}));
   addChild(
       ui::label(
           {.out = &m_status,
@@ -60,6 +61,8 @@ FolderTotalsView::FolderTotalsView(
   );
   m_service.setChangedCallback(std::move(requestSync));
   (void)m_service.start(targets);
+  m_freeSpace->setVisible(false);
+  m_freeSpace->setParticipatesInLayout(false);
 }
 
 void FolderTotalsView::sync(float width) {
@@ -103,10 +106,23 @@ void FolderTotalsView::sync(float width) {
     note += "\n" + value.error;
   }
   m_note->setText(note);
-  for (auto* label : {m_status, m_counts, m_note}) {
-    label->setMaxWidth(std::max(1.0F, width));
+  const bool hasFreeSpace = m_freeSpace != nullptr && !m_freeSpace->text().empty();
+  if (m_freeSpace != nullptr) {
+    m_freeSpace->setVisible(hasFreeSpace);
+    m_freeSpace->setParticipatesInLayout(hasFreeSpace);
+  }
+  for (auto* label : {m_status, m_counts, m_note, m_freeSpace}) {
+    if (label != nullptr) {
+      label->setMaxWidth(std::max(1.0F, width));
+    }
   }
   m_stop->setVisible(running);
   m_stop->setParticipatesInLayout(running);
   m_stop->setEnabled(!value.cancelRequested);
+}
+
+void FolderTotalsView::setFreeSpace(const std::string& text) {
+  if (m_freeSpace != nullptr) {
+    m_freeSpace->setText(text);
+  }
 }

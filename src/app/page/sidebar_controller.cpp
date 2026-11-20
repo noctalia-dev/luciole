@@ -5,6 +5,7 @@
 #include "app/page/drag_drop_controller.h"
 #include "app/page/menu_controller.h"
 #include "app/page/page_context.h"
+#include "app/page/properties_controller.h"
 #include "app/page/rename_controller.h"
 #include "app/page/sidebar_controller.h"
 #include "browser/browser_controller.h"
@@ -13,7 +14,9 @@
 #include "config/view_preference_writer.h"
 #include "core/input/key_symbols.h"
 #include "cursor-shape-v1-client-protocol.h"
+#include "fs/directory_entries.h"
 #include "fs/drive_monitor.h"
+#include "fs/file_metadata.h"
 #include "platform/desktop_integration.h"
 #include "render/animation/animation_manager.h"
 #include "ui/browser/places_sidebar.h"
@@ -30,10 +33,10 @@
 SidebarController::SidebarController(
     PageContext& page, luciole::PinService& pins, luciole::DriveMonitor& drives,
     luciole::ViewPreferenceWriter& preferences, AnimationManager& animations, MenuController& menus,
-    RenameController& renamer, DragDropController& drags
+    RenameController& renamer, PropertiesController& properties, DragDropController& drags
 )
     : m_page(page), m_pins(pins), m_drives(drives), m_preferences(preferences), m_animations(animations),
-      m_menus(menus), m_renamer(renamer), m_drags(drags) {}
+      m_menus(menus), m_renamer(renamer), m_properties(properties), m_drags(drags) {}
 
 void SidebarController::load(const luciole::BrowserSettings& settings) {
   m_sidebarWidth = settings.sidebarWidth;
@@ -279,6 +282,11 @@ void SidebarController::openDriveMenu(const std::string& key, float x, float y) 
   if (drive->removal != luciole::DriveRemoval::None) {
     entries.push_back({.id = 2, .label = std::string(luciole::driveRemovalLabel(drive->removal))});
   }
+  const bool canShowProperties = drive->root.has_value();
+  if (canShowProperties) {
+    entries.push_back({.label = "", .separator = true});
+    entries.push_back({.id = 3, .label = "Properties"});
+  }
   m_menus.showContextMenu(
       std::move(entries),
       [this, key](int action) {
@@ -286,6 +294,22 @@ void SidebarController::openDriveMenu(const std::string& key, float x, float y) 
           openDrive(key);
         } else if (action == 2) {
           removeDrive(key);
+        } else if (action == 3) {
+          const auto* target = m_drives.find(key);
+          if (target == nullptr || !target->root) {
+            return;
+          }
+          luciole::DirectoryEntry entry{
+              .place = *target->root,
+              .name = target->label,
+              .type = luciole::FileType::Directory,
+              .size = std::nullopt,
+              .modifiedSeconds = std::nullopt
+          };
+          entry.setDisplayName(target->label);
+          m_properties.show(
+              {std::move(entry)}, true, luciole::DriveFacts{.device = target->device, .filesystem = target->filesystem}
+          );
         }
       },
       {x, y, 1, 1}

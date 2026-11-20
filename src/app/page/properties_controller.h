@@ -2,9 +2,11 @@
 
 #include "browser/selection_details.h"
 #include "fs/cancel_token.h"
+#include "fs/file_query.h"
 #include "thumbnails/preview_metadata.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -12,6 +14,13 @@ namespace luciole {
   class FileIcon;
   class FileIconCache;
   struct DirectoryEntry;
+  // Filesystem facts for a mounted drive shown in Properties: the backing
+  // device and, when known without a query, its type. Free space always comes
+  // from a live query so it never goes stale.
+  struct DriveFacts {
+    std::string device;
+    std::string filesystem;
+  };
 } // namespace luciole
 
 struct KeyboardEvent;
@@ -35,7 +44,10 @@ public:
   PropertiesController(PageContext& page, luciole::FileIconCache& icons);
 
   // `captureCurrentLocation` reads the permissions of the first target's location instead of its listed entry.
-  void show(const std::vector<luciole::DirectoryEntry>& targets, bool captureCurrentLocation = false);
+  void show(
+      const std::vector<luciole::DirectoryEntry>& targets, bool captureCurrentLocation = false,
+      std::optional<luciole::DriveFacts> drive = std::nullopt
+  );
   // Owned permission job change: sync the dialog on the next frame, or report a job whose dialog closed.
   void changed(OperationJob& job);
   // Operation progress tick: keep syncing while permissions are read or applied.
@@ -63,6 +75,10 @@ private:
   void sync();
   void syncMetadata();
   void close();
+  // "X free of Y (Z% used)" for the drive dialog, or its pending/unknown text.
+  std::string driveFreeSpace() const;
+  // Live filesystem type/size/free for the drive dialog; refreshes its rows on answer.
+  void queryDriveFilesystem(const luciole::Location& root);
 
   PageContext& m_page;
   // The dialog's job: reads the targets, then applies changes.
@@ -89,6 +105,14 @@ private:
   // The header icon, and the GIO lookup that fills it for entries without an icon.
   luciole::FileIcon* m_identityIcon = nullptr;
   luciole::CancelToken m_iconQuery;
+  // Drive facts for a mounted-drive dialog, and the filesystem query filling
+  // in its type and free space.
+  std::optional<luciole::DriveFacts> m_driveFacts;
+  std::optional<luciole::Location> m_driveRoot;
+  // Set when the filesystem query answers, even on failure (as all-unknown).
+  std::optional<luciole::FilesystemFacts> m_driveFilesystemInfo;
+  std::uint64_t m_filesystemSerial = 0;
+  luciole::CancelToken m_filesystemQuery;
   // Location, size and similar entry facts that lead the Details table.
   luciole::MetadataFields m_basicFields;
   float m_metadataWidth = 0;

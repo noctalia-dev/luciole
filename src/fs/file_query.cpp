@@ -195,6 +195,39 @@ void luciole::queryFileType(
   );
 }
 
+void luciole::queryFilesystemFacts(
+    const Location& root, const CancelToken& token,
+    std::move_only_function<void(std::expected<FilesystemFacts, FileError>)> done
+) {
+  using Done = std::move_only_function<void(std::expected<FilesystemFacts, FileError>)>;
+  const auto file = gioFile(root);
+  g_file_query_filesystem_info_async(
+      file.get(),
+      G_FILE_ATTRIBUTE_FILESYSTEM_SIZE "," G_FILE_ATTRIBUTE_FILESYSTEM_FREE "," G_FILE_ATTRIBUTE_FILESYSTEM_TYPE,
+      G_PRIORITY_DEFAULT, gioCancellable(token),
+      [](GObject* source, GAsyncResult* result, gpointer raw) {
+        const std::unique_ptr<Done> done(static_cast<Done*>(raw));
+        GError* rawError = nullptr;
+        const GioPtr<GFileInfo> info(g_file_query_filesystem_info_finish(G_FILE(source), result, &rawError));
+        const GErrorPtr error(rawError);
+        if (error && g_error_matches(error.get(), G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+          return;
+        }
+        if (error || info == nullptr) {
+          (*done)(std::unexpected(error ? fileError(*error) : FileError{FileErrorKind::Other, "Unknown error."}));
+          return;
+        }
+        const char* type = g_file_info_get_attribute_string(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_TYPE);
+        FilesystemFacts facts;
+        facts.type = type ? type : "";
+        facts.size = g_file_info_get_attribute_uint64(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+        facts.free = g_file_info_get_attribute_uint64(info.get(), G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+        (*done)(std::move(facts));
+      },
+      new Done(std::move(done))
+  );
+}
+
 std::optional<luciole::FileError> luciole::enumerateChildren(
     const Location& parent, const CancelToken& token, const std::function<bool(const ChildInfo&)>& visit
 ) {
