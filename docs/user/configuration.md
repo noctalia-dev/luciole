@@ -149,7 +149,7 @@ User bookmarks live in `$XDG_CONFIG_HOME/gtk-3.0/bookmarks`, defaulting to `~/.c
 
 Built-in Places layout and optional last-window tab state remain in `$XDG_STATE_HOME/luciole/state.toml`, defaulting to `~/.local/state/luciole/state.toml`. Cached user rows there preserve their placement among built-ins; their contents always come from the shared bookmark file. Deleting a shared user bookmark removes it from Luciole even when an old cache row remains. Tab restoration is controlled by `browser.restore_last_window`.
 
-Per-folder sort and view choices live in `$XDG_STATE_HOME/luciole/folder_views.toml`, one `[[folders]]` row per folder URI with optional `sort_by`, `sort_descending`, `directories_first`, `hidden_last` and `view_mode` (`"list"` or `"grid"`) fields. Invalid rows are skipped. Luciole replaces an unreadable file with its in-memory settings the next time a folder's settings change. It keeps the 4096 most recently changed folders.
+Per-folder sort and view choices live in `$XDG_STATE_HOME/luciole/folder_views.toml`, one `[[folders]]` row per folder URI with optional `sort_by`, `sort_descending`, `directories_first`, `hidden_last` and `view_mode` (`"list"` or `"grid"`) fields. Invalid rows are skipped. Luciole replaces an unreadable file with its in-memory settings the next time a folder's settings change. It keeps the 4096 most recently changed folders, or fewer when their rows would make the file larger than 240 KiB; the least recently changed go first.
 
 Custom bookmark icons are saved as an optional `icon` field on the matching bookmark row in this private state file. They are Luciole-only; the shared GTK bookmark format has no icon field.
 

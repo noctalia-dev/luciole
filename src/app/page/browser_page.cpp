@@ -1871,8 +1871,9 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
     closePopup();
   }
   if (m_settingsController.open() && (force || before.viewMode != settings.viewMode)) {
-    m_viewMode = settings.viewMode;
     browser().setDefaultViewMode(settings.viewMode);
+    // A folder with its own Grid/List choice keeps it; only folders without one follow the new default.
+    m_viewMode = browser().viewport().mode;
   }
   if (m_settingsController.open() && (force || before.gridIconSize != settings.gridIconSize)) {
     m_gridZoom = static_cast<std::size_t>(
@@ -2007,6 +2008,8 @@ void BrowserPage::setViewMode(luciole::ViewMode mode) {
   showViewMode(mode);
   m_preferences.save(mode);
   browser().setDefaultViewMode(m_viewMode);
+  // Leaving Columns shows the current folder's own Grid/List choice, if it has one.
+  showViewMode(browser().viewport().mode);
 }
 
 void BrowserPage::applyViewMode() {
