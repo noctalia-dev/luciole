@@ -184,7 +184,7 @@ namespace {
     }
     Decoder decoder(path);
     decoder.unknownKeys(
-        *table, "", {"schema_version", "places_customized", "bookmarks", "windows", "chooser_folder_uri"},
+        *table, "", {"schema_version", "places_customized", "bookmarks", "place_separators", "windows", "chooser_folder_uri"},
         "unknown state field"
     );
     const auto* version = table->get("schema_version");
@@ -222,6 +222,20 @@ namespace {
                .location = std::move(*location),
                .iconName = icon ? std::move(*icon) : std::string{}}
           );
+        }
+      }
+    }
+    if (const auto* separators =
+            decoder.array(*table, "place_separators", "place_separators", luciole::StateStore::placesLimit, false)) {
+      for (std::size_t i = 0; i < separators->size(); ++i) {
+        const auto* value = separators->get(i);
+        if (!value->is_integer() || value->as_integer()->get() <= 0) {
+          decoder.issue(*value, std::format("place_separators[{}]", i), "expected a positive row number");
+          continue;
+        }
+        const auto row = static_cast<std::size_t>(value->as_integer()->get());
+        if (state.placeSeparators.empty() || state.placeSeparators.back() < row) {
+          state.placeSeparators.push_back(row);
         }
       }
     }
@@ -275,6 +289,13 @@ namespace {
         {"bookmarks", std::move(bookmarks)},
         {"windows", std::move(windows)}
     };
+    if (!state.placeSeparators.empty()) {
+      toml::array separators;
+      for (const auto row : state.placeSeparators) {
+        separators.push_back(static_cast<std::int64_t>(row));
+      }
+      document.insert("place_separators", std::move(separators));
+    }
     if (state.chooserFolder) {
       document.insert("chooser_folder_uri", state.chooserFolder->uri());
     }
@@ -338,9 +359,10 @@ bool luciole::StateStore::load() {
   return true;
 }
 
-luciole::AtomicWriteState luciole::StateStore::saveBookmarks(std::vector<Bookmark> bookmarks) {
+luciole::AtomicWriteState luciole::StateStore::saveBookmarks(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {
   auto proposed = m_state;
   proposed.bookmarks = std::move(bookmarks);
+  proposed.placeSeparators = std::move(separators);
   proposed.placesCustomized = true;
   return save(std::move(proposed), Section::Bookmarks);
 }
@@ -379,9 +401,12 @@ luciole::AtomicWriteState luciole::StateStore::save(SessionState proposed, Secti
         bool matches = true; // The last picked folder simply wins over another writer's.
         switch (section) {
         case Section::Bookmarks:
-          unchanged =
-              current->bookmarks == proposed.bookmarks && current->placesCustomized == proposed.placesCustomized;
-          matches = current->bookmarks == m_state.bookmarks && current->placesCustomized == m_state.placesCustomized;
+          unchanged = current->bookmarks == proposed.bookmarks
+              && current->placesCustomized == proposed.placesCustomized
+              && current->placeSeparators == proposed.placeSeparators;
+          matches = current->bookmarks == m_state.bookmarks
+              && current->placesCustomized == m_state.placesCustomized
+              && current->placeSeparators == m_state.placeSeparators;
           break;
         case Section::Windows:
           unchanged = current->windows == proposed.windows;
@@ -399,6 +424,7 @@ luciole::AtomicWriteState luciole::StateStore::save(SessionState proposed, Secti
         case Section::Bookmarks:
           candidate.bookmarks = std::move(proposed.bookmarks);
           candidate.placesCustomized = proposed.placesCustomized;
+          candidate.placeSeparators = std::move(proposed.placeSeparators);
           break;
         case Section::Windows:
           candidate.windows = std::move(proposed.windows);

@@ -6,6 +6,8 @@
 #include "model/directory_options.h"
 #include "ui/browser/sidebar_tree_view.h"
 #include "ui/builders.h"
+#include "ui/controls/box.h"
+#include "ui/controls/list_drag.h"
 #include "ui/controls/side_list_metrics.h"
 
 #include <algorithm>
@@ -361,6 +363,92 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   );
   m_scroll->content()->addChild(std::move(button));
 }
+void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
+  // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged.
+  auto button = ui::button(
+      {.controlHeight = 13.0F,
+       .contentAlign = ButtonContentAlign::Start,
+       .variant = ButtonVariant::Ghost,
+       .paddingH = luciole::kSideListRowPaddingH}
+  );
+  auto* raw = button.get();
+  raw->setDirection(FlexDirection::Horizontal);
+  raw->setAlign(FlexAlign::Center);
+  raw->setTooltip("Drag to move, or right-click for options");
+  raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F}));
+  raw->setOnRightClickWithPointer([this, before](float x, float y, std::uint32_t, std::uint32_t) {
+    cancelDragCandidate();
+    if (m_separatorContext) {
+      m_separatorContext(before, x, y);
+    }
+  });
+  raw->setOnPress([this, before, raw](float, float localY, bool pressed) {
+    if (pressed) {
+      m_separatorDrag = SeparatorDrag{.from = before, .pressY = localY, .moved = false, .target = std::nullopt};
+      return;
+    }
+    auto drag = std::exchange(m_separatorDrag, std::nullopt);
+    raw->setOpacity(1.0F);
+    showSeparatorIndicator(std::nullopt);
+    if (drag && drag->moved && drag->target && m_separatorMove) {
+      m_separatorMove(drag->from, *drag->target);
+    }
+  });
+  raw->setOnPointerMotion([this, raw](float, float localY) {
+    if (!m_separatorDrag || m_separatorDrag->from == 0) {
+      return;
+    }
+    auto& drag = *m_separatorDrag;
+    if (!drag.moved && std::abs(localY - drag.pressY) >= Style::dragStartThreshold) {
+      drag.moved = true;
+      raw->setOpacity(0.4F);
+    }
+    if (!drag.moved) {
+      return;
+    }
+    float x = 0, y = 0;
+    Node::absolutePosition(raw, x, y);
+    drag.target = separatorTarget(y + localY, drag.from);
+    showSeparatorIndicator(drag.target);
+  });
+  raw->inputArea()->setOnCancel([this, raw] {
+    m_separatorDrag.reset();
+    raw->setOpacity(1.0F);
+    showSeparatorIndicator(std::nullopt);
+  });
+  m_scroll->content()->addChild(std::move(button));
+}
+std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y, std::size_t from) const {
+  // The first row whose upper half is below the pointer; past the last row there is nothing to separate.
+  std::optional<std::size_t> target;
+  for (const auto& row : m_rows) {
+    float rowX = 0, rowY = 0;
+    Node::absolutePosition(row.button, rowX, rowY);
+    if (row.pinIndex && y < rowY + row.button->height() * 0.5F) {
+      target = row.pinIndex;
+      break;
+    }
+  }
+  const auto& separators = m_pins.separators();
+  if (!target || *target == 0 || *target == from || std::ranges::contains(separators, *target)) {
+    return std::nullopt;
+  }
+  return target;
+}
+void luciole::PlacesSidebar::showSeparatorIndicator(std::optional<std::size_t> target) {
+  if (m_separatorIndicator == nullptr) {
+    return;
+  }
+  const auto row = target ? std::ranges::find(m_rows, target, &Row::pinIndex) : m_rows.end();
+  if (row == m_rows.end()) {
+    m_separatorIndicator->setVisible(false);
+    return;
+  }
+  // The line the separator would become, drawn in the gap above its new row.
+  m_separatorIndicator->setPosition(Style::spaceSm, row->button->y() - 1.5F);
+  m_separatorIndicator->setFrameSize(std::max(1.0F, m_scroll->content()->width() - 2.0F * Style::spaceSm), 3.0F);
+  m_separatorIndicator->setVisible(true);
+}
 void luciole::PlacesSidebar::addRow(
     const Bookmark& bookmark, const std::string& glyph, std::optional<std::size_t> index
 ) {
@@ -544,8 +632,14 @@ void luciole::PlacesSidebar::rebuild() {
     );
   };
   heading("Places", &m_heading);
+  // Where a dragged separator would land; drawn over the rows, outside the layout.
+  m_separatorDrag.reset();
+  content->addChild(makeListDropIndicator(1.0F, &m_separatorIndicator));
   const auto& pins = m_pins.bookmarks();
   for (std::size_t i = 0; i < pins.size(); ++i) {
+    if (std::ranges::contains(m_pins.separators(), i)) {
+      addSeparatorRow(i);
+    }
     if (!m_showNetwork && pins[i].location == Location::network()) {
       continue;
     }

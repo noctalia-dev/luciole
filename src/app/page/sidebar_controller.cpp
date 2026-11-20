@@ -178,6 +178,12 @@ void SidebarController::configureCallbacks() {
   m_places->setContextCallback([this](const luciole::Bookmark& bookmark, float x, float y) {
     m_menus.openPlaceMenu(bookmark, x, y);
   });
+  m_places->setSeparatorContextCallback([this](std::size_t before, float x, float y) {
+    m_menus.openSeparatorMenu(before, x, y);
+  });
+  m_places->setSeparatorMoveCallback([this](std::size_t from, std::size_t to) {
+    (void)m_pins.moveSeparatorTo(from, to);
+  });
   m_places->setDragCallback([this](const luciole::Bookmark& bookmark) { m_drags.startPlaceDrag(bookmark); });
   m_places->setRenameCallback([this](const luciole::Bookmark& bookmark) { m_renamer.openPlaceRename(bookmark); });
   m_places->setDriveOpenCallback([this](const std::string& key) { openDrive(key); });

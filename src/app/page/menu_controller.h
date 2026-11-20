@@ -53,6 +53,8 @@ public:
   );
   void openFileMenu(std::optional<luciole::EntryId> id, float x, float y);
   void openPlaceMenu(const luciole::Bookmark& bookmark, float x, float y);
+  // The menu of the separator line in front of Places row `before`.
+  void openSeparatorMenu(std::size_t before, float x, float y);
   void openColumnsMenu(const LayoutRect& anchor, std::optional<luciole::DetailsColumn> column = std::nullopt);
   void openBreadcrumbMenu(const luciole::Location& target, LayoutRect anchor);
   void openMenu();

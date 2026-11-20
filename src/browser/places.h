@@ -31,6 +31,14 @@ namespace luciole {
     bool move(const Location& location, std::size_t position);
     bool rename(const Bookmark& expected, std::string label);
     bool setIcon(const Bookmark& expected, std::string iconName);
+    // Separator lines between Places rows, each as the row it sits before. Moving a pin keeps them where they are,
+    // so the pin crosses them; adding or removing pins keeps each in front of the same row.
+    const std::vector<std::size_t>& separators() const;
+    bool addSeparator(std::size_t before);
+    bool removeSeparator(std::size_t before);
+    bool moveSeparator(std::size_t before, bool up);
+    // Moves the separator in front of row `before` to sit in front of row `target` instead.
+    bool moveSeparatorTo(std::size_t before, std::size_t target);
     bool saveWindows(std::vector<SavedWindow> windows);
     bool contains(const Location& location) const;
     bool editable() const;
@@ -45,5 +53,6 @@ namespace luciole {
     struct State;
     std::shared_ptr<State> m_state;
     bool save(std::vector<Bookmark> bookmarks);
+    bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators);
   };
 } // namespace luciole
