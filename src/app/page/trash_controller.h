@@ -7,6 +7,7 @@
 #include <vector>
 
 class Button;
+class Flex;
 class Label;
 class OperationJob;
 class PageContext;
@@ -20,10 +21,9 @@ public:
   void trashItems(const std::vector<luciole::DirectoryEntry>& targets);
   void restore(const std::vector<luciole::DirectoryEntry>& targets);
   void deleteItems(const std::vector<luciole::DirectoryEntry>& targets);
-  // Empties Trash, or permanently deletes `selection`, after the user confirms. The dialog opens
-  // with its confirm button focused, so Enter confirms it once preparation enables the control.
+  // Empties Trash, or permanently deletes `selection`, after the user confirms.
   void openEmptyTrash(std::optional<std::vector<luciole::DirectoryEntry>> selection = std::nullopt);
-  // With no focused control, Enter cancels the confirmation.
+  // With no focused control, Enter cancels the confirmation. Left/Right move focus between its buttons.
   bool key(const KeyboardEvent& event);
   // Owned job changes: sync the confirmation dialog, or report a finished job.
   void trashChanged(OperationJob& job);
@@ -44,4 +44,5 @@ private:
   Label* m_emptyTrashMessage = nullptr;
   Label* m_emptyTrashSize = nullptr;
   Button* m_emptyTrashConfirm = nullptr;
+  Flex* m_emptyTrashButtonRow = nullptr;
 };

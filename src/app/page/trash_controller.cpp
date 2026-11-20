@@ -119,6 +119,18 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
   Label* message = nullptr;
   Label* size = nullptr;
   Button* confirm = nullptr;
+  Flex* buttonRow = nullptr;
+  auto buttons = ui::row(
+      {.out = &buttonRow, .align = FlexAlign::Center, .justify = FlexJustify::End, .gap = Style::spaceSm},
+      ui::button({.text = "Cancel", .variant = ButtonVariant::Default, .onClick = [this] { m_page.dismissPopup(); }}),
+      ui::button(
+          {.out = &confirm,
+           .text = selection ? "Delete" : "Empty Trash",
+           .enabled = false,
+           .variant = ButtonVariant::Destructive,
+           .onClick = [this] { confirmEmptyTrash(); }}
+      )
+  );
   auto root = ui::column(
       {.align = FlexAlign::Stretch},
       luciole::dialogHeader(
@@ -139,19 +151,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
            .maxWidth = width - 24.0F,
            .maxLines = 2}
       ),
-      ui::row(
-          {.align = FlexAlign::Center, .justify = FlexJustify::End, .gap = Style::spaceSm},
-          ui::button(
-              {.text = "Cancel", .variant = ButtonVariant::Default, .onClick = [this] { m_page.dismissPopup(); }}
-          ),
-          ui::button(
-              {.out = &confirm,
-               .text = selection ? "Delete" : "Empty Trash",
-               .enabled = false,
-               .variant = ButtonVariant::Destructive,
-               .onClick = [this] { confirmEmptyTrash(); }}
-          )
-      )
+      std::move(buttons)
   );
   if (selection) {
     titleLabel->setMaxLines(2);
@@ -160,8 +160,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
   luciole::applyDialogStyle(*root);
   m_page.showDialog(std::move(root), DialogWidth::Small);
   if (m_page.popupSurface() != nullptr) {
-    // Focus the confirm control so Enter confirms; it ignores Enter while preparation keeps it disabled.
-    m_page.popupDispatcher().setFocus(confirm->inputArea());
+    m_emptyTrashButtonRow = buttonRow;
     m_page.activePopup().bind(ActivePopup::Kind::EmptyTrash, [this] {
       if (const auto job = std::exchange(m_emptyTrash, nullptr)) {
         job->cancel();
@@ -169,6 +168,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
       m_emptyTrashMessage = nullptr;
       m_emptyTrashSize = nullptr;
       m_emptyTrashConfirm = nullptr;
+      m_emptyTrashButtonRow = nullptr;
     });
     m_emptyTrash = m_page.jobs().create<luciole::EmptyTrashService>(JobScope::Page);
     m_emptyTrashMessage = message;
@@ -191,6 +191,14 @@ bool TrashController::key(const KeyboardEvent& event) {
       && event.modifiers == 0
       && KeySymbol::isEnter(event.sym)) {
     m_page.dismissPopup();
+    return true;
+  }
+  if (m_page.activePopup().kind() == ActivePopup::Kind::EmptyTrash
+      && event.pressed
+      && !event.preedit
+      && event.modifiers == 0
+      && (KeySymbol::isLeft(event.sym) || KeySymbol::isRight(event.sym))) {
+    m_page.popupDispatcher().cycleTabFocusInSubtree(m_emptyTrashButtonRow, KeySymbol::isLeft(event.sym));
     return true;
   }
   return false;
