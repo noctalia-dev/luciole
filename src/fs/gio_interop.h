@@ -19,6 +19,7 @@ namespace luciole {
   GioPtr<GFile> gioFile(const Location& location);
   Location locationFromFile(GFile* file);
   GCancellable* gioCancellable(const CancelToken& token);
+  CancelToken cancellationToken(GCancellable* cancellable);
 
   FileError fileError(const GError& error);
   // May synchronously query installed GIO providers; call on a worker.
@@ -54,7 +55,7 @@ namespace luciole {
     // same icon once per distinct value. nullptr clears the folder.
     void setLocalFolder(const char* path);
     // name is the raw filename; contentType is GIO's regular content type, null when unknown; `folder` contains it.
-    SharedFileIcon getLocal(const char* name, GFileType type, const char* contentType, const Location& folder);
+    SharedFileIcon getLocal(const char* name, FileType type, const char* contentType, const Location& folder);
 
   private:
     struct SpecialIcon {
@@ -65,4 +66,8 @@ namespace luciole {
     std::unordered_map<std::string, SharedFileIcon> m_icons;
     std::string m_key;
   };
+  struct DirectoryEntry;
+  DirectoryEntry readEntry(
+      GFileInfo* info, const std::shared_ptr<const Location>& folder, FileIconPool& icons, bool local, bool trashFolder
+  );
 } // namespace luciole

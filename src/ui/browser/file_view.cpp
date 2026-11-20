@@ -4,7 +4,6 @@
 #include "browser/entry_details.h"
 #include "core/input/key_modifiers.h"
 #include "core/log.h"
-#include "fs/entry_access.h"
 #include "fs/gio_ptr.h"
 #include "model/details_columns.h"
 #include "ui/browser/file_icon.h"
@@ -399,7 +398,7 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
   }
   const auto* entry = model.entry(id);
   if (entry != nullptr) {
-    const bool readOnly = luciole::entryAccess(*entry).write == false || m_readOnly == true;
+    const bool readOnly = entry->access.write == false || m_readOnly == true;
     const bool selected = m_columnActive && model.selection().selected.contains(id);
     // The keyboard cursor stays visible inside a multi-selection; a lone selected item shows only its fill.
     const auto& selection = model.selection();

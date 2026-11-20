@@ -1,9 +1,9 @@
 #include "thumbnails/metadata_probe.h"
 
-#include "fs/entry_access.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
 #include "imaging/image_limits.h"
+#include "thumbnails/network_preview.h"
 #include "thumbnails/provider_process.h"
 #include "thumbnails/thumbnail_store.h"
 
@@ -11,9 +11,9 @@
 #include <array>
 #include <cerrno>
 #include <fcntl.h>
-#include <filesystem>
 #include <format>
 #include <nlohmann/json.hpp>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -169,6 +169,13 @@ namespace {
 
 luciole::MetadataFields
 luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions options, GCancellable* cancel) {
+  if (!inNetworkWorker()) {
+    try {
+      return previewRequest("metadata", entry, cancellationToken(cancel), {{"options", options}}).get<MetadataFields>();
+    } catch (const FileErrorException&) {
+      return {};
+    }
+  }
   const auto location = entry.location();
   const auto path = location.nativePath();
   const std::string mime(entry.contentType.value_or(""));
@@ -193,7 +200,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   auto fields = commonFields(current.get());
   if (entry.type != FileType::Regular
       || entry.symlink
-      || entryAccess(entry).read == false
+      || entry.access.read == false
       || (!image && !media && !launcher && mime != "application/pdf")) {
     return fields;
   }
@@ -231,19 +238,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
     extra.insert(extra.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
     return extra;
   }
-  const GString temporary(g_dir_make_tmp("luciole-metadata-XXXXXX", nullptr));
-  if (!temporary) {
-    return fields;
-  }
-  struct Cleanup {
-    std::filesystem::path path;
-    ~Cleanup() {
-      std::error_code error;
-      std::filesystem::remove_all(path, error);
-    }
-  } cleanup{temporary.get()};
-  const auto output = cleanup.path / "result";
-  const Fd capture(::open(output.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
+  const Fd capture(::memfd_create("luciole-metadata", MFD_CLOEXEC));
   if (!capture.valid()) {
     return fields;
   }
@@ -297,7 +292,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   if (!success) {
     return fields;
   }
-  const auto bytes = readThumbnailFile(output, 65536);
+  const auto bytes = readThumbnailFile(capture.get(), 65536);
   if (!bytes) {
     return fields;
   }
@@ -305,4 +300,11 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   auto extra = image ? imageFields(data) : media ? parseMediaMetadata(data) : parsePdfMetadata(data);
   extra.insert(extra.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
   return extra;
+}
+
+luciole::NetworkMessage luciole::networkMetadataRequest(const NetworkMessage& request) {
+  const CancelToken token;
+  return probePreviewMetadata(
+      request.at("source").get<DirectoryEntry>(), request.at("options").get<ThumbnailOptions>(), gioCancellable(token)
+  );
 }
