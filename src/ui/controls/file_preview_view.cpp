@@ -6,6 +6,7 @@
 #include "ui/controls/button.h"
 #include "ui/controls/card_style.h"
 #include "ui/controls/file_metadata_view.h"
+#include "ui/controls/folder_totals_view.h"
 #include "ui/controls/label.h"
 #include "ui/dialogs/dialog_chrome.h"
 #include "ui/palette.h"
@@ -13,7 +14,6 @@
 
 #include <algorithm>
 #include <format>
-#include <iterator>
 
 namespace {
   // Type icon shown in place of a preview that is loading or cannot render.
@@ -21,33 +21,10 @@ namespace {
 
   // One compact contents line for a selected folder; Properties keeps the detailed inspection notes.
   std::string folderContentsLine(const luciole::FolderTotalsSnapshot& totals) {
-    const char* prefix = totals.phase == luciole::FolderTotalsPhase::Running
-        ? (totals.cancelRequested ? "Stopping…" : "Calculating…")
-        : totals.partial() ? "Partial result"
-                           : "";
-    std::string line = prefix;
-    if (!line.empty()) {
-      line += " · ";
-    }
-    if (totals.overflow) {
-      line += "size overflow";
-    } else if (totals.bytes == 0 && totals.partial()) {
-      line += "size unknown";
-    } else {
-      const luciole::GString size(g_format_size_full(totals.bytes, G_FORMAT_SIZE_IEC_UNITS));
-      line += totals.bytes < 1024 ? std::string(size.get()) : std::format("{} ({} bytes)", size.get(), totals.bytes);
-    }
-    std::format_to(
-        std::back_inserter(line), " . {} {} . {} {}", totals.files, totals.files == 1 ? "file" : "files",
-        totals.folders, totals.folders == 1 ? "folder" : "folders"
-    );
-    if (totals.links != 0) {
-      std::format_to(std::back_inserter(line), " . {} {}", totals.links, totals.links == 1 ? "link" : "links");
-    }
-    if (totals.other != 0) {
-      std::format_to(std::back_inserter(line), " . {} other", totals.other);
-    }
-    return line;
+    const char* phase = totals.phase == luciole::FolderTotalsPhase::Running ? "Calculating… · "
+        : totals.partial()                                                  ? "Partial result · "
+                                                                            : "";
+    return std::format("{}{} · {}", phase, folderTotalsSizeText(totals), folderTotalsCountsText(totals));
   }
 } // namespace
 

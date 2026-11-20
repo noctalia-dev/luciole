@@ -6,6 +6,10 @@
 class Button;
 class Label;
 
+// Size and counts text shared by the Properties card and the preview's Contents row.
+std::string folderTotalsSizeText(const luciole::FolderTotalsSnapshot& value);
+std::string folderTotalsCountsText(const luciole::FolderTotalsSnapshot& value);
+
 // Properties-only recursive inspection, using the shared controls and a worker service.
 class FolderTotalsView final : public Flex {
 public:
