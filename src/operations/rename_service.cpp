@@ -7,9 +7,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
-#include <linux/fs.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -148,10 +146,8 @@ bool luciole::RenameService::rename(std::string name) {
       return Reply{};
     }
     if (name != target->name
-        && ::syscall(
-               SYS_renameat2, target->parent.get(), target->name.c_str(), target->parent.get(), name.c_str(),
-               RENAME_NOREPLACE
-           ) != 0) {
+        && luciole::renameNoReplace(target->parent.get(), target->name.c_str(), target->parent.get(), name.c_str())
+            != 0) {
       throwErrno(errno);
     }
     std::shared_ptr<const RenameReceipt> receipt;

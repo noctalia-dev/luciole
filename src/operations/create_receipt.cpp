@@ -11,8 +11,6 @@
 #include <atomic>
 #include <cerrno>
 #include <fcntl.h>
-#include <linux/fs.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -96,7 +94,7 @@ namespace {
     (void)currentParent(destination, parent.get());
     requireRevision(proof.item.get(), proof.stamp);
     checkCancelled(token);
-    if (::syscall(SYS_renameat2, parent.get(), name.c_str(), stage.fd(), "item", RENAME_NOREPLACE) != 0) {
+    if (luciole::renameNoReplace(parent.get(), name.c_str(), stage.fd(), "item") != 0) {
       luciole::throwErrno(errno);
     }
     try {

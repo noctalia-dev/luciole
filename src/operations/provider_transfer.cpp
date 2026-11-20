@@ -2,6 +2,7 @@
 
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
+#include "fs/posix_fd.h"
 #include "operations/copy_receipt.h"
 #include "operations/provider_copy_receipt.h"
 #include "operations/provider_move_receipt.h"
@@ -10,9 +11,7 @@
 #include <algorithm>
 #include <fcntl.h>
 #include <format>
-#include <linux/fs.h>
 #include <set>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -439,11 +438,9 @@ struct luciole::ProviderTransfer::State {
       if (previous) {
         transfer::requireUnchanged(*previous, transfer::info(parent.get(), name));
       }
-      if (::syscall(
-              SYS_renameat2, stage.fd(), "item", parent.get(), name.c_str(),
-              previous ? RENAME_EXCHANGE : RENAME_NOREPLACE
-          )
-          != 0) {
+      const auto placed = previous ? renameExchange(stage.fd(), "item", parent.get(), name.c_str())
+                                   : renameNoReplace(stage.fd(), "item", parent.get(), name.c_str());
+      if (placed != 0) {
         transfer::fail("Could not publish downloaded item");
       }
       node.published = true;
