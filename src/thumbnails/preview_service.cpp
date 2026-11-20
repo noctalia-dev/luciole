@@ -310,8 +310,8 @@ void luciole::PreviewService::show(
   state.metadata.show(*entry, options);
   state.view.metadata = state.metadata.fields();
   // Folder contents are calculated once per selection: a new selection supersedes the running walk, while the same
-  // folder keeps its totals across preview size changes.
-  if (entry->type == luciole::FileType::Directory && !entry->symlink) {
+  // folder keeps its totals across preview size changes. The walk only counts native folders, so others get no row.
+  if (entry->type == luciole::FileType::Directory && !entry->symlink && entry->location().isNative()) {
     if (!unchanged) {
       const std::array<DirectoryEntry, 1> root = {*entry};
       (void)state.totals.start(root);

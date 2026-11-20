@@ -150,6 +150,11 @@ namespace {
     TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
     wait([&] { return !preview.busy(); });
     TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
+    // Folders the native walk cannot count, such as Trash, show no contents row.
+    auto trashed = folder(tree);
+    trashed.place = luciole::Location::trash();
+    preview.show(trashed, 512);
+    TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
     preview.clear();
     TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
   }
