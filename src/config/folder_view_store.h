@@ -21,10 +21,12 @@ namespace luciole {
   class FolderViewStore {
   public:
     static constexpr std::size_t limit = 4096;
+    // The file stays below this size, under the atomic writer's 256 KiB cap; older entries go first.
+    static constexpr std::size_t maxBytes = 240 * 1024;
     explicit FolderViewStore(std::filesystem::path path);
     static std::filesystem::path pathFromEnvironment();
     void load();
-    // Keeps the last `limit` entries.
+    // Keeps the last `limit` entries, or fewer when they don't fit in `maxBytes`.
     AtomicWriteState save(std::vector<FolderViewEntry> entries);
     const std::vector<FolderViewEntry>& entries() const { return m_entries; }
     const ConfigIssues& issues() const { return m_issues; }

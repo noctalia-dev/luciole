@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -112,6 +113,33 @@ namespace {
     TEST_CHECK(!store.issues().empty() && store.entries().empty());
   }
 
+  // Typical URIs make 4096 rows larger than the atomic writer accepts; the oldest go so the save still succeeds.
+  void testStoreFitsSizeLimit() {
+    Fixture fixture;
+    FolderViewStore store(fixture.state());
+    store.load();
+    std::vector<FolderViewEntry> entries;
+    entries.reserve(FolderViewStore::limit);
+    for (std::size_t i = 0; i < FolderViewStore::limit; ++i) {
+      entries.push_back(
+          {.uri = std::format("file:///home/user/Projects/some-longer-project-name/src/module-{:04}", i),
+           .view = {.sort = SortOptions{.field = SortField::Modified, .descending = true}, .mode = ViewMode::Grid}}
+      );
+    }
+    TEST_CHECK(store.save(entries) != luciole::AtomicWriteState::NotCommitted);
+    TEST_CHECK(store.issues().empty());
+    TEST_CHECK(fs::file_size(fixture.state()) <= FolderViewStore::maxBytes);
+    TEST_CHECK(!store.entries().empty() && store.entries().size() < entries.size());
+    TEST_CHECK(store.entries().back() == entries.back());
+    // A later change still saves.
+    auto more = store.entries();
+    more.push_back({.uri = "file:///home/user/Latest", .view = {.sort = std::nullopt, .mode = ViewMode::List}});
+    TEST_CHECK(store.save(more) != luciole::AtomicWriteState::NotCommitted);
+    FolderViewStore reloaded(fixture.state());
+    reloaded.load();
+    TEST_CHECK(reloaded.entries().back().uri == "file:///home/user/Latest");
+  }
+
   void testControllerFollowsFolderViews() {
     Fixture fixture;
     Pump pump;
@@ -141,9 +169,11 @@ namespace {
       TEST_CHECK(browser.back());
       TEST_CHECK(browser.model().sort() == created && browser.viewport().mode == ViewMode::Grid);
 
-      // A new default sort leaves the folder's own alone.
+      // A new default sort or view mode leaves the folder's own alone.
       browser.setDefaultSort({.field = SortField::Size});
       TEST_CHECK(browser.model().sort() == created);
+      browser.setDefaultViewMode(ViewMode::List);
+      TEST_CHECK(browser.viewport().mode == ViewMode::Grid);
 
       views.setEnabled(false);
       browser.reapplyFolderView();
@@ -173,6 +203,7 @@ int main() {
   try {
     testStoreRoundtrip();
     testStoreSkipsInvalidEntries();
+    testStoreFitsSizeLimit();
     testControllerFollowsFolderViews();
     std::println("folder view checks passed");
     return 0;

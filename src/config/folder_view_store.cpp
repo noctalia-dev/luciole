@@ -160,6 +160,13 @@ luciole::AtomicWriteState luciole::FolderViewStore::save(std::vector<FolderViewE
     entries.erase(entries.begin(), entries.end() - static_cast<std::ptrdiff_t>(limit));
   }
   auto text = format(entries);
+  // Long folder URIs can outgrow the file before the count does: drop the oldest until it fits.
+  while (text.size() > maxBytes && !entries.empty()) {
+    const auto perEntry = std::max<std::size_t>(1, text.size() / entries.size());
+    const auto excess = std::min(entries.size(), (text.size() - maxBytes) / perEntry + 1);
+    entries.erase(entries.begin(), entries.begin() + static_cast<std::ptrdiff_t>(excess));
+    text = format(entries);
+  }
   const auto result = updateTextFileAtomic(
       m_path, [&](const std::optional<std::string>& current) -> std::expected<std::optional<std::string>, std::string> {
         if (current == text) {

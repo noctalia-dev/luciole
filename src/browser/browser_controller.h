@@ -36,6 +36,7 @@ namespace luciole {
     bool openText(const std::string& text);
     void setCaptureViewport(std::function<BrowseViewport()> callback);
     void setViewDefaults(ViewMode mode, int iconSize);
+    // The view mode of folders without their own; the current folder keeps its own mode if it has one.
     void setDefaultViewMode(ViewMode mode) {
       m_defaults.mode = mode;
       m_viewport.mode = mode;
@@ -45,6 +46,7 @@ namespace luciole {
       if (m_restoredViewport) {
         m_restoredViewport->mode = mode;
       }
+      applyFolderView(true);
     }
     ViewMode defaultViewMode() const { return m_defaults.mode; }
     // The sort of folders without their own; setting it re-sorts the current folder unless that has its own.
