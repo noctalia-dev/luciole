@@ -23,7 +23,7 @@ public:
   // Empties Trash, or permanently deletes `selection`, after the user confirms. The dialog opens
   // with its confirm button focused, so Enter confirms it once preparation enables the control.
   void openEmptyTrash(std::optional<std::vector<luciole::DirectoryEntry>> selection = std::nullopt);
-  // With no focused control, Enter cancels, so Enter alone can never confirm a permanent deletion.
+  // With no focused control, Enter cancels the confirmation.
   bool key(const KeyboardEvent& event);
   // Owned job changes: sync the confirmation dialog, or report a finished job.
   void trashChanged(OperationJob& job);
