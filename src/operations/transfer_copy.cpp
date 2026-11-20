@@ -377,10 +377,11 @@ namespace luciole::transfer {
         throwFileError(FileErrorKind::Changed, "The source folder changed.");
       }
     }
+    const auto before = statFd(pinned.get());
     if (::unlinkat(parent, tree.name.c_str(), folder ? AT_REMOVEDIR : 0) != 0) {
       fail("Could not remove copied source");
     }
-    work.noteUnlinked(statFd(pinned.get()));
+    work.noteUnlinked(statUnlinked(parent, pinned.get(), before));
   }
 
   void removeTemporary(int parent, const std::string& name, CopyWork& work) {
@@ -396,9 +397,10 @@ namespace luciole::transfer {
         removeTemporary(fd.get(), child, work);
       }
     }
+    const auto before = statFd(pinned.get());
     if (::unlinkat(parent, name.c_str(), folder ? AT_REMOVEDIR : 0) != 0) {
       fail("Could not clean temporary item");
     }
-    work.noteUnlinked(statFd(pinned.get()));
+    work.noteUnlinked(statUnlinked(parent, pinned.get(), before));
   }
 } // namespace luciole::transfer

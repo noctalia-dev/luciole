@@ -7,7 +7,9 @@
 #include <fcntl.h>
 #include <glib.h>
 #include <linux/fs.h>
+#include <linux/magic.h>
 #include <string>
+#include <sys/statfs.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
@@ -96,6 +98,25 @@ bool luciole::sameFileRevision(const struct stat& a, const struct stat& b) {
       && a.st_mtim.tv_nsec == b.st_mtim.tv_nsec
       && a.st_ctim.tv_sec == b.st_ctim.tv_sec
       && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
+}
+
+struct stat luciole::statUnlinked(int parent, int pinned, const struct stat& before) {
+  struct statfs filesystem{};
+  const bool nfs = ::fstatfs(parent, &filesystem) == 0 && filesystem.f_type == NFS_SUPER_MAGIC;
+  struct stat after{};
+  if (::fstat(pinned, &after) != 0) {
+    // The NFS server already dropped a removed folder.
+    if (!nfs || errno != ESTALE || !S_ISDIR(before.st_mode)) {
+      throwErrno(errno);
+    }
+    after = before;
+    after.st_nlink = 0;
+    return after;
+  }
+  if (nfs && after.st_nlink == before.st_nlink && after.st_nlink > 0) {
+    after.st_nlink = S_ISDIR(after.st_mode) ? 0 : after.st_nlink - 1;
+  }
+  return after;
 }
 
 int luciole::renameNoReplace(int fromDir, const char* from, int toDir, const char* to) {

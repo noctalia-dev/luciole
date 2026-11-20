@@ -34,6 +34,10 @@ namespace luciole {
   bool sameIdentity(const struct stat& a, const struct stat& b);
   // Rename history ignores access time; metadata/content changes invalidate a captured revision.
   bool sameFileRevision(const struct stat& a, const struct stat& b);
+  // fstat of an item pinned before it was unlinked from `parent`. NFS turns unlinking an open file into a rename to
+  // `.nfsXXXX`, so the pinned inode keeps its link count, and a removed folder's handle goes stale; report what a
+  // local filesystem would instead.
+  struct stat statUnlinked(int parent, int pinned, const struct stat& before);
 
   // renameat2 with RENAME_NOREPLACE. Where the filesystem rejects the flag (NFS, many FUSE filesystems), checks
   // that `to` is vacant and renames, which is not atomic. Returns 0, or -1 with errno set.
