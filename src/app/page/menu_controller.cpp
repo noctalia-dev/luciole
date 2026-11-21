@@ -378,10 +378,10 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
     return row > 0 && row < count && !std::ranges::contains(separators, row);
   };
   std::vector<ContextMenuControlEntry> entries{
-      {.id = 2, .label = "Move up", .enabled = m_pins.editable() && free(before - 1)},
-      {.id = 3, .label = "Move down", .enabled = m_pins.editable() && free(before + 1)},
+      {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && free(before - 1)},
+      {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && free(before + 1)},
       {.label = "", .separator = true},
-      {.id = 1, .label = "Remove separator", .enabled = m_pins.editable()},
+      {.id = 1, .label = "Remove Separator", .enabled = m_pins.editable()},
   };
   showContextMenu(
       std::move(entries),
@@ -441,7 +441,7 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     const auto below = static_cast<std::size_t>(row - pins.begin()) + 1;
     entries.push_back(
         {.id = 10,
-         .label = "Add separator below",
+         .label = "Add Separator Below",
          .enabled = m_pins.editable()
              && row != pins.end()
              && below < pins.size()
