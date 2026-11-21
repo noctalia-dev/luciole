@@ -620,7 +620,7 @@ namespace {
   void caseOnlyRename(const fs::path& root) {
     const int dir = ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     int flags = 0;
-    TEST_CHECK(dir >= 0 && ::ioctl(dir, FS_IOC_GETFLAGS, &flags) == 0);
+    TEST_CHECK(dir >= 0 && ::ioctl(dir, static_cast<int>(FS_IOC_GETFLAGS), &flags) == 0);
     flags |= FS_CASEFOLD_FL;
     TEST_CHECK(::ioctl(dir, FS_IOC_SETFLAGS, &flags) == 0 && ::close(dir) == 0);
     write(root / "a.txt", "A");
