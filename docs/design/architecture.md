@@ -45,6 +45,14 @@ Credentials stay in the live operation/dialog and go to GIO, with session-only s
 
 For an unsupported remote directory-open error, DirectorySession checks GIO's advertised URI schemes on a worker. An absent scheme receives backend/session setup guidance containing only the scheme, without echoing address credentials. An advertised protocol retains its provider's error, and native/Trash errors retain their existing handling. Request identity rejects diagnostic replies after navigation, cancellation or destruction. Only NotMounted starts mounting; an unsupported protocol never triggers an authentication retry.
 
+## System automounts
+
+[SystemMountMonitor](../../src/fs/system_mount_monitor.h) reads network entries from fstab, loaded systemd NFS mount/automount pairs, and the kernel mount table. It watches GIO and systemd for changes without opening mount paths. If a systemd query times out after two seconds, the monitor keeps its last snapshot. It remembers an unloaded pair while its unit files exist.
+
+[DriveMonitor](../../src/fs/drive_monitor.h) keys sidebar entries by target URI and honors `x-gvfs-show`, `x-gvfs-hide`, and `x-gvfs-name`. An idle automount keeps its row. Disk-usage polling and directory watches would keep the share active, so the user refreshes it explicitly. Ordinary user-mountable fstab entries still use `mount`.
+
+Opening a configured automount verifies the mounted filesystem before browsing. An unavailable share reports an error.
+
 ## Windows, tabs and pages
 
 [WorkspaceApplication](../../src/app/workspace_application.h) owns native windows, the workspace, application-wide preferences and caches, and the [OperationHub](../../src/app/operation_hub.h). [TabWorkspace](../../src/browser/tab_workspace.h) represents logical tabs and optional splits. A native host supplies the visible toolbar/sidebar and mounts the active page roots. `TabWorkspace::addTab()` accepts explicit activation intent; background insertion retains the selected tab and its full split layout/focused page, while the first tab of an empty window is necessarily active. Folder-opening workspace commands follow the shared `switch_to_new_tab` preference; explicit New Tab and one-off background commands carry separate intent. Hidden pages initialize their directory controllers normally without mounting their scene or taking focus. Background loading and errors do not select a tab. Middle-clicking a folder in an inactive split pane leaves the original pane focused when opening in the background.

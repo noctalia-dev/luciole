@@ -24,6 +24,14 @@ struct luciole::LocationMount::State : std::enable_shared_from_this<State> {
       }
     });
   }
+  void complete(std::expected<Location, FileError> outcome) {
+    cancellable.reset();
+    interaction->setChangedCallback({});
+    interaction = std::make_unique<MountInteraction>();
+    if (const auto callback = std::exchange(done, {})) {
+      callback(std::move(outcome));
+    }
+  }
   struct Request {
     std::weak_ptr<State> state;
     GioPtr<GCancellable> token;
@@ -85,12 +93,7 @@ struct luciole::LocationMount::State : std::enable_shared_from_this<State> {
     } else if (request->location) {
       outcome = *request->location;
     }
-    current->cancellable.reset();
-    current->interaction->setChangedCallback({});
-    current->interaction = std::make_unique<MountInteraction>();
-    if (const auto callback = std::exchange(current->done, {})) {
-      callback(std::move(outcome));
-    }
+    current->complete(std::move(outcome));
   }
 };
 luciole::LocationMount::LocationMount() : m_state(std::make_shared<State>()) {}
@@ -167,4 +170,79 @@ void luciole::LocationMount::startVolume(
     );
   }
   g_volume_mount(volume, G_MOUNT_MOUNT_NONE, request->operation.get(), request->token.get(), State::finish, request);
+}
+
+void luciole::LocationMount::startFstabMount(
+    const Location& target, std::function<void(std::expected<Location, FileError>)> done
+) {
+  cancel();
+  const auto path = target.nativePath();
+  if (!path) {
+    done(std::unexpected(FileError{FileErrorKind::Unsupported, "A configured mount needs a local path."}));
+    return;
+  }
+  GError* error = nullptr;
+  const GioPtr<GSubprocess> process(
+      g_subprocess_new(G_SUBPROCESS_FLAGS_STDERR_PIPE, &error, "mount", "--", path->c_str(), nullptr)
+  );
+  const GErrorPtr held(error);
+  if (!process) {
+    done(std::unexpected(fileError(*held)));
+    return;
+  }
+
+  m_state->begin(std::move(done), MountPurpose::Network);
+  auto* token = m_state->cancellable.get();
+  g_signal_connect_object(
+      token, "cancelled", G_CALLBACK(+[](GCancellable*, GSubprocess* child) { g_subprocess_force_exit(child); }),
+      process.get(), G_CONNECT_DEFAULT
+  );
+  struct Request {
+    std::weak_ptr<State> state;
+    GioPtr<GCancellable> token;
+    Location target;
+    guint timeout = 0;
+  };
+  auto* request = new Request{m_state, GioPtr<GCancellable>(G_CANCELLABLE(g_object_ref(token))), target};
+  request->timeout = g_timeout_add_seconds(
+      10,
+      [](gpointer data) -> gboolean {
+        auto* request = static_cast<Request*>(data);
+        request->timeout = 0;
+        g_cancellable_cancel(request->token.get());
+        return G_SOURCE_REMOVE;
+      },
+      request
+  );
+  g_subprocess_communicate_utf8_async(
+      process.get(), nullptr, token,
+      [](GObject* source, GAsyncResult* result, gpointer data) {
+        const std::unique_ptr<Request> request(static_cast<Request*>(data));
+        if (request->timeout) {
+          g_source_remove(request->timeout);
+        }
+        GError* error = nullptr;
+        char* stderrText = nullptr;
+        const bool completed =
+            g_subprocess_communicate_utf8_finish(G_SUBPROCESS(source), result, nullptr, &stderrText, &error);
+        const GErrorPtr held(error);
+        const GString message(stderrText);
+        const auto current = request->state.lock();
+        if (!current || current->cancellable.get() != request->token.get()) {
+          return;
+        }
+        if (completed && g_subprocess_get_successful(G_SUBPROCESS(source))) {
+          current->complete(request->target);
+        } else if (request->timeout == 0) {
+          current->complete(std::unexpected(FileError{FileErrorKind::Unavailable, "Mount request timed out."}));
+        } else if (message && *message) {
+          current->complete(std::unexpected(FileError{FileErrorKind::Other, message.get()}));
+        } else {
+          const auto failure =
+              held ? fileError(*held) : FileError{FileErrorKind::Other, "Could not mount the location."};
+          current->complete(std::unexpected(failure));
+        }
+      },
+      request
+  );
 }
