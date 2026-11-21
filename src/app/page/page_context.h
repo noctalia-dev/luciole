@@ -150,6 +150,10 @@ public:
   virtual float rowIconSize() const = 0;
   // Keeps the first visible item in view across the next layout change.
   virtual void captureViewAnchor() = 0;
+  // Shows `mode` without saving it anywhere.
+  virtual void showViewMode(luciole::ViewMode mode) = 0;
+  // The visible order changed: show the beginning of the new order.
+  virtual void sortChanged() = 0;
   // Cancels file pointer gestures, drops the view anchor and scrolls the file list to the top.
   virtual void resetFileView() = 0;
 

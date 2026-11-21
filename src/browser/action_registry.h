@@ -46,6 +46,7 @@ namespace luciole {
     Descending,
     FoldersFirst,
     HiddenLast,
+    ResetFolderView,
     Open,
     ContainingFolder,
     OriginalLocation,
@@ -128,6 +129,8 @@ namespace luciole {
     bool canUndo = false, canRedo = false;
     bool chooser = false;
     bool singleSelection = false;
+    // Per-folder views are on, and the current folder has its own sort or view mode.
+    bool folderViews = false, folderViewCustomized = false;
   };
   // Actions a file chooser window offers: browsing, selection and New Folder. Everything else would act on files or
   // leave the chooser.

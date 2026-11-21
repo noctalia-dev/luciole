@@ -11,6 +11,7 @@
 #include "app/page/dialog_dropdown.h"
 #include "app/page/drag_drop_controller.h"
 #include "app/page/file_keyboard_controller.h"
+#include "app/page/folder_view_controller.h"
 #include "app/page/location_bar_controller.h"
 #include "app/page/menu_controller.h"
 #include "app/page/mount_controller.h"
@@ -32,6 +33,7 @@
 #include "app/workspace_layout.h"
 #include "browser/action_registry.h"
 #include "browser/browser_controller.h"
+#include "browser/folder_views.h"
 #include "browser/path_completion.h"
 #include "browser/selection_tools.h"
 #include "browser/tab_workspace.h"
@@ -87,8 +89,8 @@ public:
       const luciole::BrowserSettings& settings, luciole::WaylandTextClipboard& clipboard,
       luciole::WindowSurface& surface, InputDispatcher& dispatcher, AnimationManager& animations,
       luciole::PinService& pins, luciole::DriveMonitor& drives, luciole::FileIconCache& icons,
-      luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences, OperationHub& hub,
-      luciole::TabId id
+      luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
+      luciole::FolderViewService& folderViews, OperationHub& hub, luciole::TabId id
   );
 
   luciole::BrowserController& browser() override;
@@ -135,6 +137,8 @@ public:
   std::string title() const;
   std::optional<luciole::FileTooltipTarget> fileTooltipAt(float x, float y) const;
   void preferencesChanged(const std::string& error);
+  // Per-folder views were loaded, switched on or off, or changed in any page: apply the current folder's again.
+  void folderViewsChanged() { m_folderView.apply(); }
   void placesChanged();
   void driveUsageChanged();
   void clipboardChanged();
@@ -288,9 +292,12 @@ private:
   void cancelDrag() override;
 
   void setViewMode(luciole::ViewMode mode);
+  void showViewMode(luciole::ViewMode mode) override;
   void applyViewMode();
   float gridHeight() const;
+  // Sets the default sort of every controller; folders with their own keep it.
   void applySort(luciole::SortOptions options);
+  void sortChanged() override;
   void changeSort(luciole::SortOptions options);
   void changeGridZoom(int requested);
   // List and Columns rows; 0 keeps the view's default size.
@@ -391,6 +398,7 @@ private:
   std::optional<std::pair<int, int>> m_dialogPosition;
   bool m_dialogResizePending = false;
   luciole::PinService& m_pins;
+  luciole::FolderViewService& m_folderViews;
   luciole::DriveMonitor& m_drives;
   luciole::FileLauncher m_launcher;
   std::vector<luciole::Location> m_revealTargets;
@@ -403,6 +411,7 @@ private:
   PageJobs m_jobs;
   DialogDropdown m_dialogDropdown{*this, m_connection, m_renderer};
   TrashController m_trashController{*this};
+  FolderViewController m_folderView{*this, m_folderViews, m_browser, m_miller};
   RenameController m_renameController{*this, m_pins};
   PropertiesController m_propertiesController{*this, m_icons};
   BatchRenameController m_batchRename{*this};

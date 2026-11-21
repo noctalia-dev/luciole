@@ -10,6 +10,7 @@
 namespace luciole {
   class DirectoryTree;
   class DriveMonitor;
+  class FolderViewService;
   struct TreeRowInfo;
   struct BrowseViewport {
     ViewMode mode = ViewMode::Grid;
@@ -35,6 +36,7 @@ namespace luciole {
     bool openText(const std::string& text);
     void setCaptureViewport(std::function<BrowseViewport()> callback);
     void setViewDefaults(ViewMode mode, int iconSize);
+    // The view mode of folders without their own; the current folder keeps its own mode if it has one.
     void setDefaultViewMode(ViewMode mode) {
       m_defaults.mode = mode;
       m_viewport.mode = mode;
@@ -44,7 +46,21 @@ namespace luciole {
       if (m_restoredViewport) {
         m_restoredViewport->mode = mode;
       }
+      applyFolderView(true);
     }
+    ViewMode defaultViewMode() const { return m_defaults.mode; }
+    // The sort of folders without their own; setting it re-sorts the current folder unless that has its own.
+    void setDefaultSort(SortOptions sort);
+    const SortOptions& defaultSort() const { return m_defaultSort; }
+    // Per-folder settings looked up on every visit; nullptr or a disabled service means the defaults everywhere.
+    // The service must outlive this controller.
+    void setFolderViews(const FolderViewService* views) { m_folderViews = views; }
+    const FolderViewService* folderViews() const { return m_folderViews; }
+    // The current folder's own settings: nullopt while per-folder views are off.
+    std::optional<FolderView> folderView() const;
+    // Applies the current folder's sort and, outside column view, its view mode to the visit after the service or
+    // the defaults changed.
+    void reapplyFolderView();
     void setDefaultIconSize(int size) {
       m_defaults.iconSize = size;
       m_restoring = false;
@@ -150,9 +166,12 @@ namespace luciole {
     };
     void saveVisit();
     void loadVisit();
+    void applyFolderView(bool viewMode);
     std::optional<Reference> reference(std::optional<EntryId> id) const;
     std::vector<Visit> m_history;
     BrowseViewport m_defaults;
+    SortOptions m_defaultSort;
+    const FolderViewService* m_folderViews = nullptr;
     BrowseViewport m_viewport;
     std::optional<BrowseViewport> m_restoredViewport;
     std::function<BrowseViewport()> m_captureViewport;
