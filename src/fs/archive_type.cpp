@@ -127,7 +127,7 @@ std::string luciole::archiveFolderName(const Location& location) {
         std::string_view(".tar.gz"), std::string_view(".tar.xz"), std::string_view(".txz"), std::string_view(".tbz2"),
         std::string_view(".tzst"), std::string_view(".tbz"), std::string_view(".tgz"), std::string_view(".zip"),
         std::string_view(".tar"), std::string_view(".7z"), std::string_view(".rar")}) {
-    if (text.ends_with(suffix)) {
+    if (text.ends_with(suffix) && name.size() >= suffix.size()) {
       name.resize(name.size() - suffix.size());
       break;
     }
