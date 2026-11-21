@@ -8,8 +8,6 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <glib.h>
-#include <linux/fs.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -80,8 +78,7 @@ void luciole::CreationStage::requireItem() const {
 
 void luciole::CreationStage::publish(const std::string& name, int parent) {
   requireItem();
-  if (::syscall(SYS_renameat2, fd(), "item", parent >= 0 ? parent : m_parent.get(), name.c_str(), RENAME_NOREPLACE)
-      != 0) {
+  if (renameNoReplace(fd(), "item", parent >= 0 ? parent : m_parent.get(), name.c_str()) != 0) {
     throwErrno(errno);
   }
 }
@@ -91,6 +88,7 @@ void luciole::CreationStage::removeItem() {
   if (::unlinkat(fd(), "item", S_ISDIR(statFd(item()).st_mode) ? AT_REMOVEDIR : 0) != 0) {
     throwErrno(errno);
   }
+  m_item = Fd(); // On NFS an open pin keeps the removed item as `.nfsXXXX`, which would block clear().
 }
 
 void luciole::CreationStage::exchange(const std::string& name, int parent, int visibleItem) {
@@ -100,7 +98,7 @@ void luciole::CreationStage::exchange(const std::string& name, int parent, int v
       || !sameIdentity(current, statFd(visibleItem))) {
     throwFileError(FileErrorKind::Changed, "The item to exchange changed.");
   }
-  if (::syscall(SYS_renameat2, fd(), "item", parent, name.c_str(), RENAME_EXCHANGE) != 0) {
+  if (renameExchange(fd(), "item", parent, name.c_str()) != 0) {
     throwErrno(errno);
   }
 }
@@ -115,6 +113,9 @@ bool luciole::CreationStage::clear() {
       } else if (errno != ENOENT) {
         return false;
       }
+    }
+    if (struct stat current{}; ::fstatat(fd(), "item", &current, AT_SYMLINK_NOFOLLOW) != 0 && errno == ENOENT) {
+      m_item = Fd(); // The item left through another path; drop its pin so NFS can release it.
     }
     return ::unlinkat(m_parent.get(), m_name.c_str(), AT_REMOVEDIR) == 0;
   } catch (const FileErrorException&) {

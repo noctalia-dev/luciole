@@ -7,8 +7,6 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
-#include <linux/fs.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -87,7 +85,7 @@ std::shared_ptr<const luciole::RenameReceipt> luciole::RenameReceipt::reverse(co
   if (token.cancelled()) {
     throwFileError(FileErrorKind::Cancelled, "Rename reversal cancelled.");
   }
-  if (::syscall(SYS_renameat2, parent.get(), after.c_str(), parent.get(), before.c_str(), RENAME_NOREPLACE) != 0) {
+  if (luciole::renameNoReplace(parent.get(), after.c_str(), parent.get(), before.c_str()) != 0) {
     throwErrno(errno);
   }
   try {
