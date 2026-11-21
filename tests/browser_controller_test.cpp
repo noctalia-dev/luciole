@@ -1,6 +1,8 @@
 #include "browser/browser_controller.h"
+#include "browser/entry_details.h"
 #include "browser/location_presentation.h"
 #include "event_loop/glib_poll_source.h"
+#include "fs/folder_totals.h"
 #include "fs/gio_interop.h"
 #include "test_check.h"
 
@@ -977,6 +979,64 @@ namespace {
     );
   }
 
+  void testFolderSizes() {
+    Fixture fixture;
+    fs::create_directory(fixture.path / "empty");
+    fs::create_directory(fixture.path / "sized");
+    std::ofstream(fixture.path / "sized" / "one") << "abc";
+    std::ofstream(fixture.path / "sized" / "two") << "abcde";
+    Pump pump;
+    BrowserController browser({}, false);
+    browser.open(Location::fromPath(fixture.path.native()));
+    pump.ready(browser);
+    const auto emptyId = id(browser, "empty");
+    const auto sizedId = id(browser, "sized");
+    const auto fileId = id(browser, "file");
+    const auto linkId = id(browser, "folder-link");
+    const auto childId = id(browser, "child");
+    int changes = 0;
+    browser.setChangedCallback([&] { ++changes; });
+    // Two walks at once; the third waits for a slot.
+    browser.requestFolderSize(emptyId);
+    browser.requestFolderSize(sizedId);
+    browser.requestFolderSize(childId);
+    pump.until([&] {
+      return browser.folderSize(emptyId) != nullptr
+          && browser.folderSize(sizedId) != nullptr
+          && browser.folderSize(childId) != nullptr;
+    });
+    pump.drainFor(150ms);
+    TEST_CHECK(
+        browser.folderSize(emptyId)->bytes == 0
+        && browser.folderSize(sizedId)->bytes == 8
+        && browser.folderSize(sizedId)->files == 2
+        && browser.folderSize(childId)->bytes == 13
+    );
+    TEST_CHECK(changes > 0);
+    TEST_CHECK(luciole::entryFolderSizeText(*browser.folderSize(emptyId)) == "0 bytes");
+    // Ineligible: a file and a folder symlink.
+    browser.requestFolderSize(fileId);
+    browser.requestFolderSize(linkId);
+    pump.drainFor(150ms);
+    TEST_CHECK(!browser.folderSize(fileId) && !browser.folderSize(linkId));
+    // Cached ids never re-walk.
+    browser.requestFolderSize(childId);
+    pump.drainFor(150ms);
+    TEST_CHECK(browser.folderSize(sizedId) != nullptr);
+    // Changed facts drop the cache; the next bind walks again.
+    std::ofstream(fixture.path / "sized" / "three") << "xy";
+    browser.refresh();
+    pump.ready(browser);
+    TEST_CHECK(!browser.folderSize(sizedId));
+    browser.requestFolderSize(sizedId);
+    pump.until([&] { return browser.folderSize(sizedId) != nullptr; });
+    TEST_CHECK(browser.folderSize(sizedId)->bytes == 10);
+    // Navigation retires ids and drops their sizes.
+    browser.open(Location::fromPath((fixture.path / "child").native()));
+    pump.ready(browser);
+    TEST_CHECK(!browser.folderSize(sizedId));
+  }
+
 } // namespace
 
 int main() {
@@ -990,6 +1050,7 @@ int main() {
     testRecursiveSearch();
     testBackupPolicyAndSearch();
     testSearchLifetimeAndPartialFailure();
+    testFolderSizes();
     testLocationPresentation();
     testHistoryState();
     testDemandMetadataAndBulkFallback();

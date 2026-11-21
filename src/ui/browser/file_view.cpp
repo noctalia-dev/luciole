@@ -101,7 +101,8 @@ namespace {
     void bind(
         const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool ring, bool hovered,
         luciole::DetailsColumns columns, luciole::DetailsColumnOrder order, bool cut, bool path, float iconSize,
-        luciole::BrowsePresentation presentation, bool readOnly, const luciole::TreeRowInfo& tree
+        luciole::BrowsePresentation presentation, bool readOnly, const luciole::TreeRowInfo& tree,
+        std::string_view folderSize
     ) {
       m_tree = tree;
       m_treePrefix->setVisible(tree.enabled);
@@ -134,7 +135,12 @@ namespace {
       m_parent->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
       for (const auto column : luciole::kDefaultDetailsColumnOrder) {
         auto* label = m_details[static_cast<std::size_t>(column)];
-        label->setText(columns.visible(column) ? luciole::entryColumnText(entry, column, typeLabel) : "");
+        const bool folderSizeCell = directory && !entry.symlink && column == luciole::DetailsColumn::Size;
+        label->setText(
+            columns.visible(column)
+                ? (folderSizeCell ? std::string(folderSize) : luciole::entryColumnText(entry, column, typeLabel))
+                : ""
+        );
         label->setOpacity(entry.hidden && !selected ? kHiddenTextOpacity : 1.0F);
         label->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
       }
@@ -410,12 +416,20 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
           m_presentation, readOnly
       );
     } else {
+      std::string folderSize;
+      const bool sizeColumnVisible = m_columns.visible(luciole::DetailsColumn::Size);
+      if (entry->type == luciole::FileType::Directory && !entry->symlink && m_folderSizes && sizeColumnVisible) {
+        m_browser.requestFolderSize(id);
+        if (const auto* totals = m_browser.folderSize(id)) {
+          folderSize = entryFolderSizeText(*totals);
+        }
+      }
       static_cast<FileRow&>(tile).bind(
           *entry, model.typeLabel(id), selected, ring, hovered, m_columns, m_columnOrder,
           m_cut && m_cut(entry->location()), m_pathEntry == id && !m_columnActive,
           m_mode == ViewMode::Miller ? millerRowIconSize(m_presentation, m_rowIconSize)
                                      : fileRowIconSize(m_rowIconSize),
-          m_presentation, readOnly, m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}
+          m_presentation, readOnly, m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}, folderSize
       );
     }
   }

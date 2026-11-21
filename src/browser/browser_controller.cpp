@@ -12,7 +12,13 @@
 
 namespace {
   std::uint64_t nextContext = 0;
-}
+
+  // Same containment check as DirectoryTree::releaseLocation.
+  bool locationWithin(const std::string& uri, const luciole::Location& root) {
+    const std::string& rootUri = root.uri();
+    return uri == rootUri || uri.starts_with(rootUri + (rootUri.ends_with('/') ? "" : "/"));
+  }
+} // namespace
 
 struct luciole::BrowserController::ActivationState {
   CancelToken token;
@@ -71,6 +77,9 @@ luciole::BrowserController::BrowserController(SortOptions sort, bool showHidden,
       m_session.requestMetadata(index, id, details);
     }
   });
+  for (std::size_t index = 0; index < m_folderSizeSlots.size(); ++index) {
+    m_folderSizeSlots[index].service.setChangedCallback([this, index] { folderSizeSlotChanged(index); });
+  }
   updateMetadataPolicy();
 }
 
@@ -622,6 +631,7 @@ void luciole::BrowserController::publish(DirectorySnapshot snapshot) {
     ready.push_back(std::move(request));
     return true;
   });
+  syncFolderSizes();
   notify();
   for (auto& request : ready) {
     if (lifetime.expired()) {
@@ -634,8 +644,108 @@ void luciole::BrowserController::publish(DirectorySnapshot snapshot) {
 }
 
 void luciole::BrowserController::releaseLocation(const Location& root) {
+  // Before the tree drops expanded rows under root, so their walks are still found and cancelled.
+  releaseFolderSizesUnder(root);
   if (m_tree) {
     m_tree->releaseLocation(root);
+  }
+}
+
+bool luciole::BrowserController::folderSizeEligible(const DirectoryEntry& entry) const {
+  if (entry.type != FileType::Directory || entry.symlink) {
+    return false;
+  }
+  const auto location = entry.location();
+  return location.isNative() && !location.isTrash();
+}
+
+void luciole::BrowserController::requestFolderSize(EntryId id) {
+  const bool claimed = m_folderSizeCache.contains(id)
+      || std::ranges::contains(m_folderSizeQueue, id)
+      || std::ranges::any_of(m_folderSizeSlots, [id](const FolderSizeSlot& slot) {
+                         return slot.running && slot.id == id;
+                       });
+  if (claimed) {
+    return;
+  }
+  m_folderSizeQueue.push_back(id);
+  pumpFolderSizes();
+}
+
+const luciole::FolderTotalsSnapshot* luciole::BrowserController::folderSize(EntryId id) const {
+  const auto found = m_folderSizeCache.find(id);
+  return found == m_folderSizeCache.end() ? nullptr : &found->second.totals;
+}
+
+void luciole::BrowserController::syncFolderSizes() {
+  for (auto iterator = m_folderSizeCache.begin(); iterator != m_folderSizeCache.end();) {
+    const auto* entry = m_model.entry(iterator->first);
+    const auto& cached = iterator->second;
+    if (!entry || (cached.etag && (!entry->etag() || *entry->etag() != *cached.etag))) {
+      iterator = m_folderSizeCache.erase(iterator);
+    } else {
+      ++iterator;
+    }
+  }
+  for (auto& slot : m_folderSizeSlots) {
+    if (slot.running && slot.id != 0 && m_model.entry(slot.id) == nullptr) {
+      slot.id = 0;
+      slot.service.cancel();
+    }
+  }
+}
+
+void luciole::BrowserController::pumpFolderSizes() {
+  for (auto& slot : m_folderSizeSlots) {
+    while (!slot.running && !m_folderSizeQueue.empty()) {
+      const auto id = m_folderSizeQueue.back();
+      m_folderSizeQueue.pop_back();
+      const auto* entry = m_model.entry(id);
+      if (!entry || !folderSizeEligible(*entry)) {
+        continue;
+      }
+      const std::array<DirectoryEntry, 1> root{*entry};
+      slot.id = id;
+      slot.running = true;
+      (void)slot.service.start(root);
+    }
+  }
+}
+
+void luciole::BrowserController::folderSizeSlotChanged(std::size_t index) {
+  auto& slot = m_folderSizeSlots[index];
+  if (!slot.running) {
+    return;
+  }
+  const auto& totals = slot.service.snapshot();
+  if (totals.phase == FolderTotalsPhase::Running) {
+    return;
+  }
+  slot.running = false;
+  if (totals.phase == FolderTotalsPhase::Complete && slot.id != 0) {
+    if (const auto* entry = m_model.entry(slot.id)) {
+      m_folderSizeCache.insert_or_assign(slot.id, FolderSizeCache{totals, entry->etag()});
+    }
+  }
+  slot.id = 0;
+  pumpFolderSizes();
+  notify();
+}
+
+void luciole::BrowserController::releaseFolderSizesUnder(const Location& root) {
+  std::erase_if(m_folderSizeCache, [this, &root](const auto& item) {
+    const auto* entry = m_model.entry(item.first);
+    return entry && locationWithin(entry->location().uri(), root);
+  });
+  for (auto& slot : m_folderSizeSlots) {
+    if (!slot.running || slot.id == 0) {
+      continue;
+    }
+    const auto* entry = m_model.entry(slot.id);
+    if (entry && locationWithin(entry->location().uri(), root)) {
+      slot.id = 0;
+      slot.service.cancel();
+    }
   }
 }
 

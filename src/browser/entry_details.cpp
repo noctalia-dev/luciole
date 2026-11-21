@@ -68,6 +68,20 @@ std::string luciole::entryColumnText(const DirectoryEntry& entry, DetailsColumn 
   return "Unknown";
 }
 
+std::string luciole::entryFolderSizeText(const FolderTotalsSnapshot& totals) {
+  if (totals.phase != FolderTotalsPhase::Complete) {
+    return {};
+  }
+  const GString size(g_format_size_full(totals.bytes, G_FORMAT_SIZE_IEC_UNITS));
+  if (!size) {
+    return {};
+  }
+  if (totals.partial()) {
+    return std::format("≥ {}", size.get());
+  }
+  return size.get();
+}
+
 std::optional<std::uint64_t> luciole::entrySortNumber(const DirectoryEntry& entry, SortField field) {
   switch (field) {
   case SortField::Size:

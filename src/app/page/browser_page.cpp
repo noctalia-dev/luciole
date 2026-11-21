@@ -183,6 +183,7 @@ BrowserPage::BrowserPage(
         [this] { m_dragDrop.cancelFileDrag(); }
     );
   }
+  m_listAdapter.setFolderSizeEnabled(true);
   m_hub.attach(m_workspaceId, *this);
 }
 

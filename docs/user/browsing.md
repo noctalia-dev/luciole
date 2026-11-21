@@ -81,10 +81,12 @@ Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (
 List and Columns shorten overflowing filenames in the middle by default, keeping their beginning and ending visible. Settings → Views → Long Filenames also offers Shorten at the End. Changes apply to open panes immediately. Grid keeps its two-line name wrapping.
 
 List headers sort by their column. Drag their dividers to resize columns; Settings → List Columns controls visibility and order. Additional columns include accessed/created time, owner, group, permissions and location. Missing provider metadata stays unavailable rather than becoming a made-up value. Grid view uses the toolbar's Sort menu. By default, shown hidden items sort among visible ones. Hidden Last, in the Sort menu and Settings, sorts them after visible ones; Folders First then applies within each group.
+Folders show their recursive size in the Size column, computed in the background for visible rows; the cell stays blank until its walk finishes and “≥” marks a partial result. Sizes are cached and refresh when the listing reports changes.
 
 The background right-click menu also offers Sort. Changing the sort field, direction, Folders First or Hidden Last shows the beginning of the new order, including in folders that need scrolling. Selected items stay selected. Sort changes made through list headings or Settings follow the same rule.
 
 In large folders, names can appear while detail values are still loading. “Reading…” means a value is pending; “Unknown” means it was unavailable after querying. Hidden extra columns are not queried by ordinary large-folder browsing. Enabling one loads its visible rows. Sorting by metadata or selecting many items can require facts from the rest of the folder; file actions wait for the facts they need.
+Folder sizes do not show “Reading…”; they stay blank until their background walk finishes.
 
 The floating status pill reports actions, search and selection. Settings → Appearance → Always Show Status Bar keeps it visible when idle with the item count and, when available, free space.
 
