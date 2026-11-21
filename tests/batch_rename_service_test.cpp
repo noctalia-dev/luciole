@@ -620,6 +620,7 @@ namespace {
   void caseOnlyRename(const fs::path& root) {
     const int dir = ::open(root.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     int flags = 0;
+    // musl declares ioctl(int, int, ...) and FS_IOC_GETFLAGS exceeds INT_MAX; the kernel reads the low 32 bits.
     TEST_CHECK(dir >= 0 && ::ioctl(dir, static_cast<int>(FS_IOC_GETFLAGS), &flags) == 0);
     flags |= FS_CASEFOLD_FL;
     TEST_CHECK(::ioctl(dir, FS_IOC_SETFLAGS, &flags) == 0 && ::close(dir) == 0);
