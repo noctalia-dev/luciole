@@ -446,7 +446,7 @@ namespace {
        .shortcut = "",
        .rule = [](const C& c, const R&) { return checked(c.model.sort().hiddenLast); }},
       {.action = A::ResetFolderView,
-       .label = "Use default view for this folder",
+       .label = "Use Default View for This Folder",
        .shortcut = "",
        .scope = S::Location,
        .rule = resetFolderView},

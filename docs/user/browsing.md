@@ -94,9 +94,9 @@ Opening a local file uses the default application for its file type; supported l
 
 ### Per-folder view and sort
 
-Settings → Views → Remember view and sort per folder makes the sort menu, list headings and the Grid/List choice change only the current folder. A folder you never changed keeps following the defaults in Settings, and changing a default there leaves folders with their own settings alone. The folder keeps its sort and view in every tab and window and across restarts. For example, Downloads can sort by Created, newest first, while everything else sorts by name. The sort button's tooltip says "This folder" while the current folder has its own sort.
+Settings → Views → Remember View and Sort per Folder makes the sort menu, list headings and the Grid/List choice change only the current folder. A folder you never changed keeps following the defaults in Settings, and changing a default there leaves folders with their own settings alone. The folder keeps its sort and view in every tab and window and across restarts. For example, Downloads can sort by Created, newest first, while everything else sorts by name. The sort button's tooltip says "This folder" while the current folder has its own sort.
 
-Use default view for this folder, at the end of the Sort menu and below the view choices in the main menu, removes the folder's own settings. Columns is a mode for the whole window: choosing it, or leaving it, changes the default view, and folders' own view choices do not apply while it is on. Sorting a column there still changes only that column's folder. Settings are remembered per location, so a renamed or moved folder starts again from the defaults.
+Use Default View for This Folder, at the end of the Sort menu and below the view choices in the main menu, removes the folder's own settings. Columns is a mode for the whole window: choosing it, or leaving it, changes the default view, and folders' own view choices do not apply while it is on. Sorting a column there still changes only that column's folder. Settings are remembered per location, so a renamed or moved folder starts again from the defaults.
 
 ## Places and folder trees
 
