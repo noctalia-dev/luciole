@@ -437,6 +437,19 @@ namespace {
     TEST_CHECK(service.removeSeparator(at));
     pump.ready(service);
     TEST_CHECK(service.separators().empty() && !read(path).contains("place_separators"));
+
+    // Another instance changes only the separators. state.toml isn't watched, so this one still has the old ones:
+    // its next write reports the conflict and adopts the other instance's separators instead of overwriting them.
+    luciole::PinService other(path, shared, {});
+    other.reload();
+    pump.ready(other);
+    TEST_CHECK(other.addSeparator(row(other, b.location)));
+    pump.ready(other);
+    const auto theirs = read(path);
+    TEST_CHECK(service.separators().empty() && service.addSeparator(row(service, a.location)));
+    pump.ready(service);
+    TEST_CHECK(!service.error().empty() && read(path) == theirs);
+    TEST_CHECK((service.separators() == other.separators()));
   }
 } // namespace
 

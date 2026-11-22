@@ -84,6 +84,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     std::vector<std::size_t> separators;
     std::optional<std::vector<SavedWindow>> windows;
     std::vector<Bookmark> expected;
+    // The separators this instance had when the write was queued; another writer may have changed them since.
+    std::vector<std::size_t> expectedSeparators;
   };
   State(std::filesystem::path path, std::filesystem::path sharedPath, std::filesystem::path legacyPath)
       : store(std::move(path)), shared(sharedPath, legacyPath), sharedPath(std::move(sharedPath)),
@@ -254,7 +256,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
         {.bookmarks = std::move(proposed),
          .separators = proposedSeparators ? std::move(*proposedSeparators) : separators,
          .windows = std::move(proposedWindows),
-         .expected = bookmarks}
+         .expected = bookmarks,
+         .expectedSeparators = separators}
     );
     startNext();
   }
@@ -275,7 +278,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     }
     runJob<Result>(
         [owner = shared_from_this(), proposed = std::move(work.bookmarks), proposedWindows = std::move(work.windows),
-         expected = std::move(work.expected), separators = std::move(work.separators)] mutable {
+         expected = std::move(work.expected), separators = std::move(work.separators),
+         expectedSeparators = std::move(work.expectedSeparators)] mutable {
           Result result;
           result.bookmarks = expected;
           result.separators = separators;
@@ -311,7 +315,9 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
                 result.error = "Places supports at most 268 rows; remove some bookmarks before adding more.";
                 return result;
               }
-              if (result.bookmarks != expected) {
+              // Separators are only in state.toml, which isn't watched, so another instance's change to them is
+              // found here rather than by a reload.
+              if (result.bookmarks != expected || result.separators != expectedSeparators) {
                 result.error = "Places changed in another application; review the updated list and retry.";
                 return result;
               }
