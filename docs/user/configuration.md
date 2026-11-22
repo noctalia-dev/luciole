@@ -64,7 +64,7 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | Key | Default | Accepted values / meaning |
 | --- | --- | --- |
 | `view_mode` | `"list"` | `"list"`, `"grid"`, `"miller"` |
-| `remember_folder_views` | `false` | Sort and Grid/List changes apply to the current folder only and are remembered for it; see [per-folder view and sort](browsing.md#per-folder-view-and-sort) |
+| `remember_folder_views` | `false` | Sort and Grid/List changes apply to the current folder only and are remembered for it; file picker windows keep their own. See [per-folder view and sort](browsing.md#per-folder-view-and-sort) |
 | `grid_icon_size` | `96` | `32`, `48`, `64`, `80`, `96`, `128`, `160`, `192`, `256` |
 | `list_icon_size` | `0` | `0` uses the default size, `32`; or `16`, `20`, `24`, `28`, `32`, `40`, `48`, `64`. Rows grow with the icon. |
 | `miller_icon_size` | `0` | Columns view icon size: `0` uses the density's size (`20` compact, `28` comfortable); otherwise the same values as `list_icon_size` |

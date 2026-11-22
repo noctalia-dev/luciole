@@ -91,7 +91,7 @@ public:
       luciole::WindowSurface& surface, InputDispatcher& dispatcher, AnimationManager& animations,
       luciole::PinService& pins, luciole::DriveMonitor& drives, luciole::FileIconCache& icons,
       luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-      luciole::FolderViewService& folderViews, OperationHub& hub, luciole::TabId id
+      luciole::FolderViewService* folderViews, OperationHub& hub, luciole::TabId id
   );
 
   luciole::BrowserController& browser() override;
@@ -399,7 +399,7 @@ private:
   std::optional<std::pair<int, int>> m_dialogPosition;
   bool m_dialogResizePending = false;
   luciole::PinService& m_pins;
-  luciole::FolderViewService& m_folderViews;
+  luciole::FolderViewService* m_folderViews; // nullptr in file pickers, which keep their own sort and view mode.
   luciole::DriveMonitor& m_drives;
   luciole::FileLauncher m_launcher;
   std::vector<luciole::Location> m_revealTargets;

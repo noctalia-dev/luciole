@@ -86,7 +86,7 @@ BrowserPage::BrowserPage(
     const luciole::BrowserSettings& settings, luciole::WaylandTextClipboard& clipboard, luciole::WindowSurface& surface,
     InputDispatcher& dispatcher, AnimationManager& animations, luciole::PinService& pins, luciole::DriveMonitor& drives,
     luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-    luciole::FolderViewService& folderViews, OperationHub& hub, luciole::TabId id
+    luciole::FolderViewService* folderViews, OperationHub& hub, luciole::TabId id
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
@@ -110,7 +110,7 @@ BrowserPage::BrowserPage(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );
   browser().setViewDefaults(settings.viewMode, settings.gridIconSize);
-  m_browser.setFolderViews(&m_folderViews);
+  m_browser.setFolderViews(m_folderViews);
   m_listIconSize = settings.listIconSize;
   m_millerIconSize = settings.millerIconSize;
   m_preview.setChangedCallback([this] {

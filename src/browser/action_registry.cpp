@@ -695,7 +695,6 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::Descending:
   case A::FoldersFirst:
   case A::HiddenLast:
-  case A::ResetFolderView:
   case A::Open:
   case A::SelectAll:
   case A::InvertSelection:
@@ -709,6 +708,7 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::CreateFolder:
     return true;
   case A::Miller:
+  case A::ResetFolderView:
   case A::OpenWith:
   case A::ContainingFolder:
   case A::OriginalLocation:

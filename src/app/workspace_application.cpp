@@ -1026,7 +1026,7 @@ luciole::TabId WorkspaceApplication::createPage(
   }
   auto page = std::make_unique<BrowserPage>(
       m_connection, m_renderer, m_input, settings, m_clipboard, host.surface, host.dispatcher, m_animations, m_pins,
-      m_drives, m_icons, m_thumbnails, m_preferences, m_folderViews, m_hub, id
+      m_drives, m_icons, m_thumbnails, m_preferences, host.chooser ? nullptr : &m_folderViews, m_hub, id
   );
   page->setHasOther([this, id] {
     const auto owner = m_model.owner(id);

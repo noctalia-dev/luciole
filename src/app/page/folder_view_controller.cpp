@@ -6,12 +6,12 @@
 #include "browser/miller_columns.h"
 
 FolderViewController::FolderViewController(
-    PageContext& page, luciole::FolderViewService& views, luciole::BrowserController& browser,
+    PageContext& page, luciole::FolderViewService* views, luciole::BrowserController& browser,
     luciole::MillerColumns& miller
 )
     : m_page(page), m_views(views), m_browser(browser), m_miller(miller) {}
 
-bool FolderViewController::enabled() const { return m_views.enabled(); }
+bool FolderViewController::enabled() const { return m_views != nullptr && m_views->enabled(); }
 
 bool FolderViewController::customized() const {
   const auto view = m_page.browser().folderView();
@@ -24,7 +24,7 @@ bool FolderViewController::sortCustomized() const {
 }
 
 std::optional<luciole::Location> FolderViewController::target() const {
-  return m_views.enabled() ? m_page.browser().model().snapshot().location : std::nullopt;
+  return enabled() ? m_page.browser().model().snapshot().location : std::nullopt;
 }
 
 bool FolderViewController::saveSort(const luciole::SortOptions& sort) {
@@ -33,7 +33,7 @@ bool FolderViewController::saveSort(const luciole::SortOptions& sort) {
     return false;
   }
   // The service's changed callback applies it to every page showing this folder.
-  m_views.setSort(*folder, sort);
+  m_views->setSort(*folder, sort);
   return true;
 }
 
@@ -45,13 +45,16 @@ bool FolderViewController::saveViewMode(luciole::ViewMode mode) {
   if (!folder) {
     return false;
   }
-  m_views.setMode(*folder, mode);
+  m_views->setMode(*folder, mode);
   return true;
 }
 
-void FolderViewController::reset(const luciole::Location& folder) { m_views.reset(folder); }
+void FolderViewController::reset(const luciole::Location& folder) { m_views->reset(folder); }
 
 void FolderViewController::apply() {
+  if (m_views == nullptr) {
+    return;
+  }
   const auto before = m_page.browser().model().sort();
   m_browser.reapplyFolderView();
   for (const auto& column : m_miller.columns()) {

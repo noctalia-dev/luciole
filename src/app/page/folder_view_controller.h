@@ -12,11 +12,12 @@ namespace luciole {
 } // namespace luciole
 
 // Per-folder sort and view mode: while they are on, the page's sort and Grid/List changes go to the current folder
-// instead of the defaults, and every controller of the page follows the folder's settings when they change.
+// instead of the defaults, and every controller of the page follows the folder's settings when they change. File
+// pickers pass no service: they keep their own sort and view mode.
 class FolderViewController {
 public:
   FolderViewController(
-      PageContext& page, luciole::FolderViewService& views, luciole::BrowserController& browser,
+      PageContext& page, luciole::FolderViewService* views, luciole::BrowserController& browser,
       luciole::MillerColumns& miller
   );
 
@@ -38,7 +39,7 @@ private:
   std::optional<luciole::Location> target() const;
 
   PageContext& m_page;
-  luciole::FolderViewService& m_views;
+  luciole::FolderViewService* m_views;
   luciole::BrowserController& m_browser;
   luciole::MillerColumns& m_miller;
 };
