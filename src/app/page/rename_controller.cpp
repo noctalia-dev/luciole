@@ -201,11 +201,16 @@ void RenameController::openPlaceRename(const luciole::Bookmark& bookmark) {
 }
 
 void RenameController::openSeparatorHeading(std::size_t before) {
-  if (!m_pins.editable() || !std::ranges::contains(m_pins.separators(), before)) {
+  if (!m_pins.editable()
+      || before >= m_pins.bookmarks().size()
+      || !std::ranges::contains(m_pins.separators(), before)) {
     m_page.actionError("This separator is no longer available.");
     return;
   }
   const auto current = m_pins.separatorLabel(before);
+  // The separator is known by the place it sits above, as Rename Place knows its place: rows renumber when
+  // Places changes while the dialog is open, in another window or another application.
+  const auto anchor = m_pins.bookmarks()[before].location;
   auto editor = std::make_unique<NameDialog>(
       m_page.dialogWidth(DialogWidth::Small), current.empty() ? "Add Heading" : "Rename Heading", "heading", current,
       "Shown under the separator line. Only Luciole shows it.",
@@ -218,9 +223,13 @@ void RenameController::openSeparatorHeading(std::size_t before) {
         }
         return std::nullopt;
       },
-      [this, before](std::string label) {
-        if (!std::ranges::contains(m_pins.separators(), before)
-            || !m_pins.setSeparatorLabel(before, std::move(label))) {
+      [this, anchor](std::string label) {
+        const auto& pins = m_pins.bookmarks();
+        const auto found = std::ranges::find(pins, anchor, &luciole::Bookmark::location);
+        const auto row = static_cast<std::size_t>(found - pins.begin());
+        if (found == pins.end()
+            || !std::ranges::contains(m_pins.separators(), row)
+            || !m_pins.setSeparatorLabel(row, std::move(label))) {
           if (m_headingEditor != nullptr) {
             m_headingEditor->showError(
                 m_pins.busy() ? "Places are being saved. Try again shortly."
