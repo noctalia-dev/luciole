@@ -184,7 +184,8 @@ namespace {
     }
     Decoder decoder(path);
     decoder.unknownKeys(
-        *table, "", {"schema_version", "places_customized", "bookmarks", "place_separators", "windows", "chooser_folder_uri"},
+        *table, "",
+        {"schema_version", "places_customized", "bookmarks", "place_separators", "windows", "chooser_folder_uri"},
         "unknown state field"
     );
     const auto* version = table->get("schema_version");
@@ -359,7 +360,8 @@ bool luciole::StateStore::load() {
   return true;
 }
 
-luciole::AtomicWriteState luciole::StateStore::saveBookmarks(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {
+luciole::AtomicWriteState
+luciole::StateStore::saveBookmarks(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {
   auto proposed = m_state;
   proposed.bookmarks = std::move(bookmarks);
   proposed.placeSeparators = std::move(separators);
