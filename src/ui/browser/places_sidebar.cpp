@@ -369,9 +369,10 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   // padding.
   const auto heading = m_pins.separatorLabel(before);
   auto button = ui::button(
-      {.controlHeight = heading.empty() ? 13.0F : 37.0F,
+      {.controlHeight = heading.empty() ? std::optional<float>{13.0F} : std::nullopt,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
+       .paddingV = heading.empty() ? std::optional<float>{} : 0.0F,
        .paddingH = heading.empty() ? luciole::kSideListRowPaddingH : 0.0F}
   );
   auto* raw = button.get();
@@ -381,8 +382,16 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   if (heading.empty()) {
     raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F}));
   } else {
-    raw->setJustify(FlexJustify::Center);
-    raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule}));
+    // Spaced like the line and caption above Drives: the line padded by spaceXs on both sides, the Places list's
+    // spaceXs gap, then the caption at its own height. The button takes its height from them.
+    raw->setJustify(FlexJustify::Start);
+    raw->setGap(Style::spaceXs);
+    raw->addChild(
+        ui::column(
+            {.align = FlexAlign::Stretch, .paddingV = Style::spaceXs},
+            ui::separator({.orientation = SeparatorOrientation::HorizontalRule})
+        )
+    );
     // In a column of its own: the button recolors the labels directly inside it, and the heading keeps the
     // captions' color instead.
     raw->addChild(
