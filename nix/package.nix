@@ -179,7 +179,7 @@ stdenv.mkDerivation (finalAttrs: {
   mesonBuildType = "release";
   postFixup = ''
     wrapProgram "$out/bin/luciole" \
-      --prefix PATH : "${
+      --suffix PATH : "${
         lib.makeBinPath [
           xdg-terminal-exec
           ffmpeg
