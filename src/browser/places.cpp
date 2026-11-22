@@ -244,6 +244,28 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
       callback();
     }
   }
+  // Separators are rows of the list they were saved with. When the list has changed since, each follows the row it
+  // was in front of, or the first one after it still listed; a separator with no row left below it, or that would
+  // sit above the first row or share a gap, is dropped. This covers Luciole's own pin changes and bookmarks changed
+  // in another application, which leave the saved rows behind.
+  static std::vector<std::size_t> follow(
+      const std::vector<std::size_t>& rows, const std::vector<Bookmark>& saved, const std::vector<Bookmark>& current
+  ) {
+    std::vector<std::size_t> result;
+    for (const auto row : rows) {
+      for (std::size_t old = row; old < saved.size(); ++old) {
+        const auto found = std::ranges::find(current, saved[old].location, &Bookmark::location);
+        if (found != current.end()) {
+          const auto index = static_cast<std::size_t>(found - current.begin());
+          if (index > 0 && (result.empty() || result.back() < index)) {
+            result.push_back(index);
+          }
+          break;
+        }
+      }
+    }
+    return result;
+  }
   // Separators that sit inside the list: past its last row they have nothing below them.
   static std::vector<std::size_t> within(std::vector<std::size_t> rows, std::size_t count) {
     std::erase_if(rows, [count](std::size_t row) { return row == 0 || row >= count; });
@@ -308,7 +330,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
             result.watchPaths = shared.watchPaths();
             auto local = layout(store.state(), result.places);
             result.bookmarks = combine(local, shared.bookmarks(), result.places);
-            result.separators = within(store.state().placeSeparators, result.bookmarks.size());
+            result.separators = follow(store.state().placeSeparators, local, result.bookmarks);
             result.ready = true;
             if (proposed) {
               if (proposed->size() > StateStore::placesLimit) {
@@ -348,8 +370,9 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
                 // The shared commit stands even if the separate local layout could not be saved.
                 result.error = store.issues().front().format();
                 store.load();
-                result.bookmarks = combine(layout(store.state(), result.places), shared.bookmarks(), result.places);
-                result.separators = within(store.state().placeSeparators, result.bookmarks.size());
+                const auto stored = layout(store.state(), result.places);
+                result.bookmarks = combine(stored, shared.bookmarks(), result.places);
+                result.separators = follow(store.state().placeSeparators, stored, result.bookmarks);
               } else {
                 result.bookmarks = std::move(*proposed);
                 result.separators = kept;
@@ -425,19 +448,7 @@ bool luciole::PinService::contains(const Location& location) const {
 }
 bool luciole::PinService::save(std::vector<Bookmark> bookmarks) {
   // Each separator stays in front of the same row: the first row at or after it that is still listed.
-  std::vector<std::size_t> separators;
-  for (const auto row : m_state->separators) {
-    for (std::size_t old = row; old < m_state->bookmarks.size(); ++old) {
-      const auto found = std::ranges::find(bookmarks, m_state->bookmarks[old].location, &Bookmark::location);
-      if (found != bookmarks.end()) {
-        const auto index = static_cast<std::size_t>(found - bookmarks.begin());
-        if (index > 0 && (separators.empty() || separators.back() < index)) {
-          separators.push_back(index);
-        }
-        break;
-      }
-    }
-  }
+  auto separators = State::follow(m_state->separators, m_state->bookmarks, bookmarks);
   return save(std::move(bookmarks), std::move(separators));
 }
 bool luciole::PinService::save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {

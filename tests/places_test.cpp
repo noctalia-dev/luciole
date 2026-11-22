@@ -451,6 +451,52 @@ namespace {
     TEST_CHECK(!service.error().empty() && read(path) == theirs);
     TEST_CHECK((service.separators() == other.separators()));
   }
+  void testSeparatorsFollowExternalChanges(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "external/state.toml";
+    const auto shared = fixture.root / "external/bookmarks";
+    const auto a = fixture.pin("ext-a");
+    const auto b = fixture.pin("ext-b");
+    const auto c = fixture.pin("ext-c");
+    const auto d = fixture.pin("ext-d");
+    const auto line = [](const luciole::Bookmark& pin) { return pin.location.uri() + " " + pin.label + "\n"; };
+    write(shared, line(a) + line(b) + line(c) + line(d));
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(service.addSeparator(row(service, c.location)));
+    pump.ready(service);
+    const auto inFront = [&](const luciole::PinService& pins, const luciole::Bookmark& pin) {
+      return pins.separators() == std::vector{row(pins, pin.location)};
+    };
+    const auto restartedInFront = [&](const luciole::Bookmark& pin) {
+      luciole::PinService restarted(path, shared, {});
+      restarted.reload();
+      pump.ready(restarted);
+      return inFront(restarted, pin);
+    };
+
+    // Another application unpins a place above the separator: the separator stays in front of c, now and after a
+    // restart, instead of keeping its row number and landing in front of d.
+    replace(shared, line(b) + line(c) + line(d));
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(inFront(service, c) && restartedInFront(c));
+    // ... unpins the place right below it: it moves to the next one still listed.
+    replace(shared, line(b) + line(d));
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(inFront(service, d) && restartedInFront(d));
+    // ... and reorders them: it stays in front of d wherever d goes.
+    replace(shared, line(d) + line(b));
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(inFront(service, d) && restartedInFront(d));
+    // A later write from this instance stores the moved separator.
+    TEST_CHECK(service.addSeparator(row(service, b.location)));
+    pump.ready(service);
+    TEST_CHECK(service.error().empty() && service.separators().size() == 2);
+  }
 } // namespace
 
 int main() {
@@ -460,6 +506,7 @@ int main() {
     testPlacesAndPins(fixture);
     testExistingNetworkLayout(fixture);
     testSeparators(fixture);
+    testSeparatorsFollowExternalChanges(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {
