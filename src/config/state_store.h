@@ -37,6 +37,8 @@ namespace luciole {
     std::vector<Bookmark> bookmarks;
     // Separator lines between Places rows, each as the row it sits before, in increasing order.
     std::vector<std::size_t> placeSeparators;
+    // A heading for each separator, in the same order; empty for a plain line.
+    std::vector<std::string> placeSeparatorLabels;
     std::vector<SavedWindow> windows;
     bool placesCustomized = false;
     // Folder of the last accepted file picker answer.
@@ -54,7 +56,9 @@ namespace luciole {
     explicit StateStore(std::filesystem::path path);
     static std::filesystem::path pathFromEnvironment();
     bool load(); // Failure preserves the last valid snapshot and the file.
-    AtomicWriteState saveBookmarks(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators = {});
+    AtomicWriteState saveBookmarks(
+        std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators = {}, std::vector<std::string> labels = {}
+    );
     AtomicWriteState saveWindows(std::vector<SavedWindow> windows);
     AtomicWriteState saveChooserFolder(Location folder);
     const SessionState& state() const { return m_state; }

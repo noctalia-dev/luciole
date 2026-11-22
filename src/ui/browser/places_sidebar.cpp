@@ -364,18 +364,36 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   m_scroll->content()->addChild(std::move(button));
 }
 Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
-  // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged.
+  // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged. A heading
+  // goes under the line in the caption style of "Places" and "Drives".
+  const auto heading = m_pins.separatorLabel(before);
   auto button = ui::button(
-      {.controlHeight = 13.0F,
+      {.controlHeight = heading.empty() ? 13.0F : 37.0F,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
        .paddingH = luciole::kSideListRowPaddingH}
   );
   auto* raw = button.get();
-  raw->setDirection(FlexDirection::Horizontal);
-  raw->setAlign(FlexAlign::Center);
+  raw->setDirection(heading.empty() ? FlexDirection::Horizontal : FlexDirection::Vertical);
+  raw->setAlign(heading.empty() ? FlexAlign::Center : FlexAlign::Stretch);
   raw->setTooltip("Drag to move, or right-click for options");
-  raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F}));
+  if (heading.empty()) {
+    raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F}));
+  } else {
+    raw->setJustify(FlexJustify::Center);
+    raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule}));
+    raw->addChild(
+        ui::label(
+            {.text = heading,
+             .fontSize = Style::fontSizeCaption,
+             .fontWeight = FontWeight::SemiBold,
+             .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+             .height = 24.0F,
+             .maxLines = 1,
+             .ellipsize = TextEllipsize::End}
+        )
+    );
+  }
   raw->setOnRightClickWithPointer([this, before](float x, float y, std::uint32_t, std::uint32_t) {
     cancelDragCandidate();
     if (m_separatorContext) {

@@ -34,6 +34,7 @@ public:
     RunProgram,
     Operations,
     OperationDetails,
+    SeparatorHeading,
   };
 
   // Takes the popup scene. `content` is the menu or dialog inside it: the scene itself for menus, the dialog

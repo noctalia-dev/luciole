@@ -25,6 +25,8 @@ public:
   void openFileRename(luciole::DirectoryEntry target);
   void openPlaceRename(const luciole::Bookmark& bookmark);
   void openPlaceIconPicker(const luciole::Bookmark& bookmark);
+  // Adds or renames the heading of the Places separator in front of row `before`.
+  void openSeparatorHeading(std::size_t before);
   // Owned rename job change: sync the editor on the next frame, or report a job whose editor closed.
   void changed(OperationJob& job);
   // Frame slot in BrowserPage::prepareFrame().
@@ -56,4 +58,5 @@ private:
   std::optional<std::string> m_pendingPlaceLabel;
   std::optional<luciole::Bookmark> m_placeIconTarget;
   std::optional<std::string> m_pendingPlaceIcon;
+  NameDialog* m_headingEditor = nullptr;
 };

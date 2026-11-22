@@ -380,12 +380,18 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
     const auto target = !gap ? std::nullopt : up ? gaps.previousShown(*gap) : gaps.nextShown(*gap);
     return target && gaps.free(*target) ? target : std::nullopt;
   };
+  const bool titled = !m_pins.separatorLabel(before).empty();
   std::vector<ContextMenuControlEntry> entries{
       {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && neighbor(true).has_value()},
       {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && neighbor(false).has_value()},
       {.label = "", .separator = true},
-      {.id = 1, .label = "Remove Separator", .enabled = m_pins.editable()},
+      {.id = 4, .label = titled ? "Rename Heading…" : "Add Heading…", .enabled = m_pins.editable()},
   };
+  if (titled) {
+    entries.push_back({.id = 5, .label = "Remove Heading", .enabled = m_pins.editable()});
+  }
+  entries.push_back({.label = "", .separator = true});
+  entries.push_back({.id = 1, .label = "Remove Separator", .enabled = m_pins.editable()});
   showContextMenu(
       std::move(entries),
       [this, before, neighbor](int action) {
@@ -395,6 +401,10 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
         }
         if (action == 1) {
           m_pins.removeSeparator(before);
+        } else if (action == 4) {
+          m_renamer.openSeparatorHeading(before);
+        } else if (action == 5) {
+          m_pins.setSeparatorLabel(before, {});
         } else if (action == 2 || action == 3) {
           if (const auto target = neighbor(action == 2)) {
             m_pins.moveSeparatorTo(before, *target);

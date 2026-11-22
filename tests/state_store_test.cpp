@@ -305,6 +305,35 @@ namespace {
     write(fixture.path(), "schema_version = 1\nplace_separators = [4, 2, 4, 6]\n");
     TEST_CHECK(store.load() && (store.state().placeSeparators == std::vector<std::size_t>{4, 6}));
   }
+
+  void testPlaceSeparatorLabels() {
+    Fixture fixture;
+    const std::vector<Bookmark> bookmarks{
+        {.label = "a", .location = Location::fromPath("/tmp/a"), .iconName = {}},
+        {.label = "b", .location = Location::fromPath("/tmp/b"), .iconName = {}},
+        {.label = "c", .location = Location::fromPath("/tmp/c"), .iconName = {}}
+    };
+    StateStore store(fixture.path());
+    TEST_CHECK(store.load());
+    TEST_CHECK(store.saveBookmarks(bookmarks, {1, 2}, {"", "Work"}) == AtomicWriteState::Durable);
+    TEST_CHECK(read(fixture.path()).contains("place_separator_labels"));
+    StateStore reread(fixture.path());
+    TEST_CHECK(reread.load() && (reread.state().placeSeparatorLabels == std::vector<std::string>{"", "Work"}));
+    // Without headings the key is left out, so builds without them can still read the file.
+    TEST_CHECK(store.saveBookmarks(bookmarks, {1, 2}) == AtomicWriteState::Durable);
+    TEST_CHECK(!read(fixture.path()).contains("place_separator_labels"));
+    TEST_CHECK(store.state().placeSeparatorLabels == std::vector<std::string>(2));
+
+    // A heading for a row without a separator is dropped.
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = 'A', 3 = 'B'}\n");
+    TEST_CHECK(store.load() && (store.state().placeSeparatorLabels == std::vector<std::string>{"A"}));
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {x = 'A'}\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_labels.x");
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = 5}\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_labels.2");
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = ''}\n");
+    TEST_CHECK(!store.load());
+  }
 } // namespace
 
 int main() {
@@ -316,6 +345,7 @@ int main() {
     testPrivacyAndBounds();
     testPrivateReaderAndPaths();
     testPlaceSeparators();
+    testPlaceSeparatorLabels();
     std::println("state store checks passed");
     return 0;
   } catch (const std::exception& error) {

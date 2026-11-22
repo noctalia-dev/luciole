@@ -605,6 +605,49 @@ namespace {
     pump.ready(service);
     TEST_CHECK(service.error().empty() && service.separators().size() == 2);
   }
+  void testSeparatorHeadings(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "headings/state.toml";
+    const auto shared = fixture.root / "headings/bookmarks";
+    const auto a = fixture.pin("head-a");
+    const auto b = fixture.pin("head-b");
+    const auto c = fixture.pin("head-c");
+    write(shared, a.location.uri() + " head-a\n" + b.location.uri() + " head-b\n" + c.location.uri() + " head-c\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    const auto first = row(service, a.location);
+    const auto second = row(service, c.location);
+    TEST_CHECK(service.addSeparator(first));
+    pump.ready(service);
+    TEST_CHECK(service.addSeparator(second));
+    pump.ready(service);
+
+    // A heading belongs to one separator; a bad one or a missing separator is refused.
+    TEST_CHECK(service.separatorLabel(first).empty() && !service.setSeparatorLabel(first + 1, "Nowhere"));
+    TEST_CHECK(!service.setSeparatorLabel(first, "Bad\nline"));
+    TEST_CHECK(service.setSeparatorLabel(first, "Projects"));
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(first) == "Projects" && service.separatorLabel(second).empty());
+    TEST_CHECK(read(path).contains("Projects") && !read(shared).contains("Projects"));
+    luciole::PinService restarted(path, shared, {});
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK(restarted.separatorLabel(first) == "Projects");
+
+    // Moving the separator takes its heading along.
+    TEST_CHECK(service.moveSeparatorTo(first, first + 1));
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(first + 1) == "Projects" && service.separatorLabel(second).empty());
+    // Removing a pin in front of it keeps the heading with its separator.
+    TEST_CHECK(service.remove(a.location));
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(first) == "Projects");
+    // An empty heading turns it back into a plain line, and the key leaves the file.
+    TEST_CHECK(service.setSeparatorLabel(first, {}));
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(first).empty() && !read(path).contains("place_separator_labels"));
+  }
 } // namespace
 
 int main() {
@@ -617,6 +660,7 @@ int main() {
     testSeparatorGaps(fixture);
     testSeparatorDrops(fixture);
     testSeparatorsFollowExternalChanges(fixture);
+    testSeparatorHeadings(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {

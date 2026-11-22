@@ -4,6 +4,7 @@
 #include "fs/xdg_dirs.h"
 
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <glib.h>
 #include <sstream>
@@ -185,7 +186,8 @@ namespace {
     Decoder decoder(path);
     decoder.unknownKeys(
         *table, "",
-        {"schema_version", "places_customized", "bookmarks", "place_separators", "windows", "chooser_folder_uri"},
+        {"schema_version", "places_customized", "bookmarks", "place_separators", "place_separator_labels", "windows",
+         "chooser_folder_uri"},
         "unknown state field"
     );
     const auto* version = table->get("schema_version");
@@ -237,6 +239,33 @@ namespace {
         const auto row = static_cast<std::size_t>(value->as_integer()->get());
         if (state.placeSeparators.empty() || state.placeSeparators.back() < row) {
           state.placeSeparators.push_back(row);
+        }
+      }
+    }
+    // Headings, keyed by the row of their separator; one for a row without a separator is dropped.
+    state.placeSeparatorLabels.resize(state.placeSeparators.size());
+    if (const auto* node = table->get("place_separator_labels")) {
+      const auto* labels = node->as_table();
+      if (labels == nullptr) {
+        decoder.issue(*node, "place_separator_labels", "expected a table of row numbers and headings");
+      } else {
+        for (const auto& [key, value] : *labels) {
+          const auto name = std::format("place_separator_labels.{}", key.str());
+          std::size_t row = 0;
+          const auto text = key.str();
+          const auto [end, failure] = std::from_chars(text.data(), text.data() + text.size(), row);
+          const auto* label = value.as_string();
+          if (failure != std::errc{} || end != text.data() + text.size()) {
+            decoder.issue(value, name, "expected a row number as the key");
+          } else if (label == nullptr) {
+            decoder.issue(value, name, "expected a heading string");
+          } else if (const auto problem = luciole::bookmarkLabelProblem(label->get())) {
+            decoder.issue(value, name, *problem);
+          } else if (
+              const auto found = std::ranges::find(state.placeSeparators, row); found != state.placeSeparators.end()
+          ) {
+            state.placeSeparatorLabels[static_cast<std::size_t>(found - state.placeSeparators.begin())] = label->get();
+          }
         }
       }
     }
@@ -297,6 +326,16 @@ namespace {
       }
       document.insert("place_separators", std::move(separators));
     }
+    // Only written while a heading exists, so a file without headings stays readable by builds without them.
+    toml::table labels;
+    for (std::size_t i = 0; i < state.placeSeparators.size() && i < state.placeSeparatorLabels.size(); ++i) {
+      if (!state.placeSeparatorLabels[i].empty()) {
+        labels.insert(std::to_string(state.placeSeparators[i]), state.placeSeparatorLabels[i]);
+      }
+    }
+    if (!labels.empty()) {
+      document.insert("place_separator_labels", std::move(labels));
+    }
     if (state.chooserFolder) {
       document.insert("chooser_folder_uri", state.chooserFolder->uri());
     }
@@ -315,7 +354,8 @@ namespace {
   bool samePlaces(const luciole::SessionState& a, const luciole::SessionState& b) {
     return a.bookmarks == b.bookmarks
         && a.placesCustomized == b.placesCustomized
-        && a.placeSeparators == b.placeSeparators;
+        && a.placeSeparators == b.placeSeparators
+        && a.placeSeparatorLabels == b.placeSeparatorLabels;
   }
 } // namespace
 
@@ -366,11 +406,14 @@ bool luciole::StateStore::load() {
   return true;
 }
 
-luciole::AtomicWriteState
-luciole::StateStore::saveBookmarks(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {
+luciole::AtomicWriteState luciole::StateStore::saveBookmarks(
+    std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators, std::vector<std::string> labels
+) {
   auto proposed = m_state;
   proposed.bookmarks = std::move(bookmarks);
+  labels.resize(separators.size());
   proposed.placeSeparators = std::move(separators);
+  proposed.placeSeparatorLabels = std::move(labels);
   proposed.placesCustomized = true;
   return save(std::move(proposed), Section::Bookmarks);
 }
@@ -429,6 +472,7 @@ luciole::AtomicWriteState luciole::StateStore::save(SessionState proposed, Secti
           candidate.bookmarks = std::move(proposed.bookmarks);
           candidate.placesCustomized = proposed.placesCustomized;
           candidate.placeSeparators = std::move(proposed.placeSeparators);
+          candidate.placeSeparatorLabels = std::move(proposed.placeSeparatorLabels);
           break;
         case Section::Windows:
           candidate.windows = std::move(proposed.windows);
