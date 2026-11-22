@@ -383,15 +383,20 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   } else {
     raw->setJustify(FlexJustify::Center);
     raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule}));
+    // In a column of its own: the button recolors the labels directly inside it, and the heading keeps the
+    // captions' color instead.
     raw->addChild(
-        ui::label(
-            {.text = heading,
-             .fontSize = Style::fontSizeCaption,
-             .fontWeight = FontWeight::SemiBold,
-             .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-             .height = 24.0F,
-             .maxLines = 1,
-             .ellipsize = TextEllipsize::End}
+        ui::column(
+            {.align = FlexAlign::Stretch},
+            ui::label(
+                {.text = heading,
+                 .fontSize = Style::fontSizeCaption,
+                 .fontWeight = FontWeight::SemiBold,
+                 .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+                 .height = 24.0F,
+                 .maxLines = 1,
+                 .ellipsize = TextEllipsize::End}
+            )
         )
     );
   }
