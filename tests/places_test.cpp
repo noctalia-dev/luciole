@@ -647,6 +647,17 @@ namespace {
     TEST_CHECK(service.setSeparatorLabel(first, {}));
     pump.ready(service);
     TEST_CHECK(service.separatorLabel(first).empty() && !read(path).contains("place_separator_labels"));
+
+    // Another instance gives the separator a heading; this one, still without it, reports the conflict on its next
+    // write and takes the heading instead of dropping it.
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK(restarted.setSeparatorLabel(first, "Theirs"));
+    pump.ready(restarted);
+    const auto theirs = read(path);
+    TEST_CHECK(service.separatorLabel(first).empty() && service.removeSeparator(first + 1));
+    pump.ready(service);
+    TEST_CHECK(!service.error().empty() && read(path) == theirs && service.separatorLabel(first) == "Theirs");
   }
 } // namespace
 

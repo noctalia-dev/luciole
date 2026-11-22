@@ -88,6 +88,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     std::vector<Bookmark> expected;
     // The separators this instance had when the write was queued; another writer may have changed them since.
     std::vector<std::size_t> expectedSeparators;
+    std::vector<std::string> expectedLabels; // And their headings, one per separator.
   };
   State(std::filesystem::path path, std::filesystem::path sharedPath, std::filesystem::path legacyPath)
       : store(std::move(path)), shared(sharedPath, legacyPath), sharedPath(std::move(sharedPath)),
@@ -321,9 +322,16 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
          .separatorLabels = std::move(labels),
          .windows = std::move(proposedWindows),
          .expected = bookmarks,
-         .expectedSeparators = separators}
+         .expectedSeparators = separators,
+         .expectedLabels = expectedLabels()}
     );
     startNext();
+  }
+  // The headings as they stand, one per separator.
+  std::vector<std::string> expectedLabels() const {
+    auto labels = separatorLabels;
+    labels.resize(separators.size());
+    return labels;
   }
   void startNext() {
     if (busy || queue.empty()) {
@@ -343,7 +351,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     runJob<Result>(
         [owner = shared_from_this(), proposed = std::move(work.bookmarks), proposedWindows = std::move(work.windows),
          expected = std::move(work.expected), separators = std::move(work.separators),
-         labels = std::move(work.separatorLabels), expectedSeparators = std::move(work.expectedSeparators)] mutable {
+         labels = std::move(work.separatorLabels), expectedSeparators = std::move(work.expectedSeparators),
+         expectedLabels = std::move(work.expectedLabels)] mutable {
           Result result;
           result.bookmarks = expected;
           result.separators = expectedSeparators;
@@ -384,7 +393,9 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
               }
               // Separators are only in state.toml, which isn't watched, so another instance's change to them is
               // found here rather than by a reload.
-              if (result.bookmarks != expected || result.separators != expectedSeparators) {
+              if (result.bookmarks != expected
+                  || result.separators != expectedSeparators
+                  || result.separatorLabels != expectedLabels) {
                 result.error = "Places changed in another application; review the updated list and retry.";
                 return result;
               }
