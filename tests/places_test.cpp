@@ -683,6 +683,33 @@ namespace {
     TEST_CHECK((service.separators() == std::vector{row(service, y.location)}));
     TEST_CHECK(service.separatorLabel(row(service, y.location)) == "Rest");
   }
+  void testHeadingsFollowExternalChanges(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "external-headings/state.toml";
+    const auto shared = fixture.root / "external-headings/bookmarks";
+    const auto a = fixture.pin("exth-a");
+    const auto b = fixture.pin("exth-b");
+    const auto c = fixture.pin("exth-c");
+    const auto line = [](const luciole::Bookmark& pin) { return pin.location.uri() + " " + pin.label + "\n"; };
+    write(shared, line(a) + line(b) + line(c));
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(service.addSeparator(row(service, c.location)));
+    pump.ready(service);
+    TEST_CHECK(service.setSeparatorLabel(row(service, c.location), "Last"));
+    pump.ready(service);
+    // Another application unpins a place above it: the heading stays with its separator, in front of c.
+    replace(shared, line(b) + line(c));
+    service.reload();
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(row(service, c.location)) == "Last");
+    luciole::PinService restarted(path, shared, {});
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK((restarted.separators() == std::vector{row(restarted, c.location)}));
+    TEST_CHECK(restarted.separatorLabel(row(restarted, c.location)) == "Last");
+  }
 } // namespace
 
 int main() {
@@ -697,6 +724,7 @@ int main() {
     testSeparatorsFollowExternalChanges(fixture);
     testSeparatorHeadings(fixture);
     testMergedHeadings(fixture);
+    testHeadingsFollowExternalChanges(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {
