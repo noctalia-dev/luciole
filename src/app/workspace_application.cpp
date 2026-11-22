@@ -1525,7 +1525,7 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
     select(host.id, tab);
     return true;
   }
-  if (y > kTabDetachY) {
+  if (tabDetaches(y)) {
     defer(host.id, tab, WorkspaceCommand::Detach);
   } else {
     m_model.move(tab, host.id, tabDropIndex(host, tab, x));
@@ -1535,8 +1535,13 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
   return true;
 }
 
-float WorkspaceApplication::tabEdgeScrollSpeed(const Host& host) {
-  if (!host.pressedTab || !host.tabDrag || host.pointerY > kTabDetachY || !host.tabScroll->scrollable()) {
+bool WorkspaceApplication::tabDetaches(float y) const {
+  // Single Window has no detach, so the whole window reorders.
+  return !m_defaults.singleWindow && y > kTabDetachY;
+}
+
+float WorkspaceApplication::tabEdgeScrollSpeed(const Host& host) const {
+  if (!host.pressedTab || !host.tabDrag || tabDetaches(host.pointerY) || !host.tabScroll->scrollable()) {
     return 0;
   }
   float left = 0, top = 0;
@@ -1566,7 +1571,7 @@ void WorkspaceApplication::updateTabEdgeScroll(Host& host) {
   if (host.tabEdgeScroll.active()) {
     return;
   }
-  host.tabEdgeScroll.startRepeating(std::chrono::milliseconds(16), [&host] {
+  host.tabEdgeScroll.startRepeating(std::chrono::milliseconds(16), [this, &host] {
     const float speed = tabEdgeScrollSpeed(host);
     if (speed == 0) {
       host.tabEdgeScroll.stop();
@@ -1591,7 +1596,7 @@ std::size_t WorkspaceApplication::tabDropIndex(const Host& host, luciole::TabId 
   return index;
 }
 
-void WorkspaceApplication::layoutTabDrag(Host& host, Renderer& renderer) {
+void WorkspaceApplication::layoutTabDrag(Host& host, Renderer& renderer) const {
   const auto dragged = host.pressedTab && host.tabDrag ? host.pressedTab : std::nullopt;
   Button* source = nullptr;
   for (const auto& [id, button] : host.buttons) {
@@ -1610,7 +1615,7 @@ void WorkspaceApplication::layoutTabDrag(Host& host, Renderer& renderer) {
   const float width = source->width(), height = source->height();
   const auto surfaceWidth = static_cast<float>(host.surface.width());
   const auto surfaceHeight = static_cast<float>(host.surface.height());
-  const bool detach = host.pointerY > kTabDetachY;
+  const bool detach = tabDetaches(host.pointerY);
   float sx = 0, sy = 0;
   Node::absolutePosition(source, sx, sy);
   // Within the strip the copy slides along it; pulled out, it follows the pointer freely.

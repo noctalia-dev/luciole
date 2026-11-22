@@ -141,14 +141,16 @@ private:
   bool tabDragPointer(Host& host, const PointerEvent& event, float x, float y);
   // The position `tab`, dropped at `x`, takes among the window's other tabs.
   static std::size_t tabDropIndex(const Host& host, luciole::TabId tab, float x);
+  // True when a tab dropped at `y` opens in a new window rather than moving within the strip.
+  bool tabDetaches(float y) const;
   // How far the tab bar scrolls per step while a dragged tab is held near its ends; 0 elsewhere.
-  static float tabEdgeScrollSpeed(const Host& host);
+  float tabEdgeScrollSpeed(const Host& host) const;
   // Starts or stops scrolling the tab bar for the dragged tab's position.
-  static void updateTabEdgeScroll(Host& host);
+  void updateTabEdgeScroll(Host& host);
   // Adds the dragged tab's copy and its drop marker to the window's scene.
   static void buildTabDrag(Host& host);
   // Shows the dragged tab's copy under the pointer and, while it would reorder, the marker where it lands.
-  static void layoutTabDrag(Host& host, Renderer& renderer);
+  void layoutTabDrag(Host& host, Renderer& renderer) const;
   void tabMenu(Host& host, luciole::TabId tab, float x, float y);
   static Button::ButtonPalette closeTabPalette(ColorRole foreground);
   void rebuildStrip(Host& host, const luciole::TabWindow& window);
