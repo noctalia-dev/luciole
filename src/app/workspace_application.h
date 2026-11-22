@@ -9,6 +9,7 @@
 #include "app/window_move_gesture.h"
 #include "browser/tab_workspace.h"
 #include "config/state_store.h"
+#include "core/timer_manager.h"
 #include "thumbnails/thumbnail_service.h"
 #include "ui/palette.h"
 
@@ -59,6 +60,8 @@ class WorkspaceApplication {
     Flex* tabGhost = nullptr;
     Label* tabGhostLabel = nullptr;
     Box* tabDropMarker = nullptr;
+    // Scrolls the tab bar while a dragged tab is held near either end of it.
+    Timer tabEdgeScroll;
     // A left press on empty tab strip, until it becomes a window move.
     WindowMoveGesture stripMove;
     bool tabDrag = false, resizing = false, closed = false;
@@ -138,6 +141,10 @@ private:
   bool tabDragPointer(Host& host, const PointerEvent& event, float x, float y);
   // The position `tab`, dropped at `x`, takes among the window's other tabs.
   static std::size_t tabDropIndex(const Host& host, luciole::TabId tab, float x);
+  // How far the tab bar scrolls per step while a dragged tab is held near its ends; 0 elsewhere.
+  static float tabEdgeScrollSpeed(const Host& host);
+  // Starts or stops scrolling the tab bar for the dragged tab's position.
+  static void updateTabEdgeScroll(Host& host);
   // Adds the dragged tab's copy and its drop marker to the window's scene.
   static void buildTabDrag(Host& host);
   // Shows the dragged tab's copy under the pointer and, while it would reorder, the marker where it lands.

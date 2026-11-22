@@ -64,6 +64,9 @@ namespace {
   constexpr float kTabGhostOpacity = 0.92F;
   // Below this a dropped tab opens in a new window rather than moving within the strip.
   constexpr float kTabDetachY = kTabStripHeight + kNavigationToolbarHeight - Style::spaceXs;
+  // Width of the zone at each end of the tab bar that scrolls it while a tab is dragged, and the fastest step.
+  constexpr float kTabEdgeZone = 48.0F;
+  constexpr float kTabEdgeStep = 14.0F;
 } // namespace
 
 WorkspaceApplication::WorkspaceApplication(
@@ -1509,6 +1512,7 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
   if (event.type == PointerEvent::Type::Motion) {
     host.tabDrag |= std::abs(x - host.pressX) > 8 || std::abs(y - host.pressY) > 8;
     if (host.tabDrag) {
+      updateTabEdgeScroll(host);
       host.surface.requestLayout();
     }
     return true;
@@ -1529,6 +1533,43 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
   }
   host.surface.requestLayout();
   return true;
+}
+
+float WorkspaceApplication::tabEdgeScrollSpeed(const Host& host) {
+  if (!host.pressedTab || !host.tabDrag || host.pointerY > kTabDetachY || !host.tabScroll->scrollable()) {
+    return 0;
+  }
+  float left = 0, top = 0;
+  Node::absolutePosition(host.tabScroll, left, top);
+  const float right = left + host.tabScroll->width();
+  // Faster the nearer the pointer is to the end, and at full speed past it.
+  if (host.pointerX < left + kTabEdgeZone) {
+    return -kTabEdgeStep * std::clamp((left + kTabEdgeZone - host.pointerX) / kTabEdgeZone, 0.0F, 1.0F);
+  }
+  if (host.pointerX > right - kTabEdgeZone) {
+    return kTabEdgeStep * std::clamp((host.pointerX - right + kTabEdgeZone) / kTabEdgeZone, 0.0F, 1.0F);
+  }
+  return 0;
+}
+
+void WorkspaceApplication::updateTabEdgeScroll(Host& host) {
+  if (tabEdgeScrollSpeed(host) == 0) {
+    host.tabEdgeScroll.stop();
+    return;
+  }
+  if (host.tabEdgeScroll.active()) {
+    return;
+  }
+  host.tabEdgeScroll.startRepeating(std::chrono::milliseconds(16), [&host] {
+    const float speed = tabEdgeScrollSpeed(host);
+    if (speed == 0) {
+      host.tabEdgeScroll.stop();
+      return;
+    }
+    auto* scroll = host.tabScroll;
+    scroll->requestScrollToOffset(std::clamp(scroll->scrollOffset() + speed, 0.0F, scroll->maxScrollOffset()));
+    host.surface.requestLayout();
+  });
 }
 
 std::size_t WorkspaceApplication::tabDropIndex(const Host& host, luciole::TabId tab, float x) {
