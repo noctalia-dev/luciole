@@ -365,13 +365,14 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
 }
 Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged. A heading
-  // goes under the line in the caption style of "Places" and "Drives".
+  // goes under the line in the caption style of "Places" and "Drives", and lines up with them, without the row
+  // padding.
   const auto heading = m_pins.separatorLabel(before);
   auto button = ui::button(
       {.controlHeight = heading.empty() ? 13.0F : 37.0F,
        .contentAlign = ButtonContentAlign::Start,
        .variant = ButtonVariant::Ghost,
-       .paddingH = luciole::kSideListRowPaddingH}
+       .paddingH = heading.empty() ? luciole::kSideListRowPaddingH : 0.0F}
   );
   auto* raw = button.get();
   raw->setDirection(heading.empty() ? FlexDirection::Horizontal : FlexDirection::Vertical);

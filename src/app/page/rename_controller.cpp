@@ -238,6 +238,7 @@ void RenameController::openSeparatorHeading(std::size_t before) {
   if (m_page.popupSurface() != nullptr) {
     m_page.activePopup().bind(ActivePopup::Kind::SeparatorHeading, [this] { m_headingEditor = nullptr; });
     m_headingEditor = control;
+    control->input()->setPlaceholder("Heading");
     m_page.popupDispatcher().setFocus(control->input()->inputArea());
     control->input()->selectAll();
   }
