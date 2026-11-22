@@ -392,20 +392,20 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
             ui::separator({.orientation = SeparatorOrientation::HorizontalRule})
         )
     );
-    // In a column of its own: the button recolors the labels directly inside it, and the heading keeps the
-    // captions' color instead.
+    // The button colors the heading per state, as it does a place name: the caption color at rest, like Places
+    // and Drives, and the row text color over the hover and pressed fills, which the caption color would not
+    // stand out on.
+    auto palette = Button::defaultPalette(ButtonVariant::Ghost);
+    palette.normal.label = colorSpecFromRole(ColorRole::OnSurfaceVariant);
+    raw->setCustomPalette(palette);
     raw->addChild(
-        ui::column(
-            {.align = FlexAlign::Stretch},
-            ui::label(
-                {.text = heading,
-                 .fontSize = Style::fontSizeCaption,
-                 .fontWeight = FontWeight::SemiBold,
-                 .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
-                 .height = 24.0F,
-                 .maxLines = 1,
-                 .ellipsize = TextEllipsize::End}
-            )
+        ui::label(
+            {.text = heading,
+             .fontSize = Style::fontSizeCaption,
+             .fontWeight = FontWeight::SemiBold,
+             .height = 24.0F,
+             .maxLines = 1,
+             .ellipsize = TextEllipsize::End}
         )
     );
   }
