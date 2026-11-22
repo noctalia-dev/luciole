@@ -283,7 +283,11 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
         const auto found = std::ranges::find(current, saved[old].location, &Bookmark::location);
         if (found != current.end()) {
           const auto index = static_cast<std::size_t>(found - current.begin());
-          if (index > 0 && (followed.empty() || followed.back() < index)) {
+          if (index > 0 && !followed.empty() && followed.back() == index) {
+            // The group between this separator and the one before it is gone. The rows below are this one's, so
+            // its heading, or its lack of one, replaces the emptied group's.
+            headings.back() = labels[i];
+          } else if (index > 0 && (followed.empty() || followed.back() < index)) {
             followed.push_back(index);
             headings.push_back(labels[i]);
           }

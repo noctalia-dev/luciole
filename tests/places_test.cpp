@@ -659,6 +659,30 @@ namespace {
     pump.ready(service);
     TEST_CHECK(!service.error().empty() && read(path) == theirs && service.separatorLabel(first) == "Theirs");
   }
+  void testMergedHeadings(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "merged-headings/state.toml";
+    const auto shared = fixture.root / "merged-headings/bookmarks";
+    const auto x = fixture.pin("merge-x");
+    const auto y = fixture.pin("merge-y");
+    const auto z = fixture.pin("merge-z");
+    write(shared, x.location.uri() + " merge-x\n" + y.location.uri() + " merge-y\n" + z.location.uri() + " merge-z\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    // "Solo" heads a group of one pin, x; "Rest" heads y and z.
+    for (const auto& [pin, heading] : {std::pair{x, "Solo"}, std::pair{y, "Rest"}}) {
+      TEST_CHECK(service.addSeparator(row(service, pin.location)));
+      pump.ready(service);
+      TEST_CHECK(service.setSeparatorLabel(row(service, pin.location), heading));
+      pump.ready(service);
+    }
+    // Unpinning x empties its group: the two separators become one, in front of y, and it heads y's group.
+    TEST_CHECK(service.remove(x.location));
+    pump.ready(service);
+    TEST_CHECK((service.separators() == std::vector{row(service, y.location)}));
+    TEST_CHECK(service.separatorLabel(row(service, y.location)) == "Rest");
+  }
 } // namespace
 
 int main() {
@@ -672,6 +696,7 @@ int main() {
     testSeparatorDrops(fixture);
     testSeparatorsFollowExternalChanges(fixture);
     testSeparatorHeadings(fixture);
+    testMergedHeadings(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {
