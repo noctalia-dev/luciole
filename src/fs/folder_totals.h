@@ -35,6 +35,7 @@ namespace luciole {
     const FolderTotalsSnapshot& snapshot() const;
     void setChangedCallback(std::function<void()> changed);
     void setNetworkFilesystemCheck(NetworkFilesystemCheck check);
+    void setSameDeviceOnly(bool enabled);
 
   private:
     struct State;

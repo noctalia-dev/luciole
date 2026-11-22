@@ -82,6 +82,7 @@ luciole::BrowserController::BrowserController(
   for (std::size_t index = 0; index < m_folderSizeSlots.size(); ++index) {
     m_folderSizeSlots[index].service.setChangedCallback([this, index] { folderSizeSlotChanged(index); });
     m_folderSizeSlots[index].service.setNetworkFilesystemCheck(networkCheck);
+    m_folderSizeSlots[index].service.setSameDeviceOnly(true);
   }
   updateMetadataPolicy();
 }
