@@ -53,6 +53,12 @@ class WorkspaceApplication {
     luciole::TabId chromeOwner = 0;
     std::optional<luciole::TabId> pressedTab;
     float pressX = 0, pressY = 0;
+    // Where the press landed inside the pressed tab, so its dragged copy keeps that point under the pointer.
+    float grabX = 0, grabY = 0;
+    // A dragged tab's copy that follows the pointer, and the marker where it will land.
+    Flex* tabGhost = nullptr;
+    Label* tabGhostLabel = nullptr;
+    Box* tabDropMarker = nullptr;
     // A left press on empty tab strip, until it becomes a window move.
     WindowMoveGesture stripMove;
     bool tabDrag = false, resizing = false, closed = false;
@@ -128,6 +134,14 @@ private:
   void saveWindows(std::vector<luciole::SavedWindow> windows);
   // A pending move from an empty tab strip press; true when it consumed the event.
   bool stripMovePointer(Host& host, const PointerEvent& event);
+  // Motion and release of a press held on a tab: reorders it, or detaches it into a new window. True when handled.
+  bool tabDragPointer(Host& host, const PointerEvent& event, float x, float y);
+  // The position `tab`, dropped at `x`, takes among the window's other tabs.
+  static std::size_t tabDropIndex(const Host& host, luciole::TabId tab, float x);
+  // Adds the dragged tab's copy and its drop marker to the window's scene.
+  static void buildTabDrag(Host& host);
+  // Shows the dragged tab's copy under the pointer and, while it would reorder, the marker where it lands.
+  static void layoutTabDrag(Host& host, Renderer& renderer);
   void tabMenu(Host& host, luciole::TabId tab, float x, float y);
   static Button::ButtonPalette closeTabPalette(ColorRole foreground);
   void rebuildStrip(Host& host, const luciole::TabWindow& window);
