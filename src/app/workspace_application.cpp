@@ -1542,12 +1542,18 @@ float WorkspaceApplication::tabEdgeScrollSpeed(const Host& host) {
   float left = 0, top = 0;
   Node::absolutePosition(host.tabScroll, left, top);
   const float right = left + host.tabScroll->width();
-  // Faster the nearer the pointer is to the end, and at full speed past it.
+  const float offset = host.tabScroll->scrollOffset();
+  // Faster the nearer the pointer is to the end, and at full speed past it. Nothing once the bar is at that end,
+  // so the timer stops instead of relaying out the window with nothing to scroll.
   if (host.pointerX < left + kTabEdgeZone) {
-    return -kTabEdgeStep * std::clamp((left + kTabEdgeZone - host.pointerX) / kTabEdgeZone, 0.0F, 1.0F);
+    return offset <= 0.0F
+        ? 0.0F
+        : -kTabEdgeStep * std::clamp((left + kTabEdgeZone - host.pointerX) / kTabEdgeZone, 0.0F, 1.0F);
   }
   if (host.pointerX > right - kTabEdgeZone) {
-    return kTabEdgeStep * std::clamp((host.pointerX - right + kTabEdgeZone) / kTabEdgeZone, 0.0F, 1.0F);
+    return offset >= host.tabScroll->maxScrollOffset()
+        ? 0.0F
+        : kTabEdgeStep * std::clamp((host.pointerX - right + kTabEdgeZone) / kTabEdgeZone, 0.0F, 1.0F);
   }
   return 0;
 }
