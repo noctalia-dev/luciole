@@ -382,6 +382,62 @@ namespace {
     dying->reload();
     pump.until([&] { return destroyed; });
   }
+  std::size_t row(const luciole::PinService& service, const luciole::Location& location) {
+    const auto found = std::ranges::find(service.bookmarks(), location, &luciole::Bookmark::location);
+    TEST_CHECK(found != service.bookmarks().end());
+    return static_cast<std::size_t>(found - service.bookmarks().begin());
+  }
+  void testSeparators(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "separators/state.toml";
+    const auto shared = fixture.root / "separators/bookmarks";
+    const auto a = fixture.pin("sep-a");
+    const auto b = fixture.pin("sep-b");
+    const auto c = fixture.pin("sep-c");
+    write(shared, a.location.uri() + " sep-a\n" + b.location.uri() + " sep-b\n" + c.location.uri() + " sep-c\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    const auto count = service.bookmarks().size();
+    TEST_CHECK(service.separators().empty());
+
+    // A separator sits in front of a row; never before the first, past the last or twice in one gap.
+    TEST_CHECK(service.addSeparator(row(service, b.location)));
+    pump.ready(service);
+    TEST_CHECK((service.separators() == std::vector{row(service, b.location)}));
+    TEST_CHECK(
+        !service.addSeparator(0) && !service.addSeparator(count) && !service.addSeparator(row(service, b.location))
+    );
+    TEST_CHECK(read(path).contains("place_separators") && !read(shared).contains("separator"));
+    luciole::PinService restarted(path, shared, {});
+    restarted.reload();
+    pump.ready(restarted);
+    TEST_CHECK((restarted.separators() == service.separators()));
+
+    // Moving a pin keeps the separator's row, so the pin crosses it.
+    const auto before = service.separators();
+    TEST_CHECK(service.move(c.location, row(service, a.location)));
+    pump.ready(service);
+    TEST_CHECK(service.separators() == before && row(service, c.location) < service.separators().front());
+    // Removing a pin keeps the separator in front of the same row.
+    const auto ahead = service.bookmarks()[service.separators().front()].location;
+    TEST_CHECK(service.remove(c.location));
+    pump.ready(service);
+    TEST_CHECK(service.bookmarks()[service.separators().front()].location == ahead);
+
+    // Moving and removing a separator.
+    const auto at = service.separators().front();
+    TEST_CHECK(service.moveSeparator(at, true));
+    pump.ready(service);
+    TEST_CHECK((service.separators() == std::vector{at - 1}));
+    TEST_CHECK(service.moveSeparatorTo(at - 1, at));
+    pump.ready(service);
+    TEST_CHECK((service.separators() == std::vector{at}));
+    TEST_CHECK(!service.moveSeparatorTo(at, 0) && !service.removeSeparator(at + 1));
+    TEST_CHECK(service.removeSeparator(at));
+    pump.ready(service);
+    TEST_CHECK(service.separators().empty() && !read(path).contains("place_separators"));
+  }
 } // namespace
 
 int main() {
@@ -390,6 +446,7 @@ int main() {
     testSharedDocument(fixture);
     testPlacesAndPins(fixture);
     testExistingNetworkLayout(fixture);
+    testSeparators(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
   } catch (const std::exception& error) {

@@ -277,6 +277,34 @@ namespace {
       ::setenv("XDG_STATE_HOME", saved->c_str(), 1);
     }
   }
+
+  void testPlaceSeparators() {
+    Fixture fixture;
+    const std::vector<Bookmark> bookmarks{
+        {.label = "a", .location = Location::fromPath("/tmp/a"), .iconName = {}},
+        {.label = "b", .location = Location::fromPath("/tmp/b"), .iconName = {}},
+        {.label = "c", .location = Location::fromPath("/tmp/c"), .iconName = {}}
+    };
+    StateStore store(fixture.path());
+    TEST_CHECK(store.load());
+    TEST_CHECK(store.saveBookmarks(bookmarks, {1, 2}) == AtomicWriteState::Durable);
+    TEST_CHECK(read(fixture.path()).contains("place_separators"));
+    StateStore reread(fixture.path());
+    TEST_CHECK(reread.load() && (reread.state().placeSeparators == std::vector<std::size_t>{1, 2}));
+    // Saving the windows leaves the separators alone.
+    TEST_CHECK(reread.saveWindows({window("/tmp")}) == AtomicWriteState::Durable);
+    TEST_CHECK(store.load() && (store.state().placeSeparators == std::vector<std::size_t>{1, 2}));
+    // Without separators the key is left out of the file.
+    TEST_CHECK(store.saveBookmarks(bookmarks) == AtomicWriteState::Durable);
+    TEST_CHECK(!read(fixture.path()).contains("place_separators") && store.state().placeSeparators.empty());
+
+    // A separator can't sit before the first row.
+    write(fixture.path(), "schema_version = 1\nplace_separators = [3, 0]\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separators[1]");
+    // Rows out of order or repeated are dropped, keeping an increasing list.
+    write(fixture.path(), "schema_version = 1\nplace_separators = [4, 2, 4, 6]\n");
+    TEST_CHECK(store.load() && (store.state().placeSeparators == std::vector<std::size_t>{4, 6}));
+  }
 } // namespace
 
 int main() {
@@ -287,6 +315,7 @@ int main() {
     testInvalidStateAndRecovery();
     testPrivacyAndBounds();
     testPrivateReaderAndPaths();
+    testPlaceSeparators();
     std::println("state store checks passed");
     return 0;
   } catch (const std::exception& error) {
