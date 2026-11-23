@@ -1525,7 +1525,7 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
     select(host.id, tab);
     return true;
   }
-  if (tabDetaches(y)) {
+  if (tabDetaches(host, y)) {
     defer(host.id, tab, WorkspaceCommand::Detach);
   } else {
     m_model.move(tab, host.id, tabDropIndex(host, tab, x));
@@ -1535,13 +1535,13 @@ bool WorkspaceApplication::tabDragPointer(Host& host, const PointerEvent& event,
   return true;
 }
 
-bool WorkspaceApplication::tabDetaches(float y) const {
-  // Single Window has no detach, so the whole window reorders.
-  return !m_defaults.singleWindow && y > kTabDetachY;
+bool WorkspaceApplication::tabDetaches(const Host& host, float y) const {
+  // Single Window has no detach, and detaching a lone tab would only reopen its window.
+  return !m_defaults.singleWindow && m_model.windows().at(host.id).tabs.size() > 1 && y > kTabDetachY;
 }
 
 float WorkspaceApplication::tabEdgeScrollSpeed(const Host& host) const {
-  if (!host.pressedTab || !host.tabDrag || tabDetaches(host.pointerY) || !host.tabScroll->scrollable()) {
+  if (!host.pressedTab || !host.tabDrag || tabDetaches(host, host.pointerY) || !host.tabScroll->scrollable()) {
     return 0;
   }
   float left = 0, top = 0;
@@ -1615,7 +1615,7 @@ void WorkspaceApplication::layoutTabDrag(Host& host, Renderer& renderer) const {
   const float width = source->width(), height = source->height();
   const auto surfaceWidth = static_cast<float>(host.surface.width());
   const auto surfaceHeight = static_cast<float>(host.surface.height());
-  const bool detach = tabDetaches(host.pointerY);
+  const bool detach = tabDetaches(host, host.pointerY);
   float sx = 0, sy = 0;
   Node::absolutePosition(source, sx, sy);
   // Within the strip the copy slides along it; pulled out, it follows the pointer freely.

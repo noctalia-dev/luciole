@@ -141,8 +141,8 @@ private:
   bool tabDragPointer(Host& host, const PointerEvent& event, float x, float y);
   // The position `tab`, dropped at `x`, takes among the window's other tabs.
   static std::size_t tabDropIndex(const Host& host, luciole::TabId tab, float x);
-  // True when a tab dropped at `y` opens in a new window rather than moving within the strip.
-  bool tabDetaches(float y) const;
+  // True when a tab of `host` dropped at `y` opens in a new window rather than moving within the strip.
+  bool tabDetaches(const Host& host, float y) const;
   // How far the tab bar scrolls per step while a dragged tab is held near its ends; 0 elsewhere.
   float tabEdgeScrollSpeed(const Host& host) const;
   // Starts or stops scrolling the tab bar for the dragged tab's position.
