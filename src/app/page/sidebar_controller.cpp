@@ -489,21 +489,19 @@ void SidebarController::onFrame() {
 
 void SidebarController::updateDriveUsage() { m_places->updateDriveUsage(); }
 
-std::optional<InputDispatcher::TabFocusSnapshot> SidebarController::invalidate() {
-  std::optional<InputDispatcher::TabFocusSnapshot> placesFocus;
-  if (m_placesDirty) {
-    for (const Node* node = m_page.dispatcher().focusedArea(); node != nullptr; node = node->parent()) {
-      if (node == m_places) {
-        placesFocus = m_page.dispatcher().captureTabFocus();
-        break;
-      }
+bool SidebarController::invalidate() {
+  if (!m_placesDirty) {
+    return false;
+  }
+  for (const Node* node = m_page.dispatcher().focusedArea(); node != nullptr; node = node->parent()) {
+    if (node == m_places) {
+      m_placesFocus = m_page.dispatcher().captureTabFocus();
+      break;
     }
   }
-  if (m_placesDirty) {
-    m_placesDirty = false;
-    m_places->invalidate();
-  }
-  return placesFocus;
+  m_placesDirty = false;
+  m_places->invalidate();
+  return true;
 }
 
 void SidebarController::layout() {
@@ -525,8 +523,8 @@ void SidebarController::layoutResizeLine(Renderer& renderer) {
   m_sidebarResizeLine->arrange(renderer, {2.5F, 0, 1.0F, m_sidebarResize->height()});
 }
 
-void SidebarController::restoreFocus(std::optional<InputDispatcher::TabFocusSnapshot> focus, bool covered) {
-  if (focus) {
+void SidebarController::restoreFocus(bool covered) {
+  if (auto focus = std::exchange(m_placesFocus, std::nullopt)) {
     m_page.dispatcher().restoreTabFocus(std::move(*focus));
   }
   if (m_restorePlaceFocus && !covered) {

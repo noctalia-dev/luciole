@@ -79,7 +79,7 @@ namespace luciole {
     void rebuild();
     void addSeparatorRow(std::size_t before);
     // The row a dragged separator at scene `y` would sit in front of, if it can go there.
-    std::optional<std::size_t> separatorTarget(float y, std::size_t from) const;
+    std::optional<std::size_t> separatorTarget(float y) const;
     void showSeparatorIndicator(std::optional<std::size_t> target);
     void addRow(const Bookmark& bookmark, const std::string& glyph, std::optional<std::size_t> index);
     void addDriveRow(const Drive& drive);

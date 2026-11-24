@@ -83,7 +83,6 @@ public:
   void configureCallbacks();
   // Pins or devices changed: rebuild the list on the next layout.
   void markDirty() { m_placesDirty = true; }
-  bool placesDirty() const { return m_placesDirty; }
   // Drive usage changed: updates the usage bars in place.
   void updateDriveUsage();
   // A Trash, Restore or Empty Trash job settled: recounts the trash once per job.
@@ -107,13 +106,13 @@ public:
   // Frame slot in BrowserPage::prepareFrame(): the resize line follows hover and focus.
   void onFrame();
   // Layout hooks in BrowserPage::prepareFrame(), in this order.
-  // Rebuilds a changed list; returns the focus inside it to restore afterwards. BrowserPage::prepareSidebar() also
-  // calls it, before the window arranges the sidebar.
-  std::optional<InputDispatcher::TabFocusSnapshot> invalidate();
+  // Rebuilds a changed list and keeps the focus inside it for restoreFocus(); returns whether it did.
+  // BrowserPage::prepareSidebar() also calls it, before the window arranges the sidebar.
+  bool invalidate();
   void layout();
   void layoutResizeLine(Renderer& renderer);
-  // Restores the focus `invalidate()` captured, then a pending place focus unless `covered`.
-  void restoreFocus(std::optional<InputDispatcher::TabFocusSnapshot> focus, bool covered);
+  // Restores the focus `invalidate()` kept, then a pending place focus unless `covered`.
+  void restoreFocus(bool covered);
 
 private:
   static constexpr float kGapInset = (kWorkspaceInset - kHandleWidth) * 0.5F;
@@ -167,4 +166,5 @@ private:
   Node* m_sidebarBundle = nullptr;
   std::unique_ptr<Node> m_detachedSidebar;
   std::optional<luciole::Location> m_restorePlaceFocus;
+  std::optional<InputDispatcher::TabFocusSnapshot> m_placesFocus;
 };

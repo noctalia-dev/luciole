@@ -373,13 +373,9 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
   if (m_page.choosing()) {
     return;
   }
-  const auto& separators = m_pins.separators();
-  const auto free = [&separators, count = m_pins.bookmarks().size()](std::size_t row) {
-    return row > 0 && row < count && !std::ranges::contains(separators, row);
-  };
   std::vector<ContextMenuControlEntry> entries{
-      {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && free(before - 1)},
-      {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && free(before + 1)},
+      {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && m_pins.canAddSeparator(before - 1)},
+      {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && m_pins.canAddSeparator(before + 1)},
       {.label = "", .separator = true},
       {.id = 1, .label = "Remove Separator", .enabled = m_pins.editable()},
   };
@@ -393,7 +389,7 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
         if (action == 1) {
           m_pins.removeSeparator(before);
         } else if (action == 2 || action == 3) {
-          m_pins.moveSeparator(before, action == 2);
+          m_pins.moveSeparatorTo(before, action == 2 ? before - 1 : before + 1);
         }
       },
       {x, y, 1, 1}
@@ -426,6 +422,12 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     }
     return std::nullopt;
   };
+  // The row after this place, where a separator below it goes; 0, which never takes one, when it isn't pinned.
+  const auto below = [this, location = bookmark.location] -> std::size_t {
+    const auto& pins = m_pins.bookmarks();
+    const auto found = std::ranges::find(pins, location, &luciole::Bookmark::location);
+    return found == pins.end() ? 0 : static_cast<std::size_t>(found - pins.begin()) + 1;
+  };
   {
     entries.push_back({.label = "", .separator = true});
     if (!bookmark.location.isTrash() && bookmark.location != luciole::Location::network()) {
@@ -436,16 +438,8 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     entries.push_back({.id = 3, .label = "Move Up", .enabled = m_pins.editable() && adjacent(true).has_value()});
     entries.push_back({.id = 4, .label = "Move Down", .enabled = m_pins.editable() && adjacent(false).has_value()});
     // A line under this row; the last row has nothing below it to separate.
-    const auto& pins = m_pins.bookmarks();
-    const auto row = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);
-    const auto below = static_cast<std::size_t>(row - pins.begin()) + 1;
     entries.push_back(
-        {.id = 10,
-         .label = "Add Separator Below",
-         .enabled = m_pins.editable()
-             && row != pins.end()
-             && below < pins.size()
-             && !std::ranges::contains(m_pins.separators(), below)}
+        {.id = 10, .label = "Add Separator Below", .enabled = m_pins.editable() && m_pins.canAddSeparator(below())}
     );
   }
   entries.push_back({.label = "", .separator = true});
@@ -460,7 +454,7 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
   }
   showContextMenu(
       entries,
-      [this, bookmark, adjacent](int action) {
+      [this, bookmark, adjacent, below](int action) {
         if (!m_pins.contains(bookmark.location)) {
           m_page.actionError("This pin is no longer available.");
           return;
@@ -482,11 +476,7 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
             m_pins.move(bookmark.location, *index);
           }
         } else if (action == 10) {
-          const auto& pins = m_pins.bookmarks();
-          const auto row = std::ranges::find(pins, bookmark.location, &luciole::Bookmark::location);
-          if (row != pins.end()) {
-            m_pins.addSeparator(static_cast<std::size_t>(row - pins.begin()) + 1);
-          }
+          m_pins.addSeparator(below());
         } else if (action == 5) {
           luciole::DirectoryEntry entry{
               .place = bookmark.location,

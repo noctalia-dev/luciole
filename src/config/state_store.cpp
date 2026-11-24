@@ -311,6 +311,12 @@ namespace {
     }
     return text;
   }
+  // The Places section: what saveBookmarks() writes.
+  bool samePlaces(const luciole::SessionState& a, const luciole::SessionState& b) {
+    return a.bookmarks == b.bookmarks
+        && a.placesCustomized == b.placesCustomized
+        && a.placeSeparators == b.placeSeparators;
+  }
 } // namespace
 
 std::optional<std::string> luciole::storedUriProblem(const std::string& uri) { return uriProblem(uri); }
@@ -403,12 +409,8 @@ luciole::AtomicWriteState luciole::StateStore::save(SessionState proposed, Secti
         bool matches = true; // The last picked folder simply wins over another writer's.
         switch (section) {
         case Section::Bookmarks:
-          unchanged = current->bookmarks == proposed.bookmarks
-              && current->placesCustomized == proposed.placesCustomized
-              && current->placeSeparators == proposed.placeSeparators;
-          matches = current->bookmarks == m_state.bookmarks
-              && current->placesCustomized == m_state.placesCustomized
-              && current->placeSeparators == m_state.placeSeparators;
+          unchanged = samePlaces(*current, proposed);
+          matches = samePlaces(*current, m_state);
           break;
         case Section::Windows:
           unchanged = current->windows == proposed.windows;

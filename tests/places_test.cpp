@@ -429,7 +429,7 @@ namespace {
 
     // Moving and removing a separator.
     const auto at = service.separators().front();
-    TEST_CHECK(service.moveSeparator(at, true));
+    TEST_CHECK(service.moveSeparatorTo(at, at - 1));
     pump.ready(service);
     TEST_CHECK((service.separators() == std::vector{at - 1}));
     TEST_CHECK(service.moveSeparatorTo(at - 1, at));

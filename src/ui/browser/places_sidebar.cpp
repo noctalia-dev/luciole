@@ -395,19 +395,17 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
     }
   });
   raw->setOnPointerMotion([this, raw](float, float localY) {
-    if (!m_separatorDrag || m_separatorDrag->from == 0) {
+    if (!m_separatorDrag) {
       return;
     }
     auto& drag = *m_separatorDrag;
-    if (!drag.moved && std::abs(localY - drag.pressY) >= Style::dragStartThreshold) {
-      drag.moved = true;
-    }
+    drag.moved = drag.moved || std::abs(localY - drag.pressY) >= Style::dragStartThreshold;
     if (!drag.moved) {
       return;
     }
     float x = 0, y = 0;
     Node::absolutePosition(raw, x, y);
-    drag.target = separatorTarget(y + localY, drag.from);
+    drag.target = separatorTarget(y + localY);
     showSeparatorIndicator(drag.target);
   });
   raw->inputArea()->setOnCancel([this] {
@@ -416,7 +414,7 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   });
   m_scroll->content()->addChild(std::move(button));
 }
-std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y, std::size_t from) const {
+std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y) const {
   // The first row whose upper half is below the pointer; past the last row there is nothing to separate.
   std::optional<std::size_t> target;
   for (const auto& row : m_rows) {
@@ -427,11 +425,8 @@ std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y, std:
       break;
     }
   }
-  const auto& separators = m_pins.separators();
-  if (!target || *target == 0 || *target == from || std::ranges::contains(separators, *target)) {
-    return std::nullopt;
-  }
-  return target;
+  // Its own gap has a separator too: the one being dragged.
+  return target && m_pins.canAddSeparator(*target) ? target : std::nullopt;
 }
 void luciole::PlacesSidebar::showSeparatorIndicator(std::optional<std::size_t> target) {
   if (m_separatorIndicator == nullptr) {

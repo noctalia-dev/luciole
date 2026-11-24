@@ -472,11 +472,14 @@ bool luciole::PinService::save(std::vector<Bookmark> bookmarks, std::vector<std:
   return true;
 }
 const std::vector<std::size_t>& luciole::PinService::separators() const { return m_state->separators; }
+bool luciole::PinService::canAddSeparator(std::size_t before) const {
+  return before > 0 && before < m_state->bookmarks.size() && !std::ranges::contains(m_state->separators, before);
+}
 bool luciole::PinService::addSeparator(std::size_t before) {
-  auto separators = m_state->separators;
-  if (before == 0 || before >= m_state->bookmarks.size() || std::ranges::contains(separators, before)) {
+  if (!canAddSeparator(before)) {
     return false;
   }
+  auto separators = m_state->separators;
   separators.insert(std::ranges::upper_bound(separators, before), before);
   return save(m_state->bookmarks, std::move(separators));
 }
@@ -487,16 +490,10 @@ bool luciole::PinService::removeSeparator(std::size_t before) {
   }
   return save(m_state->bookmarks, std::move(separators));
 }
-bool luciole::PinService::moveSeparator(std::size_t before, bool up) {
-  return before > 0 && moveSeparatorTo(before, up ? before - 1 : before + 1);
-}
 bool luciole::PinService::moveSeparatorTo(std::size_t before, std::size_t target) {
   auto separators = m_state->separators;
   const auto found = std::ranges::find(separators, before);
-  if (found == separators.end()
-      || target == 0
-      || target >= m_state->bookmarks.size()
-      || std::ranges::contains(separators, target)) {
+  if (found == separators.end() || !canAddSeparator(target)) {
     return false;
   }
   *found = target;

@@ -34,9 +34,10 @@ namespace luciole {
     // Separator lines between Places rows, each as the row it sits before. Moving a pin keeps them where they are,
     // so the pin crosses them; adding or removing pins keeps each in front of the same row.
     const std::vector<std::size_t>& separators() const;
+    // Whether a separator can go in front of row `before`: a gap inside the list that has none yet.
+    bool canAddSeparator(std::size_t before) const;
     bool addSeparator(std::size_t before);
     bool removeSeparator(std::size_t before);
-    bool moveSeparator(std::size_t before, bool up);
     // Moves the separator in front of row `before` to sit in front of row `target` instead.
     bool moveSeparatorTo(std::size_t before, std::size_t target);
     bool saveWindows(std::vector<SavedWindow> windows);
