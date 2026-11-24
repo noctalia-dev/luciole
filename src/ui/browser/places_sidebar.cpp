@@ -426,7 +426,7 @@ std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y) cons
     }
   }
   // Its own gap has a separator too: the one being dragged.
-  return target && m_pins.canAddSeparator(*target) ? target : std::nullopt;
+  return target && SeparatorGaps(m_pins, m_showNetwork).free(*target) ? target : std::nullopt;
 }
 void luciole::PlacesSidebar::showSeparatorIndicator(std::optional<std::size_t> target) {
   if (m_separatorIndicator == nullptr) {
@@ -629,12 +629,13 @@ void luciole::PlacesSidebar::rebuild() {
   m_separatorDrag.reset();
   content->addChild(makeListDropIndicator(1.0F, &m_separatorIndicator));
   const auto& pins = m_pins.bookmarks();
+  const SeparatorGaps gaps(m_pins, m_showNetwork);
   for (std::size_t i = 0; i < pins.size(); ++i) {
-    if (std::ranges::contains(m_pins.separators(), i)) {
-      addSeparatorRow(i);
-    }
-    if (!m_showNetwork && pins[i].location == Location::network()) {
+    if (!placeShown(pins[i], m_showNetwork)) {
       continue;
+    }
+    if (const auto separator = gaps.separatorAbove(i)) {
+      addSeparatorRow(*separator);
     }
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;

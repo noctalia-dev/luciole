@@ -373,15 +373,22 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
   if (m_page.choosing()) {
     return;
   }
+  // The gap above or below the one this separator is drawn in, among the rows Places shows.
+  const auto neighbor = [this, before](bool up) -> std::optional<std::size_t> {
+    const luciole::SeparatorGaps gaps(m_pins, m_page.settings().showNetwork);
+    const auto gap = gaps.gap(before);
+    const auto target = !gap ? std::nullopt : up ? gaps.previousShown(*gap) : gaps.nextShown(*gap);
+    return target && gaps.free(*target) ? target : std::nullopt;
+  };
   std::vector<ContextMenuControlEntry> entries{
-      {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && m_pins.canAddSeparator(before - 1)},
-      {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && m_pins.canAddSeparator(before + 1)},
+      {.id = 2, .label = "Move Up", .enabled = m_pins.editable() && neighbor(true).has_value()},
+      {.id = 3, .label = "Move Down", .enabled = m_pins.editable() && neighbor(false).has_value()},
       {.label = "", .separator = true},
       {.id = 1, .label = "Remove Separator", .enabled = m_pins.editable()},
   };
   showContextMenu(
       std::move(entries),
-      [this, before](int action) {
+      [this, before, neighbor](int action) {
         if (!std::ranges::contains(m_pins.separators(), before)) {
           m_page.actionError("This separator is no longer available.");
           return;
@@ -389,7 +396,9 @@ void MenuController::openSeparatorMenu(std::size_t before, float x, float y) {
         if (action == 1) {
           m_pins.removeSeparator(before);
         } else if (action == 2 || action == 3) {
-          m_pins.moveSeparatorTo(before, action == 2 ? before - 1 : before + 1);
+          if (const auto target = neighbor(action == 2)) {
+            m_pins.moveSeparatorTo(before, *target);
+          }
         }
       },
       {x, y, 1, 1}
@@ -416,17 +425,22 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     auto index = static_cast<std::size_t>(found - pins.begin());
     while (previous ? index > 0 : index + 1 < pins.size()) {
       index = previous ? index - 1 : index + 1;
-      if (m_page.settings().showNetwork || pins[index].location != luciole::Location::network()) {
+      if (luciole::placeShown(pins[index], m_page.settings().showNetwork)) {
         return index;
       }
     }
     return std::nullopt;
   };
-  // The row after this place, where a separator below it goes; 0, which never takes one, when it isn't pinned.
-  const auto below = [this, location = bookmark.location] -> std::size_t {
+  // The gap under this place, above the next row Places shows, if a separator can go there.
+  const auto below = [this, location = bookmark.location] -> std::optional<std::size_t> {
     const auto& pins = m_pins.bookmarks();
     const auto found = std::ranges::find(pins, location, &luciole::Bookmark::location);
-    return found == pins.end() ? 0 : static_cast<std::size_t>(found - pins.begin()) + 1;
+    if (found == pins.end()) {
+      return std::nullopt;
+    }
+    const luciole::SeparatorGaps gaps(m_pins, m_page.settings().showNetwork);
+    const auto next = gaps.nextShown(static_cast<std::size_t>(found - pins.begin()));
+    return next && gaps.free(*next) ? next : std::nullopt;
   };
   {
     entries.push_back({.label = "", .separator = true});
@@ -438,9 +452,7 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     entries.push_back({.id = 3, .label = "Move Up", .enabled = m_pins.editable() && adjacent(true).has_value()});
     entries.push_back({.id = 4, .label = "Move Down", .enabled = m_pins.editable() && adjacent(false).has_value()});
     // A line under this row; the last row has nothing below it to separate.
-    entries.push_back(
-        {.id = 10, .label = "Add Separator Below", .enabled = m_pins.editable() && m_pins.canAddSeparator(below())}
-    );
+    entries.push_back({.id = 10, .label = "Add Separator Below", .enabled = m_pins.editable() && below().has_value()});
   }
   entries.push_back({.label = "", .separator = true});
   if (bookmark.location == luciole::Location::trash()) {
@@ -476,7 +488,9 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
             m_pins.move(bookmark.location, *index);
           }
         } else if (action == 10) {
-          m_pins.addSeparator(below());
+          if (const auto target = below()) {
+            m_pins.addSeparator(*target);
+          }
         } else if (action == 5) {
           luciole::DirectoryEntry entry{
               .place = bookmark.location,

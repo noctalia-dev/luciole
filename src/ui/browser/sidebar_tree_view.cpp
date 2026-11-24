@@ -205,7 +205,7 @@ void luciole::SidebarTreeView::setRoots(
   m_pinCount = pins.bookmarks().size();
   for (std::size_t i = 0; i < pins.bookmarks().size(); ++i) {
     const auto& pin = pins.bookmarks()[i];
-    if (!showNetwork && pin.location == Location::network()) {
+    if (!placeShown(pin, showNetwork)) {
       continue;
     }
     const auto prior = m_rootIds.find(pin.location.uri());

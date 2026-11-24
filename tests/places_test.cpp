@@ -453,6 +453,34 @@ namespace {
     TEST_CHECK(!service.error().empty() && read(path) == theirs);
     TEST_CHECK((service.separators() == other.separators()));
   }
+  // With Network hidden, a gap on screen spans two rows: separators are placed, moved and drawn per shown gap.
+  void testSeparatorGaps(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "gaps/state.toml";
+    const auto shared = fixture.root / "gaps/bookmarks";
+    const auto a = fixture.pin("gap-a");
+    write(shared, a.location.uri() + " gap-a\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    const auto network = row(service, luciole::Location::network());
+    const auto after = row(service, a.location);
+    TEST_CHECK(network > 1 && after == network + 1);
+
+    const luciole::SeparatorGaps shown(service, true);
+    TEST_CHECK(shown.gap(0) == std::nullopt && shown.gap(network) == network && shown.free(network));
+    const luciole::SeparatorGaps hidden(service, false);
+    // The gap under the row above Network is the one above the next shown row; Network's own gap is gone.
+    TEST_CHECK(hidden.nextShown(network - 1) == after && hidden.previousShown(after) == network - 1);
+    TEST_CHECK(!hidden.free(network) && hidden.free(after));
+
+    // A separator saved in front of the hidden row is drawn above the next shown one, which then takes no other.
+    TEST_CHECK(service.addSeparator(network));
+    pump.ready(service);
+    const luciole::SeparatorGaps drawn(service, false);
+    TEST_CHECK(drawn.gap(network) == after && drawn.separatorAbove(after) == network && !drawn.free(after));
+    TEST_CHECK(luciole::SeparatorGaps(service, true).free(after));
+  }
   void testSeparatorsFollowExternalChanges(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "external/state.toml";
@@ -508,6 +536,7 @@ int main() {
     testPlacesAndPins(fixture);
     testExistingNetworkLayout(fixture);
     testSeparators(fixture);
+    testSeparatorGaps(fixture);
     testSeparatorsFollowExternalChanges(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;

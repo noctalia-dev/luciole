@@ -590,3 +590,35 @@ bool luciole::PinService::setIcon(const Bookmark& expected, std::string iconName
   found->iconName = std::move(iconName);
   return save(std::move(proposed));
 }
+bool luciole::placeShown(const Bookmark& place, bool showNetwork) {
+  return showNetwork || place.location != Location::network();
+}
+luciole::SeparatorGaps::SeparatorGaps(const PinService& pins, bool showNetwork) : m_separators(pins.separators()) {
+  const auto& rows = pins.bookmarks();
+  for (std::size_t i = 0; i < rows.size(); ++i) {
+    if (placeShown(rows[i], showNetwork)) {
+      m_shown.push_back(i);
+    }
+  }
+}
+std::optional<std::size_t> luciole::SeparatorGaps::gap(std::size_t before) const {
+  // Nothing is above the first shown row to separate it from.
+  const auto row = std::ranges::lower_bound(m_shown, before);
+  if (row == m_shown.end() || row == m_shown.begin()) {
+    return std::nullopt;
+  }
+  return *row;
+}
+std::optional<std::size_t> luciole::SeparatorGaps::separatorAbove(std::size_t row) const {
+  const auto found = std::ranges::find_if(m_separators, [&](std::size_t before) { return gap(before) == row; });
+  return found == m_separators.end() ? std::nullopt : std::optional(*found);
+}
+bool luciole::SeparatorGaps::free(std::size_t row) const { return gap(row) == row && !separatorAbove(row); }
+std::optional<std::size_t> luciole::SeparatorGaps::nextShown(std::size_t row) const {
+  const auto next = std::ranges::upper_bound(m_shown, row);
+  return next == m_shown.end() ? std::nullopt : std::optional(*next);
+}
+std::optional<std::size_t> luciole::SeparatorGaps::previousShown(std::size_t row) const {
+  const auto next = std::ranges::lower_bound(m_shown, row);
+  return next == m_shown.begin() ? std::nullopt : std::optional(*std::prev(next));
+}
