@@ -456,8 +456,18 @@ bool luciole::PinService::save(std::vector<Bookmark> bookmarks, std::vector<std:
     return false;
   }
   if (bookmarks != m_state->bookmarks || separators != m_state->separators) {
+    // A change to the separators alone writes only state.toml, so nothing but the end of the write would redraw
+    // Places: show it now, in the frame that closes the menu or ends the drag. The write's result replaces it, so a
+    // conflict or a failed write still shows what is on disk. Not when pins change too, since the rows would then
+    // refer to the new list while Places still shows the old one.
+    const bool separatorsOnly = bookmarks == m_state->bookmarks;
+    auto shown = separatorsOnly ? std::optional(separators) : std::nullopt;
     m_state->pinBusy = true;
     m_state->run(std::move(bookmarks), std::nullopt, std::move(separators));
+    if (shown) {
+      m_state->separators = std::move(*shown);
+      m_state->notify();
+    }
   }
   return true;
 }

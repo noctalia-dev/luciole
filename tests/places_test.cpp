@@ -403,6 +403,8 @@ namespace {
 
     // A separator sits in front of a row; never before the first, past the last or twice in one gap.
     TEST_CHECK(service.addSeparator(row(service, b.location)));
+    // Shown before the write ends, since nothing else would redraw Places for a separator-only change.
+    TEST_CHECK(service.busy() && (service.separators() == std::vector{row(service, b.location)}));
     pump.ready(service);
     TEST_CHECK((service.separators() == std::vector{row(service, b.location)}));
     TEST_CHECK(
