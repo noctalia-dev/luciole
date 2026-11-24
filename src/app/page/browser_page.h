@@ -484,6 +484,8 @@ private:
   Flex* m_toolbar = nullptr;
   LayoutRect m_pageBounds{};
   std::optional<InputDispatcher::TabFocusSnapshot> m_stashedFocus;
+  // Focus in Places captured by prepareSidebar(), restored by layoutFrame().
+  std::optional<InputDispatcher::TabFocusSnapshot> m_placesFocus;
   std::optional<luciole::BrowseViewport> m_inactiveViewport;
   std::function<void(WorkspaceCommand, std::optional<luciole::Location>)> m_workspaceRequest;
   bool m_visible = false, m_active = false;

@@ -83,6 +83,7 @@ public:
   void configureCallbacks();
   // Pins or devices changed: rebuild the list on the next layout.
   void markDirty() { m_placesDirty = true; }
+  bool placesDirty() const { return m_placesDirty; }
   // Drive usage changed: updates the usage bars in place.
   void updateDriveUsage();
   // A Trash, Restore or Empty Trash job settled: recounts the trash once per job.
@@ -106,7 +107,8 @@ public:
   // Frame slot in BrowserPage::prepareFrame(): the resize line follows hover and focus.
   void onFrame();
   // Layout hooks in BrowserPage::prepareFrame(), in this order.
-  // Rebuilds a changed list; returns the focus inside it to restore afterwards.
+  // Rebuilds a changed list; returns the focus inside it to restore afterwards. BrowserPage::prepareSidebar() also
+  // calls it, before the window arranges the sidebar.
   std::optional<InputDispatcher::TabFocusSnapshot> invalidate();
   void layout();
   void layoutResizeLine(Renderer& renderer);
