@@ -882,16 +882,13 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
       }
       // The empty strip works as a title bar, as browsers' tab strips do: double-click toggles maximized and a right
       // click opens the compositor's window menu. A compositor that decorates the window may still draw no title bar.
-      const bool titlebar = !host->surface.fullscreen();
-      if (!child && event.button == BTN_RIGHT) {
-        if (titlebar) {
-          host->stripMove.cancel();
-          host->surface.showWindowMenu(event.serial, static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
-          return;
-        }
-      } else if (!child) {
+      const bool titlebar = !child && !host->surface.fullscreen();
+      if (titlebar && event.button == BTN_RIGHT) {
+        host->surface.showWindowMenu(event.serial, static_cast<std::int32_t>(x), static_cast<std::int32_t>(y));
+        return;
+      }
+      if (!child && event.button == BTN_LEFT) {
         if (titlebar && host->stripMove.doubleClick(event.time, x, y)) {
-          host->stripMove.cancel();
           host->surface.toggleMaximized();
           return;
         }
