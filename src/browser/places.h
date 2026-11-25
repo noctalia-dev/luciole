@@ -38,8 +38,8 @@ namespace luciole {
     // pin crosses them; add() and removing pins keep each in front of the same row that stays.
     const std::vector<std::size_t>& separators() const;
     // The heading of the separator in front of row `before`; empty for a plain line. An empty `text` removes it.
-    std::string separatorLabel(std::size_t before) const;
-    bool setSeparatorLabel(std::size_t before, std::string text);
+    std::string separatorHeading(std::size_t before) const;
+    bool setSeparatorHeading(std::size_t before, std::string text);
     bool addSeparator(std::size_t before);
     bool removeSeparator(std::size_t before);
     // Moves the separator in front of row `before` to sit in front of row `target` instead.
@@ -59,7 +59,7 @@ namespace luciole {
     std::shared_ptr<State> m_state;
     bool save(std::vector<Bookmark> bookmarks);
     bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators);
-    bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators, std::vector<std::string> labels);
+    bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators, std::vector<std::string> headings);
     // Whether a separator can go in front of row `before`: a gap inside the list that has none yet.
     bool canAddSeparator(std::size_t before) const;
   };

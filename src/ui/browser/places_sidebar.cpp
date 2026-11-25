@@ -367,7 +367,7 @@ luciole::PlacesSidebar::SeparatorRow luciole::PlacesSidebar::addSeparatorRow(std
   // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged. A heading
   // goes under the line in the caption style of "Places" and "Drives", and lines up with them, without the row
   // padding.
-  const auto heading = m_pins.separatorLabel(before);
+  const auto heading = m_pins.separatorHeading(before);
   auto button = ui::button(
       {.controlHeight = heading.empty() ? std::optional<float>{13.0F} : std::nullopt,
        .contentAlign = ButtonContentAlign::Start,

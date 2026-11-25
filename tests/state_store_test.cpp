@@ -306,7 +306,7 @@ namespace {
     TEST_CHECK(store.load() && (store.state().placeSeparators == std::vector<std::size_t>{4, 6}));
   }
 
-  void testPlaceSeparatorLabels() {
+  void testPlaceSeparatorHeadings() {
     Fixture fixture;
     const std::vector<Bookmark> bookmarks{
         {.label = "a", .location = Location::fromPath("/tmp/a"), .iconName = {}},
@@ -316,26 +316,28 @@ namespace {
     StateStore store(fixture.path());
     TEST_CHECK(store.load());
     TEST_CHECK(store.saveBookmarks(bookmarks, {1, 2}, {"", "Work"}) == AtomicWriteState::Durable);
-    TEST_CHECK(read(fixture.path()).contains("place_separator_labels"));
+    TEST_CHECK(read(fixture.path()).contains("place_separator_headings"));
     StateStore reread(fixture.path());
-    TEST_CHECK(reread.load() && (reread.state().placeSeparatorLabels == std::vector<std::string>{"", "Work"}));
+    TEST_CHECK(reread.load() && (reread.state().placeSeparatorHeadings == std::vector<std::string>{"", "Work"}));
     // Without headings the key is left out, so builds without them can still read the file.
     TEST_CHECK(store.saveBookmarks(bookmarks, {1, 2}) == AtomicWriteState::Durable);
-    TEST_CHECK(!read(fixture.path()).contains("place_separator_labels"));
-    TEST_CHECK(store.state().placeSeparatorLabels == std::vector<std::string>(2));
+    TEST_CHECK(!read(fixture.path()).contains("place_separator_headings"));
+    TEST_CHECK(store.state().placeSeparatorHeadings == std::vector<std::string>(2));
 
     // A heading for a row without a separator is dropped.
-    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = 'A', 3 = 'B'}\n");
-    TEST_CHECK(store.load() && (store.state().placeSeparatorLabels == std::vector<std::string>{"A"}));
-    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {x = 'A'}\n");
-    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_labels.x");
-    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = 5}\n");
-    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_labels.2");
-    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = ''}\n");
+    write(
+        fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_headings = {2 = 'A', 3 = 'B'}\n"
+    );
+    TEST_CHECK(store.load() && (store.state().placeSeparatorHeadings == std::vector<std::string>{"A"}));
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_headings = {x = 'A'}\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_headings.x");
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_headings = {2 = 5}\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_headings.2");
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_headings = {2 = ''}\n");
     TEST_CHECK(!store.load());
     // A heading of only spaces, Unicode ones included, would draw nothing, so it is refused like an empty one.
-    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_labels = {2 = ' \u00a0'}\n");
-    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_labels.2");
+    write(fixture.path(), "schema_version = 1\nplace_separators = [2]\nplace_separator_headings = {2 = ' \u00a0'}\n");
+    TEST_CHECK(!store.load() && store.issues().front().key == "place_separator_headings.2");
 
     // Headings are checked like place labels, but worded for headings, and blank text is refused.
     TEST_CHECK(luciole::separatorHeadingProblem("") == "Enter a heading.");
@@ -361,7 +363,7 @@ int main() {
     testPrivacyAndBounds();
     testPrivateReaderAndPaths();
     testPlaceSeparators();
-    testPlaceSeparatorLabels();
+    testPlaceSeparatorHeadings();
     std::println("state store checks passed");
     return 0;
   } catch (const std::exception& error) {

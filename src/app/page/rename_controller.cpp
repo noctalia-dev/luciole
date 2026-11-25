@@ -207,7 +207,7 @@ void RenameController::openSeparatorHeading(std::size_t before) {
     m_page.actionError("This separator is no longer available.");
     return;
   }
-  const auto current = m_pins.separatorLabel(before);
+  const auto current = m_pins.separatorHeading(before);
   // The separator is known by the place it sits above, as Rename Place knows its place: rows renumber when
   // Places changes while the dialog is open, in another window or another application.
   const auto anchor = m_pins.bookmarks()[before].location;
@@ -221,7 +221,7 @@ void RenameController::openSeparatorHeading(std::size_t before) {
         const auto row = static_cast<std::size_t>(found - pins.begin());
         if (found == pins.end()
             || !std::ranges::contains(m_pins.separators(), row)
-            || !m_pins.setSeparatorLabel(row, std::move(label))) {
+            || !m_pins.setSeparatorHeading(row, std::move(label))) {
           if (m_headingEditor != nullptr) {
             m_headingEditor->showError(
                 m_pins.busy() ? "Places are being saved. Try again shortly."
