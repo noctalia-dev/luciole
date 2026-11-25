@@ -4,6 +4,7 @@
 
 #include <cerrno>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <utility>
 
@@ -78,4 +79,12 @@ bool luciole::sameRenamedRevision(const struct stat& before, const struct stat& 
     expected.st_mtim = after.st_mtim;
   }
   return sameFileRevision(expected, after);
+}
+
+void luciole::raiseFileDescriptorLimit() {
+  struct rlimit limit{};
+  if (::getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur < limit.rlim_max) {
+    limit.rlim_cur = limit.rlim_max;
+    (void)::setrlimit(RLIMIT_NOFILE, &limit);
+  }
 }

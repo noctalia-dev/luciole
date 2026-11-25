@@ -37,4 +37,7 @@ namespace luciole {
   // A completed rename changes ctime; an atomic directory exchange can also change mtime (XFS).
   // Use only immediately after our own successful syscall, before adopting the new revision.
   bool sameRenamedRevision(const struct stat& before, const struct stat& after, bool exchanged = false);
+  // Raises the soft open-file limit to the hard limit at startup. The 1024 default exists for select(), which
+  // Luciole never uses; undo history for large transfers needs several descriptors per item.
+  void raiseFileDescriptorLimit();
 } // namespace luciole

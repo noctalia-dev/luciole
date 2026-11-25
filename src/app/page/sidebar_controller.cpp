@@ -19,6 +19,7 @@
 #include "fs/file_metadata.h"
 #include "platform/desktop_integration.h"
 #include "render/animation/animation_manager.h"
+#include "ui/browser/action_shortcuts.h"
 #include "ui/browser/places_sidebar.h"
 #include "ui/builders.h"
 #include "ui/palette.h"
@@ -507,9 +508,10 @@ void SidebarController::layout() {
   m_sidebarResize->setVisible(visible() && !m_state.compact());
   m_sidebarResize->setParticipatesInLayout(visible() && !m_state.compact());
   m_sidebarPanel->setExcludeSubtreeFromTabOrder(!visible());
-  m_toggle->setVisible(m_state.compact());
-  m_toggle->setParticipatesInLayout(m_state.compact());
-  m_toggle->setSelected(drawerOpen());
+  m_toggle->setSelected(visible());
+  m_toggle->setTooltip(
+      luciole::shortcutTooltip(visible() ? "Hide sidebar" : "Show sidebar", luciole::KeybindCommand::ToggleSidebar)
+  );
   const float sidebarWidth = static_cast<float>(std::min(m_sidebarWidth, maximumWidth()));
   m_places->setMinWidth(sidebarWidth);
   m_places->setMaxWidth(sidebarWidth);
