@@ -7,12 +7,14 @@
 #include "fs/system_mounts.h"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <fstream>
 #include <gio/gio.h>
 #include <gio/gunixmounts.h>
 #include <map>
 #include <set>
+#include <utility>
 
 namespace {
   // Owned references to the GVolume or GMount behind one Drive, and the device holding it.
@@ -43,6 +45,23 @@ namespace {
     std::string name;
     std::getline(file, name);
     return name.empty() ? std::format("process {}", pid) : name;
+  }
+
+  // The first name of a themed icon, without "-symbolic"; empty for other icons.
+  std::string themedName(GIcon* icon) {
+    if (icon == nullptr || !G_IS_THEMED_ICON(icon)) {
+      return {};
+    }
+    const auto* const* names = g_themed_icon_get_names(G_THEMED_ICON(icon));
+    if (names == nullptr || names[0] == nullptr) {
+      return {};
+    }
+    std::string name(names[0]);
+    constexpr std::string_view symbolic = "-symbolic";
+    if (name.ends_with(symbolic)) {
+      name.resize(name.size() - symbolic.size());
+    }
+    return name;
   }
 
   bool boundDirectory(GMount* mount) {
@@ -83,7 +102,8 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
          .glyph = "database",
          .root = Location::fromPath("/"),
          .removal = luciole::DriveRemoval::None,
-         .usage = std::nullopt}
+         .usage = std::nullopt,
+         .iconName = {}}
     );
   }
 
@@ -120,12 +140,23 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
         drive.key = "mount:" + drive.root->uri();
       }
     }
-    if (drive.root && !drive.root->isNative()) {
+    const luciole::GioPtr<GIcon> icon(
+        handle.volume ? g_volume_get_symbolic_icon(handle.volume.get())
+                      : (mount ? g_mount_get_symbolic_icon(mount) : nullptr)
+    );
+    const auto iconName = themedName(icon.get());
+    const auto kind = deviceGlyph(iconName);
+    if (!kind.empty()) {
+      drive.glyph = kind;
+    } else if (drive.root && !drive.root->isNative()) {
       drive.glyph = "server";
     } else if (device && g_drive_is_removable(device)) {
       drive.glyph = "device-usb";
     } else {
       drive.glyph = "database";
+    }
+    if (kind.empty()) {
+      drive.iconName = iconName;
     }
     handles.insert_or_assign(drive.key, std::move(handle));
     drives.push_back(std::move(drive));
@@ -221,7 +252,8 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
            .root = mount.state == SystemMountState::Mounted ? std::optional(target) : std::nullopt,
            .removal = removable ? DriveRemoval::Unmount : DriveRemoval::None,
            .usage = std::nullopt,
-           .activation = mount.configuration.automount ? std::optional(target) : std::nullopt}
+           .activation = mount.configuration.automount ? std::optional(target) : std::nullopt,
+           .iconName = {}}
       );
     }
     // Mounted drives first, keeping GIO's order within each group; the root entry stays at the top.
@@ -455,4 +487,24 @@ void luciole::DriveMonitor::remove(const std::string& key, std::function<void(Dr
     );
     break;
   }
+}
+
+std::string_view luciole::deviceGlyph(std::string_view iconName) {
+  static constexpr std::array<std::pair<std::string_view, std::string_view>, 4> kDevices{{
+      {"phone", "device-mobile"},
+      {"multimedia-player", "device-speaker"},
+      // GVfs AFC reports iPads as computer-apple-ipad.
+      {"computer-apple-ipad", "device-ipad"},
+      {"camera-photo", "camera"},
+  }};
+  while (!iconName.empty()) {
+    if (const auto* found =
+            std::ranges::find(kDevices, iconName, &std::pair<std::string_view, std::string_view>::first);
+        found != kDevices.end()) {
+      return found->second;
+    }
+    const auto dash = iconName.rfind('-');
+    iconName = dash == std::string_view::npos ? std::string_view{} : iconName.substr(0, dash);
+  }
+  return {};
 }

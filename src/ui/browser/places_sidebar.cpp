@@ -4,6 +4,7 @@
 #include "config/keybinds.h"
 #include "fs/gio_ptr.h"
 #include "model/directory_options.h"
+#include "ui/browser/drive_glyph.h"
 #include "ui/browser/sidebar_tree_view.h"
 #include "ui/builders.h"
 #include "ui/controls/box.h"
@@ -260,7 +261,7 @@ void luciole::PlacesSidebar::setTrashFull(bool full) {
 }
 void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   auto button = ui::button(
-      {.glyph = drive.glyph,
+      {.glyph = luciole::driveGlyph(drive),
        .glyphSize = luciole::kSideListGlyphSize,
        .controlHeight = luciole::kSideListRowHeight,
        .contentAlign = ButtonContentAlign::Start,

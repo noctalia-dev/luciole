@@ -51,6 +51,8 @@ For an unsupported remote directory-open error, DirectorySession checks GIO's ad
 
 [DriveMonitor](../../src/fs/drive_monitor.h) keys sidebar entries by target URI and honors `x-gvfs-show`, `x-gvfs-hide`, and `x-gvfs-name`. An idle automount keeps its row. Disk-usage polling and directory watches would keep the share active, so the user refreshes it explicitly. Ordinary user-mountable fstab entries still use `mount`.
 
+Drive glyphs come from the volume's GIO icon. `fs/` maps freedesktop device names to a glyph ([deviceGlyph](../../src/fs/drive_monitor.h)) and passes any other icon name on; [driveGlyph](../../src/ui/browser/drive_glyph.h) in `ui/` shows that name when it is a glyph, since `fs/` cannot reach the glyph registry in `lib/`.
+
 When browsing a configured automount, [openSystemMount](../../src/fs/system_mounts.h) opens the nearest automount ancestor to trigger systemd, verifies the mounted filesystem so a stopped mount returns an error before Luciole exposes the directory underneath it, and holds the descriptor through enumeration so idle expiry cannot unmount it while in use. File jobs and program or terminal launches hold the same guard for each affected mount.
 
 ## Windows, tabs and pages

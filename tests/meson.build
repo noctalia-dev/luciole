@@ -23,6 +23,7 @@ test_table = [
   {'name': 'operation-activity', 'deps': [app_jobs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'drive-removal', 'deps': [app_jobs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'device-mount', 'deps': [browser_dep], 'env': gio_env},
+  {'name': 'drive-glyph', 'deps': [ui_dep], 'env': ['LUCIOLE_ASSETS_DIR=' + (meson.project_source_root() / 'lib/assets')]},
   {'name': 'archive-service', 'deps': [operations_dep, event_loop_dep], 'timeout': 90, 'env': gio_env},
   {'name': 'thumbnail', 'deps': [thumbnails_dep, imaging_dep, event_loop_dep, dependency('libwebp')],
     'timeout': 90, 'env': gio_env},

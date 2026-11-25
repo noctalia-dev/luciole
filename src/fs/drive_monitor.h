@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace luciole {
@@ -52,7 +53,14 @@ namespace luciole {
     std::optional<DriveUsage> usage;
     // A system-owned automount can be opened while its filesystem is idle. This is not a mounted root.
     std::optional<Location> activation = std::nullopt;
+    // The GIO icon name, without "-symbolic", when it names no standard device kind. A udev rule can set it
+    // through ID_MEDIA_PLAYER_ICON_NAME; the UI shows the glyph of that name, if any, in place of `glyph`.
+    std::string iconName;
   };
+
+  // The glyph for a freedesktop device icon name such as "phone" or "camera-photo", tried with trailing
+  // "-part"s removed so "phone-samsung-galaxy-s" maps as "phone". Empty for any other name.
+  std::string_view deviceGlyph(std::string_view iconName);
 
   // Main-context view of GIO's volume monitor. Callbacks run on the main context and must not throw.
   class DriveMonitor {
