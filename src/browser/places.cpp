@@ -328,7 +328,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
           Result result;
           result.bookmarks = expected;
           result.separators = expectedSeparators;
-          result.separatorLabels = labels;
+          result.separatorLabels = expectedLabels;
           auto& store = owner->store;
           auto& shared = owner->shared;
           try {
@@ -617,19 +617,27 @@ bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t befor
   }
   const auto at = stayed[before];
   proposed.insert(proposed.begin() + static_cast<std::ptrdiff_t>(at), incoming.begin(), incoming.end());
-  // Each separator stays in front of the same staying row. One that ends up at the drop goes below the new pins, or
-  // above them for a drop below its line; one left with nothing between it and the one before it is dropped.
+  // Each separator stays in front of the same staying row, with its heading. One that ends up at the drop goes below
+  // the new pins, or above them for a drop below its line. One left with nothing between it and the one before it
+  // merges with it, and the rows below are this one's, so its heading, or its lack of one, replaces the other's.
   std::vector<std::size_t> separators;
-  for (const auto row : m_state->separators) {
-    auto gap = stayed[std::min(row, current.size())];
+  std::vector<std::string> labels;
+  for (std::size_t i = 0; i < m_state->separators.size(); ++i) {
+    auto gap = stayed[std::min(m_state->separators[i], current.size())];
     if (gap > at || (gap == at && !belowSeparator)) {
       gap += incoming.size();
     }
-    if (gap > 0 && gap < proposed.size() && (separators.empty() || separators.back() < gap)) {
+    if (gap == 0 || gap >= proposed.size()) {
+      continue;
+    }
+    if (!separators.empty() && separators.back() == gap) {
+      labels.back() = m_state->separatorLabels[i];
+    } else {
       separators.push_back(gap);
+      labels.push_back(m_state->separatorLabels[i]);
     }
   }
-  return save(std::move(proposed), std::move(separators));
+  return save(std::move(proposed), std::move(separators), std::move(labels));
 }
 bool luciole::PinService::remove(const Location& location) { return removeMany({location}); }
 bool luciole::PinService::removeMany(const std::vector<Location>& locations) {

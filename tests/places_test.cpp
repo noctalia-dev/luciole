@@ -683,6 +683,36 @@ namespace {
     TEST_CHECK((service.separators() == std::vector{row(service, y.location)}));
     TEST_CHECK(service.separatorLabel(row(service, y.location)) == "Rest");
   }
+  // A pin dropped next to a headed separator leaves each heading on its line.
+  void testHeadingsFollowDrops(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "drop-headings/state.toml";
+    const auto shared = fixture.root / "drop-headings/bookmarks";
+    const auto p = fixture.pin("hd-p");
+    const auto q = fixture.pin("hd-q");
+    const auto r = fixture.pin("hd-r");
+    write(shared, p.location.uri() + " hd-p\n" + q.location.uri() + " hd-q\n" + r.location.uri() + " hd-r\n");
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    for (const auto& [pin, heading] : {std::pair{q, "Top"}, std::pair{r, "Low"}}) {
+      TEST_CHECK(service.addSeparator(row(service, pin.location)));
+      pump.ready(service);
+      TEST_CHECK(service.setSeparatorLabel(row(service, pin.location), heading));
+      pump.ready(service);
+    }
+    const auto pin = [&](const luciole::Bookmark& place) { return service.bookmarks()[row(service, place.location)]; };
+    // p dropped below the "Top" line: "Top" now sits in front of p, "Low" still in front of r.
+    TEST_CHECK(service.add({pin(p)}, row(service, q.location), true));
+    pump.ready(service);
+    TEST_CHECK(service.separatorLabel(row(service, p.location)) == "Top");
+    TEST_CHECK(service.separatorLabel(row(service, r.location)) == "Low");
+    // p and q dropped below the "Low" line empty the "Top" group: the lines merge, and "Low" heads the rows below.
+    TEST_CHECK(service.add({pin(p), pin(q)}, row(service, r.location), true));
+    pump.ready(service);
+    TEST_CHECK((service.separators() == std::vector{row(service, p.location)}));
+    TEST_CHECK(service.separatorLabel(row(service, p.location)) == "Low");
+  }
   void testHeadingsFollowExternalChanges(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "external-headings/state.toml";
@@ -724,6 +754,7 @@ int main() {
     testSeparatorsFollowExternalChanges(fixture);
     testSeparatorHeadings(fixture);
     testMergedHeadings(fixture);
+    testHeadingsFollowDrops(fixture);
     testHeadingsFollowExternalChanges(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;
