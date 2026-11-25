@@ -65,6 +65,11 @@ namespace {
   constexpr auto kChooserStartFolders = std::to_array<Named<luciole::ChooserStartFolder>>(
       {{luciole::ChooserStartFolder::Home, "home"}, {luciole::ChooserStartFolder::Last, "last"}}
   );
+  constexpr auto kColorSchemes = std::to_array<Named<luciole::ColorScheme>>(
+      {{luciole::ColorScheme::Auto, "auto"},
+       {luciole::ColorScheme::Dark, "dark"},
+       {luciole::ColorScheme::Light, "light"}}
+  );
   constexpr auto kDensities = std::to_array<Named<luciole::ViewDensity>>(
       {{luciole::ViewDensity::Compact, "compact"}, {luciole::ViewDensity::Comfortable, "comfortable"}}
   );
@@ -325,6 +330,7 @@ namespace {
       describe(P::ShowCloseButtons, "show_close_buttons", [](S& s) -> auto& { return s.showCloseButtons; }),
       describe(P::ReduceAnimations, "reduce_animations", [](S& s) -> auto& { return s.reduceAnimations; }),
       describe(P::UseSSD, "use_ssd", [](S& s) -> auto& { return s.useSSD; }),
+      describe(P::ColorScheme, "color_scheme", [](S& s) -> auto& { return s.colorScheme; }, {kColorSchemes}),
       describe(
           P::BackgroundOpacity, "background_opacity", [](S& s) -> auto& { return s.backgroundOpacity; },
           {0.0, 1.0, "expected a number from 0 to 1"}
@@ -727,6 +733,7 @@ template luciole::FilenameTruncation& luciole::preferenceValue(BrowserSettings&,
 template luciole::DetailsColumnOrder& luciole::preferenceValue(BrowserSettings&, PreferenceKey<DetailsColumnOrder>);
 template luciole::ThumbnailPolicy& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ThumbnailPolicy>);
 template luciole::ChooserStartFolder& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ChooserStartFolder>);
+template luciole::ColorScheme& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ColorScheme>);
 template const bool& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<bool>);
 template const int& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<int>);
 template const double& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<double>);
@@ -744,6 +751,7 @@ template const luciole::ThumbnailPolicy&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ThumbnailPolicy>);
 template const luciole::ChooserStartFolder&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ChooserStartFolder>);
+template const luciole::ColorScheme& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ColorScheme>);
 
 std::string_view luciole::sortFieldName(SortField field) {
   const auto* found = std::ranges::find(kSortFields, field, &Named<SortField>::value);

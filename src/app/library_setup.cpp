@@ -23,6 +23,6 @@ namespace luciole {
     });
     installPixbufImageDecoder();
     // PaletteWatcher applies colors.toml once the main loop owner exists.
-    setPalette(defaultPalette());
+    setPalette(defaultPalette(ColorScheme::Dark));
   }
 } // namespace luciole

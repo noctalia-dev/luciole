@@ -71,6 +71,7 @@ test_table = [
   {'name': 'file-filter', 'deps': [fs_dep], 'env': gio_env},
   {'name': 'chooser-policy', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-chooser-portal', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'palette-file', 'deps': [ui_dep]},
 ]
 
 foreach entry : test_table

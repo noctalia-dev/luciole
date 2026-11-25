@@ -39,6 +39,8 @@ namespace luciole {
   enum class DropAction : std::uint8_t { Menu, Copy, Move };
   // Where a file picker opens when the requesting application suggests no folder.
   enum class ChooserStartFolder : std::uint8_t { Home, Last };
+  // Which colors.toml table the palette comes from; Auto follows Noctalia's current mode.
+  enum class ColorScheme : std::uint8_t { Auto, Dark, Light };
   // Complete column allocations, including the gap after their contents. Zero
   // is the automatic Name width; metadata always has an explicit allocation.
   inline constexpr std::size_t kDetailsColumnCount = 9;

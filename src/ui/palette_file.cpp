@@ -52,7 +52,39 @@ namespace {
   }
 } // namespace
 
-Palette luciole::defaultPalette() {
+Palette luciole::defaultPalette(ColorScheme scheme) {
+  if (scheme == ColorScheme::Light) {
+    return {
+        .primary = hex("#5058b1"),
+        .onPrimary = hex("#f0eff7"),
+        .primaryContainer = hex("#b2b5d8"),
+        .onPrimaryContainer = hex("#3b3f95"),
+        .secondary = hex("#555e88"),
+        .onSecondary = hex("#f0eff7"),
+        .secondaryContainer = hex("#b3b6cc"),
+        .onSecondaryContainer = hex("#3e466f"),
+        .tertiary = hex("#3b4168"),
+        .onTertiary = hex("#fff0bd"),
+        .tertiaryContainer = hex("#abaec3"),
+        .onTertiaryContainer = hex("#3b4067"),
+        .error = hex("#a53c59"),
+        .onError = hex("#f0eff7"),
+        .errorContainer = hex("#cbacbe"),
+        .onErrorContainer = hex("#861d3f"),
+        .surface = hex("#dcddea"),
+        .onSurface = hex("#292b45"),
+        .onSurfaceVariant = hex("#414765"),
+        .surfaceContainerLow = hex("#d5d7e7"),
+        .surfaceContainer = hex("#cfd2e4"),
+        .surfaceContainerHigh = hex("#c2c6dd"),
+        .surfaceContainerHighest = hex("#b5bad5"),
+        .outlineVariant = hex("#a4aac9"),
+        .shadow = hex("#333652"),
+        .scrim = hex("#000000"),
+        .hover = hex("#3b4168"),
+        .onHover = hex("#fff0bd"),
+    };
+  }
   return {
       .primary = hex("#f7e9a8"),
       .onPrimary = hex("#302c1e"),
@@ -88,7 +120,7 @@ Palette luciole::defaultPalette() {
 std::filesystem::path luciole::palettePath() { return configHome() / "luciole" / "colors.toml"; }
 
 std::expected<Palette, std::string>
-luciole::parsePalette(std::string_view text, std::string_view source, const Palette& base) {
+luciole::parsePalette(std::string_view text, std::string_view source, ColorScheme scheme) {
   toml::table table;
   try {
     table = toml::parse(text, source);
@@ -97,11 +129,17 @@ luciole::parsePalette(std::string_view text, std::string_view source, const Pale
         std::format("{}:{}: {}", source, error.source().begin.line, std::string_view(error.description()))
     );
   }
-  const auto* colors = table["colors"].as_table();
+  const std::string_view name = scheme == ColorScheme::Dark ? "dark"
+      : scheme == ColorScheme::Light                        ? "light"
+                                                            : "colors";
+  Palette result = defaultPalette(scheme);
+  const auto* colors = table[name].as_table();
   if (colors == nullptr) {
-    return std::unexpected(std::format("{}: missing [colors] table", source));
+    if (scheme == ColorScheme::Auto) {
+      return std::unexpected(std::format("{}: missing [colors] table", source));
+    }
+    return result;
   }
-  Palette result = base;
   for (const auto& [key, node] : *colors) {
     const auto role = colorRoleFromToken(key.str());
     if (!role) {
@@ -110,23 +148,23 @@ luciole::parsePalette(std::string_view text, std::string_view source, const Pale
     const auto* value = node.as_string();
     Color color;
     if (value == nullptr || !tryParseHexColor(value->get(), color)) {
-      return std::unexpected(std::format("{}: colors.{} must be a hex color such as \"#1a1a39\"", source, key.str()));
+      return std::unexpected(std::format("{}: {}.{} must be a hex color such as \"#1a1a39\"", source, name, key.str()));
     }
     slot(result, *role) = color;
   }
   return result;
 }
 
-std::expected<Palette, std::string> luciole::loadPalette(const std::filesystem::path& path, const Palette& base) {
+std::expected<Palette, std::string> luciole::loadPalette(const std::filesystem::path& path, ColorScheme scheme) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     std::error_code error;
     if (!std::filesystem::exists(path, error) && !error) {
-      return base;
+      return defaultPalette(scheme);
     }
     return std::unexpected(std::format("{}: cannot be read", path.string()));
   }
   std::ostringstream text;
   text << file.rdbuf();
-  return parsePalette(text.str(), path.string(), base);
+  return parsePalette(text.str(), path.string(), scheme);
 }
