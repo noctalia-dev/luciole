@@ -1,5 +1,6 @@
 #pragma once
 
+#include "model/directory_options.h"
 #include "ui/palette.h"
 
 #include <expected>
@@ -8,13 +9,14 @@
 #include <string_view>
 
 namespace luciole {
-  // Built-in dark palette, used for every role colors.toml does not set.
-  Palette defaultPalette();
+  // Noctalia's built-in palette: light for ColorScheme::Light, dark otherwise.
+  Palette defaultPalette(ColorScheme scheme);
   // $XDG_CONFIG_HOME/luciole/colors.toml
   std::filesystem::path palettePath();
-  // Reads `[colors]` with keys named like Noctalia's template tokens (`primary`, `surface_container`, ...)
-  // and "#rrggbb" or "#rrggbbaa" values. Unknown keys are ignored; roles left out keep `base`.
-  std::expected<Palette, std::string> parsePalette(std::string_view text, std::string_view source, const Palette& base);
-  // A missing file yields `base`.
-  std::expected<Palette, std::string> loadPalette(const std::filesystem::path& path, const Palette& base);
+  // Reads `[colors]` (Auto), `[dark]` or `[light]` with Noctalia template token keys and "#rrggbb"/"#rrggbbaa"
+  // values over defaultPalette(scheme). Unknown keys are ignored. Dark and Light fall back to the built-in palette
+  // when their table is absent, as in files from Noctalia versions that only wrote [colors].
+  std::expected<Palette, std::string> parsePalette(std::string_view text, std::string_view source, ColorScheme scheme);
+  // A missing file yields defaultPalette(scheme).
+  std::expected<Palette, std::string> loadPalette(const std::filesystem::path& path, ColorScheme scheme);
 } // namespace luciole

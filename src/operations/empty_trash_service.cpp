@@ -2,9 +2,11 @@
 
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
+#include "operations/transfer_copy.h"
 #include "operations/trash_item.h"
 
 #include <atomic>
+#include <fcntl.h>
 #include <filesystem>
 #include <limits>
 #include <set>
@@ -119,6 +121,20 @@ namespace {
       return Outcome::Failed;
     default:
       return Outcome::Unconfirmed;
+    }
+  }
+  // Deletes name inside parent through descriptors, so a path swapped in by another process is never followed.
+  void removeTree(int parent, const std::string& name) {
+    using namespace luciole::transfer;
+    const bool folder = S_ISDIR(info(parent, name).st_mode);
+    if (folder) {
+      const auto fd = directory(parent, name);
+      for (const auto& child : children(fd.get())) {
+        removeTree(fd.get(), child);
+      }
+    }
+    if (::unlinkat(parent, name.c_str(), folder ? AT_REMOVEDIR : 0) != 0) {
+      fail("Could not delete item");
     }
   }
 } // namespace
@@ -327,7 +343,18 @@ void luciole::EmptyTrashService::State::startEmpty(const std::shared_ptr<State>&
           const auto& target = (*targets)[index];
           auto& result = results[index];
           try {
-            if (target.identity != queryTrashItem(target.location, token).identity()) {
+            // Pin the confirmed item before checking it, so a later swap at its path is detected.
+            Fd parent;
+            std::string name;
+            struct stat pinned{};
+            if (outsideTrash) {
+              const std::filesystem::path path(*target.location.nativePath());
+              name = path.filename().native();
+              parent = transfer::opened(::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+              pinned = transfer::info(parent.get(), name);
+            }
+            if (target.identity != queryTrashItem(target.location, token).identity()
+                || (outsideTrash && !sameIdentity(pinned, transfer::info(parent.get(), name)))) {
               result.outcome = EmptyTrashOutcome::Failed;
               result.error = FileError{
                   .kind = FileErrorKind::Changed,
@@ -338,13 +365,12 @@ void luciole::EmptyTrashService::State::startEmpty(const std::shared_ptr<State>&
                 break;
               }
               if (outsideTrash) {
-                std::error_code error;
-                const auto removed = std::filesystem::remove_all(*target.location.nativePath(), error);
-                if (error) {
-                  result.error = FileError{.kind = FileErrorKind::Other, .message = error.message()};
+                try {
+                  removeTree(parent.get(), name);
+                  result.outcome = EmptyTrashOutcome::Deleted;
+                } catch (const std::exception&) {
+                  result.error = currentFileError();
                   result.outcome = EmptyTrashOutcome::Unconfirmed;
-                } else {
-                  result.outcome = removed ? EmptyTrashOutcome::Deleted : EmptyTrashOutcome::Skipped;
                 }
                 owner->completed.fetch_add(1);
                 continue;

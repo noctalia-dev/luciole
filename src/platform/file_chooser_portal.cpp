@@ -4,6 +4,9 @@
 
 #include <exception>
 #include <gio/gio.h>
+#include <optional>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -100,6 +103,13 @@ namespace {
     return g_variant_new("(s@a(us))", filter.name.c_str(), g_variant_builder_end(&patterns));
   }
 
+  // std::string(const char*) would silently cut a bytestring at an embedded NUL.
+  std::optional<std::string> bytestring(GVariant* value) {
+    const char* text = g_variant_get_bytestring(value);
+    const std::string_view view(text);
+    const auto size = g_variant_get_size(value);
+    return size == 0 || view.size() + 1 == size ? std::optional<std::string>(view) : std::nullopt;
+  }
   GVariant* emptyResults() { return g_variant_new_array(G_VARIANT_TYPE("{sv}"), nullptr, 0); }
 } // namespace
 
@@ -171,10 +181,13 @@ luciole::FileChooserRequest luciole::parseFileChooserRequest(FileChooserMode mod
   }
   // Hold the value while reading it: a borrowed bytestring from g_variant_lookup() does not outlive the lookup.
   if (GVariant* folder = g_variant_lookup_value(options, "current_folder", G_VARIANT_TYPE_BYTESTRING)) {
-    const std::string path = g_variant_get_bytestring(folder);
+    const auto path = bytestring(folder);
     g_variant_unref(folder);
     try {
-      request.currentFolder = Location::fromPath(path);
+      if (!path) {
+        throw std::runtime_error("embedded NUL");
+      }
+      request.currentFolder = Location::fromPath(*path);
     } catch (const std::exception& error) {
       kLog.debug("ignoring current_folder: {}", error.what());
     }
@@ -185,7 +198,8 @@ luciole::FileChooserRequest luciole::parseFileChooserRequest(FileChooserMode mod
   }
   // A file to save over: its folder and name replace current_folder and current_name.
   if (GVariant* file = g_variant_lookup_value(options, "current_file", G_VARIANT_TYPE_BYTESTRING)) {
-    const std::string path = g_variant_get_bytestring(file);
+    // An embedded NUL reads as empty, which has no slash and is ignored below.
+    const std::string path = bytestring(file).value_or("");
     g_variant_unref(file);
     const auto slash = path.rfind('/');
     if (slash != std::string::npos && slash + 1 < path.size()) {
@@ -197,16 +211,26 @@ luciole::FileChooserRequest luciole::parseFileChooserRequest(FileChooserMode mod
       }
     }
   }
+  bool validFiles = true;
   if (GVariant* files = g_variant_lookup_value(options, "files", G_VARIANT_TYPE_BYTESTRING_ARRAY)) {
     GVariantIter iter;
     g_variant_iter_init(&iter, files);
     while (GVariant* file = g_variant_iter_next_value(&iter)) {
-      request.files.emplace_back(g_variant_get_bytestring(file));
+      auto name = bytestring(file);
+      validFiles = validFiles && name;
+      request.files.push_back(std::move(name).value_or(""));
       g_variant_unref(file);
     }
     g_variant_unref(files);
   }
   g_variant_unref(options);
+  if (!validFiles) {
+    throw std::runtime_error("files contains an embedded NUL");
+  }
+  // An empty list would let the dialog accept without returning a single file.
+  if (mode == FileChooserMode::SaveFiles && request.files.empty()) {
+    throw std::runtime_error("SaveFiles needs at least one file");
+  }
   return request;
 }
 

@@ -72,6 +72,7 @@ test_table = [
   {'name': 'file-filter', 'deps': [fs_dep], 'env': gio_env},
   {'name': 'chooser-policy', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-chooser-portal', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'palette-file', 'deps': [ui_dep]},
 ]
 
 # Suites that publish through renameat2 flags run again as if on NFS or a FUSE filesystem that rejects them.

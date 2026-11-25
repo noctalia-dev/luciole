@@ -74,8 +74,8 @@ WorkspaceApplication::WorkspaceApplication(
     luciole::WaylandTextClipboard& clipboard, luciole::BrowserSettings settings
 )
     : m_connection(connection), m_renderer(renderer), m_input(input), m_clipboard(clipboard),
-      m_defaults(std::move(settings)), m_preferences(luciole::ConfigPaths::fromEnvironment()),
-      m_pins(luciole::StateStore::pathFromEnvironment()),
+      m_defaults(std::move(settings)), m_palette(m_defaults.colorScheme),
+      m_preferences(luciole::ConfigPaths::fromEnvironment()), m_pins(luciole::StateStore::pathFromEnvironment()),
       m_folderViews(luciole::FolderViewStore::pathFromEnvironment(), m_defaults.rememberFolderViews) {
   m_preferences.setChangedCallback([this](const std::string& error) {
     if (m_preferences.settings()) {
@@ -90,6 +90,7 @@ WorkspaceApplication::WorkspaceApplication(
       Style::setCornerRadiusScale(static_cast<float>(m_defaults.cornerRadiusScale));
       Style::setCloseButtonsEnabled(m_defaults.showCloseButtons);
       MotionService::instance().setEnabled(!m_defaults.reduceAnimations);
+      m_palette.setScheme(m_defaults.colorScheme);
       m_folderViews.setEnabled(m_defaults.rememberFolderViews);
     }
     for (auto& [id, page] : m_pages) {

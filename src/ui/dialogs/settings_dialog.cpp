@@ -175,13 +175,20 @@ SettingsDialog::SettingsDialog(
   addTerminal();
   section("Appearance", "paint");
   card("Window");
-  if (compositorSupportsSSD) {
-    addBool(P::UseSSD, "Use System Title Bar And Borders");
-  }
+  addChoice(
+      P::ColorScheme, "Color Scheme",
+      {{"Automatic", luciole::ColorScheme::Auto},
+       {"Dark", luciole::ColorScheme::Dark},
+       {"Light", luciole::ColorScheme::Light}},
+      "Automatic follows Noctalia's theme mode"
+  );
   addFraction(P::BackgroundOpacity, "Background Opacity", 1.0, 0.01);
   addFraction(P::CornerRadiusScale, "Corner Roundness", 2.0, 0.05, {}, [](double value) {
     Style::setCornerRadiusScale(static_cast<float>(value));
   });
+  if (compositorSupportsSSD) {
+    addBool(P::UseSSD, "Use System Title Bar And Borders");
+  }
   addBool(P::AlwaysShowTabBar, "Always Show Tab Bar");
   addBool(P::AlwaysShowStatusBar, "Always Show Status Bar");
   addBool(P::CompactMenus, "Compact Context Menus");

@@ -10,7 +10,7 @@ namespace {
   constexpr auto kLog = Logger("palette");
 }
 
-luciole::PaletteWatcher::PaletteWatcher() : m_path(palettePath()) {
+luciole::PaletteWatcher::PaletteWatcher(ColorScheme scheme) : m_path(palettePath()), m_scheme(scheme) {
   watch();
   reload();
 }
@@ -22,8 +22,16 @@ luciole::PaletteWatcher::~PaletteWatcher() {
   }
 }
 
+void luciole::PaletteWatcher::setScheme(ColorScheme scheme) {
+  if (scheme == m_scheme) {
+    return;
+  }
+  m_scheme = scheme;
+  reload();
+}
+
 void luciole::PaletteWatcher::reload() {
-  auto palette = loadPalette(m_path, defaultPalette());
+  auto palette = loadPalette(m_path, m_scheme);
   if (!palette) {
     kLog.warn("{}", palette.error());
     return;

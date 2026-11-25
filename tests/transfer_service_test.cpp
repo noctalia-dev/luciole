@@ -1,4 +1,5 @@
 #include "event_loop/glib_poll_source.h"
+#include "fs/posix_fd.h"
 #include "operations/copy_receipt.h"
 #include "operations/creation_stage.h"
 #include "operations/history_revisions.h"
@@ -4561,6 +4562,7 @@ namespace {
 
 int main(int argc, char** argv) {
   try {
+    luciole::raiseFileDescriptorLimit();
     if (argc == 2 && std::string_view(argv[1]) == "--mount-history") {
       return mountedHistoryChecks();
     }

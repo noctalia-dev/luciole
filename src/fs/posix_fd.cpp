@@ -9,6 +9,7 @@
 #include <linux/fs.h>
 #include <linux/magic.h>
 #include <string>
+#include <sys/resource.h>
 #include <sys/statfs.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -174,4 +175,12 @@ bool luciole::sameRenamedRevision(const struct stat& before, const struct stat& 
     expected.st_mtim = after.st_mtim;
   }
   return sameFileRevision(expected, after);
+}
+
+void luciole::raiseFileDescriptorLimit() {
+  struct rlimit limit{};
+  if (::getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur < limit.rlim_max) {
+    limit.rlim_cur = limit.rlim_max;
+    (void)::setrlimit(RLIMIT_NOFILE, &limit);
+  }
 }

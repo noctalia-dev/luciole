@@ -136,7 +136,6 @@ With relative `datadir=share`, Meson installs:
 <prefix>/share/luciole/assets/fonts/noctalia-tabler.ttf
 <prefix>/share/luciole/assets/fonts/tabler.json
 <prefix>/share/luciole/assets/fonts/tabler-icons-license.txt
-<prefix>/share/luciole/templates/colors.toml
 <prefix>/share/dbus-1/services/dev.noctalia.luciole.FileManager1.service
 <prefix>/share/dbus-1/services/org.freedesktop.impl.portal.desktop.luciole.service
 <prefix>/share/xdg-desktop-portal/portals/luciole.portal
@@ -149,7 +148,7 @@ With relative `datadir=share`, Meson installs:
 <prefix>/share/licenses/luciole/LICENSE
 ```
 
-Ship the fonts directory and its license together. The palette template is an integration resource, not per-user configuration. No AppStream/metainfo file, manual page or systemd unit is currently installed.
+Ship the fonts directory and its license together. No AppStream/metainfo file, manual page or systemd unit is currently installed.
 
 ### Asset lookup and staging
 

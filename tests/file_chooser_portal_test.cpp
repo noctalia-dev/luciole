@@ -135,11 +135,43 @@ namespace {
     TEST_CHECK(rejected);
   }
 
+  // SaveFiles must name at least one file, and a name cut short at an embedded NUL must not reach the dialog.
+  void checkSaveFilesNames() {
+    const auto rejected = [](std::initializer_list<std::string_view> names) {
+      GVariantBuilder files;
+      g_variant_builder_init(&files, G_VARIANT_TYPE("aay"));
+      for (const auto name : names) {
+        g_variant_builder_add_value(
+            &files, g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, name.data(), name.size(), 1)
+        );
+      }
+      GVariantBuilder options;
+      g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+      g_variant_builder_add(&options, "{sv}", "files", g_variant_builder_end(&files));
+      GVariant* parameters = g_variant_ref_sink(
+          openFileParameters("/org/freedesktop/portal/desktop/request/1_1/files", g_variant_builder_end(&options))
+      );
+      bool thrown = false;
+      try {
+        luciole::parseFileChooserRequest(luciole::FileChooserMode::SaveFiles, parameters);
+      } catch (const std::runtime_error&) {
+        thrown = true;
+      }
+      g_variant_unref(parameters);
+      return thrown;
+    };
+    using namespace std::string_view_literals;
+    TEST_CHECK(rejected({}));
+    TEST_CHECK(rejected({"a\0b\0"sv}));
+    TEST_CHECK(!rejected({"a.txt\0"sv}));
+  }
+
   void run() {
     using luciole::FileChooserCall;
     using luciole::FileChooserRequest;
     using luciole::FilePattern;
     checkMnemonics();
+    checkSaveFilesNames();
 
     const luciole::GioPtr<GTestDBus> bus(g_test_dbus_new(G_TEST_DBUS_NONE));
     g_test_dbus_up(bus.get());

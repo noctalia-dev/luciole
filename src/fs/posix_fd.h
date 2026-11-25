@@ -48,4 +48,8 @@ namespace luciole {
   // renameat2 with RENAME_EXCHANGE. Where the filesystem rejects the flag, swaps through a temporary name beside
   // `from` and restores both names on failure; `to` is briefly absent. Returns 0, or -1 with errno set.
   int renameExchange(int fromDir, const char* from, int toDir, const char* to);
+
+  // Raises the soft open-file limit to the hard limit at startup. The 1024 default exists for select(), which
+  // Luciole never uses; undo history for large transfers needs several descriptors per item.
+  void raiseFileDescriptorLimit();
 } // namespace luciole
