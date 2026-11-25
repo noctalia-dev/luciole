@@ -175,6 +175,7 @@ namespace {
       TEST_CHECK(workspace.hub.replayHistory(workspace.page, false));
       until([&] { return !workspace.hub.busy(); });
       TEST_CHECK(workspace.hub.canRedo());
+      TEST_CHECK(!fs::exists(fixture.root / "volume/destination/input"));
     }
     const auto descriptors = fixture.held();
     TEST_CHECK(descriptors >= 2);
@@ -212,12 +213,8 @@ namespace {
     // Keep the finished job alive throughout, as an open report/dialog does.
     TEST_CHECK(job && !job->running());
     if (!realMounts) {
-      if (kind == History::CopyRedo || kind == History::CrossMoveRedo) {
+      if (kind == History::CopyRedo || kind == History::ReplaceRedo || kind == History::CrossMoveRedo) {
         TEST_CHECK(!fs::exists(fixture.root / "volume/destination/input"));
-      } else if (kind == History::ReplaceRedo) {
-        std::string contents;
-        std::ifstream(fixture.root / "volume/destination/input") >> contents;
-        TEST_CHECK(contents == "original");
       } else if (
           kind == History::Copy || kind == History::Replace || kind == History::Move || kind == History::CrossMove
       ) {

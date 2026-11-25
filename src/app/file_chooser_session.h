@@ -61,16 +61,31 @@ public:
 private:
   bool saving() const { return m_request.mode != luciole::FileChooserMode::Open; }
   luciole::ChooserMode mode() const;
-  luciole::ChooserDecision decision(const std::vector<luciole::DirectoryEntry>& entries) const;
+  luciole::ChooserDecision decision(const std::vector<luciole::DirectoryEntry>& entries, bool refresh = false);
   void selectFilter(std::size_t index);
   void apply(const luciole::ChooserDecision& decision);
   void open(const std::vector<luciole::DirectoryEntry>& targets);
+  void
+  finishOpen(const std::vector<luciole::DirectoryEntry>& targets, const std::vector<luciole::DirectoryEntry>& resolved);
   // Save: answers with the destinations, or asks first when one exists.
   void save();
   void syncSave();
   // Puts the selected item's name in the name field when saving over it makes sense.
   void offerName(const luciole::DirectoryEntry& entry);
+  void savedTargets(std::vector<luciole::Location> targets, std::vector<luciole::Location> existing);
   void cancel();
+
+  luciole::CancelToken m_typeToken, m_saveToken;
+  std::vector<luciole::DirectoryEntry> m_typeSources, m_typeResolved;
+  std::optional<luciole::Location> m_typeFolder;
+  std::string m_saveError;
+  struct PendingOpen {
+    std::vector<luciole::DirectoryEntry> targets;
+    std::vector<luciole::EntryId> selection;
+    bool acceptButton = false;
+  };
+  std::optional<PendingOpen> m_openAfterTypes;
+  bool m_typesPending = false, m_savePending = false;
 
   luciole::FileChooserRequest m_request;
   std::shared_ptr<luciole::FileChooserCall> m_call;
@@ -96,7 +111,7 @@ private:
   std::optional<luciole::EntryId> m_namedFrom;
   luciole::CancelToken m_nameLookup;
   std::optional<luciole::Location> m_folder;
-  // Destinations the user was asked about; saving to exactly these again replaces them.
+  // Existing destinations the user was asked about; saving while exactly these exist replaces them.
   std::vector<luciole::Location> m_confirm;
   std::string m_reasonText;
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);

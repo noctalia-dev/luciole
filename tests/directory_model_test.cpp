@@ -845,8 +845,8 @@ namespace {
     data.generation = 12;
     test::editEntries(data, [&](auto& entries) { entries[0] = entry(3, "z-renamed"); });
     model.applySnapshot(data);
-    selected(model, {});
-    TEST_CHECK(!model.selection().focused && !model.selection().anchor && !model.scrollAnchor());
+    selected(model, {2});
+    TEST_CHECK(model.selection().focused == 2 && model.selection().anchor == 2 && !model.scrollAnchor());
     model.select(2);
     auto cancelled = data;
     cancelled.generation = 13;
@@ -870,6 +870,126 @@ namespace {
     auto dying = std::make_unique<DirectoryModel>();
     dying->setChangedCallback([&dying] { dying.reset(); });
     dying->applySnapshot(other);
+  }
+
+  void testSelectionAfterRemoval() {
+    const auto initial = snapshot({entry(1, "a"), entry(2, "b"), entry(3, "c"), entry(4, "d")});
+    DirectoryModel model;
+    model.applySnapshot(initial);
+    TEST_CHECK(model.select(2));
+    model.applySnapshot(snapshot({entry(1, "a"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(model, {3});
+    TEST_CHECK(model.selection().focused == 3 && model.selection().anchor == 3);
+    model.applySnapshot(snapshot({entry(1, "a"), entry(4, "d")}, 3));
+    selected(model, {4});
+    model.applySnapshot(snapshot({entry(1, "a")}, 4));
+    selected(model, {1});
+    model.applySnapshot(snapshot({}, 5));
+    selected(model, {});
+    TEST_CHECK(!model.selection().focused && !model.selection().anchor);
+
+    DirectoryModel descending;
+    descending.setSort({.descending = true});
+    descending.applySnapshot(initial);
+    TEST_CHECK(descending.select(3));
+    descending.applySnapshot(snapshot({entry(1, "a"), entry(2, "b"), entry(4, "d")}, 2));
+    selected(descending, {2});
+
+    DirectoryModel batch;
+    batch.applySnapshot(initial);
+    TEST_CHECK(batch.select(2) && batch.select(3, SelectionMode::Range));
+    batch.applySnapshot(snapshot({entry(1, "a"), entry(2, "b"), entry(4, "d")}, 2));
+    selected(batch, {2});
+    TEST_CHECK(batch.selection().focused == 2);
+    batch.applySnapshot(snapshot({entry(1, "a"), entry(4, "d")}, 3));
+    selected(batch, {4});
+
+    DirectoryModel together;
+    together.applySnapshot(initial);
+    TEST_CHECK(together.select(2) && together.select(3, SelectionMode::Range));
+    together.applySnapshot(snapshot({entry(1, "a"), entry(4, "d")}, 2));
+    selected(together, {4});
+
+    DirectoryModel inserted;
+    inserted.applySnapshot(initial);
+    TEST_CHECK(inserted.select(2));
+    inserted.applySnapshot(snapshot({entry(1, "a"), entry(99, "bb"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(inserted, {3});
+
+    DirectoryModel filtered;
+    filtered.applySnapshot(snapshot({entry(1, "match-a"), entry(2, "match-b"), entry(3, "other")}));
+    filtered.setFilter({.text = "match"});
+    TEST_CHECK(filtered.select(2));
+    filtered.applySnapshot(snapshot({entry(1, "match-a"), entry(3, "other")}, 2));
+    selected(filtered, {1});
+    filtered.setFilter({.text = "other"});
+    selected(filtered, {});
+    TEST_CHECK(!filtered.selection().focused);
+
+    DirectoryModel hidden;
+    hidden.applySnapshot(initial);
+    TEST_CHECK(hidden.select(2));
+    auto hiddenEntry = entry(2, ".hidden");
+    hiddenEntry.hidden = true;
+    hidden.applySnapshot(snapshot({entry(1, "a"), hiddenEntry, entry(3, "c"), entry(4, "d")}, 2));
+    selected(hidden, {});
+    TEST_CHECK(!hidden.selection().focused);
+
+    DirectoryModel unselected;
+    unselected.applySnapshot(initial);
+    TEST_CHECK(unselected.select(2));
+    unselected.clearSelection();
+    unselected.applySnapshot(snapshot({entry(1, "a"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(unselected, {});
+    TEST_CHECK(unselected.selection().focused == 3);
+
+    DirectoryModel changedChoice;
+    changedChoice.applySnapshot(initial);
+    TEST_CHECK(changedChoice.select(2) && changedChoice.select(4));
+    changedChoice.applySnapshot(snapshot({entry(1, "a"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(changedChoice, {4});
+
+    DirectoryModel loading;
+    loading.applySnapshot(initial);
+    TEST_CHECK(loading.select(2));
+    auto refresh = initial;
+    refresh.status = DirectoryStatus::Loading;
+    refresh.generation = 2;
+    loading.applySnapshot(refresh);
+    selected(loading, {2});
+    loading.applySnapshot(snapshot({entry(1, "a"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(loading, {3});
+    auto partial = snapshot({entry(1, "a"), entry(4, "d")}, 3);
+    partial.status = DirectoryStatus::Error;
+    partial.error = luciole::FileError{.kind = luciole::FileErrorKind::Denied, .message = "partial fixture"};
+    loading.applySnapshot(partial);
+    selected(loading, {});
+    TEST_CHECK(!loading.selection().focused);
+
+    DirectoryModel incremental;
+    incremental.applySnapshot(initial);
+    TEST_CHECK(incremental.select(2));
+    auto fresh = snapshot({entry(1, "a")}, 2);
+    fresh.status = DirectoryStatus::Loading;
+    fresh.incrementalResults = true;
+    incremental.applySnapshot(fresh);
+    selected(incremental, {});
+    incremental.applySnapshot(snapshot({entry(1, "a"), entry(3, "c"), entry(4, "d")}, 2));
+    selected(incremental, {});
+
+    DirectoryModel tree;
+    tree.applySnapshot(
+        snapshot({entry(1, "folder", luciole::FileType::Directory), entry(2, "a"), entry(3, "b"), entry(4, "other")}),
+        {{2, 1}, {3, 1}}
+    );
+    TEST_CHECK(tree.select(2));
+    tree.applySnapshot(
+        snapshot({entry(1, "folder", luciole::FileType::Directory), entry(3, "b"), entry(4, "other")}, 2), {{3, 1}}
+    );
+    selected(tree, {3});
+    tree.applySnapshot(snapshot({entry(1, "folder", luciole::FileType::Directory), entry(4, "other")}, 3));
+    selected(tree, {});
+    TEST_CHECK(!tree.selection().focused);
   }
 
   struct Fixture {
@@ -939,10 +1059,10 @@ namespace {
     selected(model, {id});
     std::filesystem::remove(fixture.path / "item20");
     pump.until([&] { return model.entry(id) == nullptr; });
-    selected(model, {});
+    selected(model, {otherId});
     fixture.write("item20");
     pump.until([&] { return model.rows().size() == 2; });
-    TEST_CHECK(model.entry(id) == nullptr && model.selection().selected.empty());
+    TEST_CHECK(model.entry(id) == nullptr && model.selection().selected.contains(otherId));
   }
 } // namespace
 
@@ -970,6 +1090,7 @@ int main() {
     testBulkSelection();
     testSingleSelectionAndEntryFilter();
     testSnapshotReconciliation();
+    testSelectionAfterRemoval();
     testDirectoryServiceIntegration();
     std::println("directory model checks passed");
     return 0;

@@ -28,6 +28,10 @@ Open Terminal Here is near the top of the folder background menu. A single folde
 
 In List and Columns, Right or Enter enters the folder under the cursor and Left or Backspace goes to its parent. Entering a folder from the keyboard selects its first item; going up selects the folder you left. In a List view folder tree, Left and Right still collapse and expand folders first. Grid keeps Left and Right for moving between items. Backspace edits typeahead or the search query while one is active.
 
+The Parent Folder toolbar button also returns keyboard focus to the file view. Once the parent listing loads, F2 renames the selected folder you left, and Delete moves it to Trash.
+
+After deleting the selected item, selection moves to the next remaining item in the previous visible order, or the previous one when there is no successor. Surviving items in a multi-selection stay selected while a deletion finishes or some items fail. An empty folder clears selection. The same behavior applies to context-menu deletion and observed removals; filtering and navigation keep their existing selection rules. Within an expanded List folder, an empty branch does not select an unrelated item outside that branch.
+
 The cursor ring marks the item the keyboard acts on and stays visible inside a multi-selection. Ctrl+arrow keys move it without changing the selection, and Ctrl+Space selects or unselects the item under it. Ctrl+Enter opens the folder under the cursor in a new tab; Ctrl+Shift+Enter reverses the Switch to new folder tabs preference. Escape anywhere outside the file list, such as Places or the toolbar, returns focus to the list. In the search field, Down or Enter moves to the results with the first one selected. F1 lists every shortcut.
 
 ## Network folders
@@ -72,11 +76,17 @@ When the server requests login, use the username, domain and password fields, or
 
 Network protocols require their installed GVfs backends and a session D-Bus connection. See [packaging requirements](../../PACKAGING.md#gvfs-and-trash). A separate connect-to-server form and process-blocked mount questions are still planned.
 
+### Network share automounts
+
+Open an NFS or SMB share from the sidebar or enter its local mount path. Systemd mounts it using your fstab entry or native automount unit, even without `user` in fstab. The share stays in the sidebar while idle. If the automount is stopped or the NAS is unreachable, Luciole shows an error.
+
+Use **Refresh** to see folder changes.
+
 ## Views and selection
 
 [Undo/redo](file-operations.md#undo-and-redo) affects the most recent supported creation, rename or native copy/link/move in the running application, independently of the current folder or selection. When a text input is focused, its text-editing undo takes precedence.
 
-Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (Ctrl+3). In every view, Ctrl+wheel (or Ctrl with a touchpad scroll), Ctrl+Plus and Ctrl+Minus change the icon size, and Ctrl+0 resets it. Each view keeps its own size. View, zoom, sort and hidden-file choices are saved as defaults for new browsing pages. Existing tabs and panes keep their own browsing state. In Grid and List, entries fade in the first time they scroll into view in a folder; Settings → Appearance → Reduce Animations turns this and other transitions off.
+Use the toolbar or main menu to choose Grid (Ctrl+1), List (Ctrl+2) or Columns (Ctrl+3). These shortcuts also work while typing in the search field or location bar. In every view, Ctrl+wheel (or Ctrl with a touchpad scroll), Ctrl+Plus and Ctrl+Minus change the icon size, and Ctrl+0 resets it. Each view keeps its own size. View, zoom, sort and hidden-file choices are saved as defaults for new browsing pages. Existing tabs and panes keep their own browsing state. In Grid and List, entries fade in the first time they scroll into view in a folder; Settings → Appearance → Reduce Animations turns this and other transitions off.
 
 Folders show custom icons set by other file managers: GNOME Files' (`gio set FOLDER metadata::custom-icon-name NAME`, or `metadata::custom-icon` with an image's `file://` URI) and Dolphin's or PCManFM-Qt's (`Icon=` in the folder's `.directory`, a themed icon name or an absolute image path). Links show their target's icon with a link emblem: a custom icon set on the link or on its target folder, the folder icon, or the target file's type icon. A dangling link keeps the link icon. Changes to custom icons show the next time the folder is listed, for example after Refresh (F5). Network filesystems keep the plain icons, so listing them reads nothing extra.
 
@@ -96,7 +106,7 @@ The status bar, a small tab docked to the bottom of the file pane, reports actio
 
 Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
 
-Opening a local file uses the default application for its file type; supported local archives open in Luciole's archive browser instead (see [archives](file-operations.md#archives)). Use Open With to choose another application or change that file type's default.
+Opening a local file uses the default application for its file type; supported local archives open in Luciole's archive browser instead (see [archives](file-operations.md#archives)). Use Open With to choose another application or change that file type's default. Suggested applications include registered file handlers whose desktop entries use `NoDisplay=true`, such as imv and swayimg. For a mixed selection, suggested applications must handle every selected file type. Show Other Applications retains launcher visibility rules for unrelated applications.
 
 ### Per-folder view and sort
 

@@ -162,6 +162,9 @@ fs_lib = static_library('luciole-fs',
     'src/fs/location_mount.cpp',
     'src/fs/mount_interaction.cpp',
     'src/fs/native_listing.cpp',
+    'src/fs/system_mounts.cpp',
+    'src/fs/systemd_mounts.cpp',
+    'src/fs/system_mount_monitor.cpp',
     'src/fs/network_listing.cpp',
     'src/fs/ws_discovery.cpp',
     'src/fs/ws_discovery_metadata.cpp',
@@ -174,9 +177,9 @@ fs_lib = static_library('luciole-fs',
     'src/fs/xdg_dirs.cpp',
   ),
   include_directories: src_inc,
-  dependencies: [gio, libarchive, liblzma, curl, xml],
+  dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml],
 )
-fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, libarchive, liblzma, curl, xml])
+fs_dep = declare_dependency(link_with: fs_lib, include_directories: src_inc, dependencies: [gio, gio_unix, libarchive, liblzma, curl, xml])
 
 config_lib = static_library('luciole-config',
   files(
@@ -496,4 +499,5 @@ install_data('assets/completions/luciole.bash',
 install_data('assets/completions/_luciole', install_dir: get_option('datadir') / 'zsh/site-functions')
 install_data('assets/completions/luciole.fish', install_dir: get_option('datadir') / 'fish/vendor_completions.d')
 install_data('assets/desktop/dev.noctalia.luciole.desktop', install_dir: get_option('datadir') / 'applications')
+install_data('assets/desktop/dev.noctalia.luciole-chooser.desktop', install_dir: get_option('datadir') / 'applications')
 install_data('assets/icons/dev.noctalia.luciole.svg', install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps')

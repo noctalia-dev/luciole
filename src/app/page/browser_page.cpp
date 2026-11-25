@@ -1280,7 +1280,11 @@ bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
   if (!editing && (m_detailsHeader.menuKey(event) || m_fileKeys.commandKey(event))) {
     return true;
   }
-  if (!editing && dispatchShortcut(event, {Action::Grid, Action::List, Action::Miller, Action::ShowHidden})) {
+  // View chords cannot be plain text keys, so they switch the view even while typing in a field.
+  if (dispatchShortcut(event, {Action::Grid, Action::List, Action::Miller})) {
+    return true;
+  }
+  if (!editing && dispatchShortcut(event, {Action::ShowHidden})) {
     return true;
   }
   if (m_list != nullptr
@@ -1808,6 +1812,7 @@ void BrowserPage::leaveFolder() {
   }
   if (auto current = browser().model().snapshot().location; browser().up()) {
     revealOnReload({std::move(*current)});
+    focusFileList();
   }
 }
 
@@ -2065,7 +2070,8 @@ void BrowserPage::setViewMode(luciole::ViewMode mode) {
   if (mode == m_viewMode) {
     return;
   }
-  if (m_list != nullptr) {
+  // Taking focus from a text field would end its edit and drop the path being typed.
+  if (m_list != nullptr && !m_locationBar.textFocused()) {
     dispatcher().setFocus(m_list->focusArea());
   }
   if (m_folderView.saveViewMode(mode)) {

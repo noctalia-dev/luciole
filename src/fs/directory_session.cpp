@@ -6,6 +6,7 @@
 #include "fs/heap_trim.h"
 #include "fs/native_listing.h"
 #include "fs/network_listing.h"
+#include "fs/system_mounts.h"
 
 #include <algorithm>
 #include <bit>
@@ -36,21 +37,29 @@ namespace {
       "," G_FILE_ATTRIBUTE_TIME_CREATED "," G_FILE_ATTRIBUTE_OWNER_USER "," G_FILE_ATTRIBUTE_OWNER_GROUP
       "," G_FILE_ATTRIBUTE_UNIX_MODE "," G_FILE_ATTRIBUTE_TIME_CHANGED
       ",time::changed-nsec," G_FILE_ATTRIBUTE_TIME_CHANGED_USEC "," G_FILE_ATTRIBUTE_ETAG_VALUE
-      "," G_FILE_ATTRIBUTE_ACCESS_CAN_READ "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE "," G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE
       "," G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME "," G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH
-      "," G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE
-      "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE "," G_FILE_ATTRIBUTE_ID_FILE "," G_FILE_ATTRIBUTE_ID_FILESYSTEM;
-  std::string browseAttributes(std::uint8_t details) {
+      "," G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE
+      "," G_FILE_ATTRIBUTE_ID_FILE "," G_FILE_ATTRIBUTE_ID_FILESYSTEM;
+  // Mounted network shares omit per-child access(R/W/X) and content sniffing: on NFS/SMB those send synchronous
+  // ACCESS and OPEN/READ RPCs per entry instead of letting READDIRPLUS satisfy enumeration.
+  constexpr const char* kProbeAttributes =
+      "," G_FILE_ATTRIBUTE_ACCESS_CAN_READ "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE "," G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE
+      "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE;
+  std::string browseAttributes(std::uint8_t details, bool network) {
     std::string attributes = G_FILE_ATTRIBUTE_STANDARD_NAME
         "," G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME "," G_FILE_ATTRIBUTE_STANDARD_TYPE
         "," G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN "," G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK
         "," G_FILE_ATTRIBUTE_STANDARD_SIZE "," G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_CHANGED
         ",time::changed-nsec," G_FILE_ATTRIBUTE_TIME_CHANGED_USEC "," G_FILE_ATTRIBUTE_ETAG_VALUE
-        "," G_FILE_ATTRIBUTE_ACCESS_CAN_READ "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE
-        "," G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE "," G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME
-        "," G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH "," G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE
-        "," G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE
+        "," G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME "," G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH
+        "," G_FILE_ATTRIBUTE_ACCESS_CAN_DELETE "," G_FILE_ATTRIBUTE_STANDARD_FAST_CONTENT_TYPE
         "," G_FILE_ATTRIBUTE_ID_FILE "," G_FILE_ATTRIBUTE_ID_FILESYSTEM;
+    if (network) {
+      // Without access::can-execute, the context menu's Run entry falls back to the mode's execute bits.
+      details |= luciole::EntryDetails::Permissions;
+    } else {
+      attributes.append(kProbeAttributes);
+    }
     for (const auto& [flag, attribute] :
          {std::pair{luciole::EntryDetails::Accessed, G_FILE_ATTRIBUTE_TIME_ACCESS},
           std::pair{luciole::EntryDetails::Created, G_FILE_ATTRIBUTE_TIME_CREATED},
@@ -258,9 +267,10 @@ namespace luciole {
         }
       }
     }
+    entry.contentType = readContentType(info);
     entry.icon = local
         ? icons.getLocal(
-              name, g_file_info_get_file_type(info), infoString(info, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE), *folder
+              name, g_file_info_get_file_type(info), entry.contentType ? entry.contentType->c_str() : nullptr, *folder
           )
         : icons.get(info, *folder);
     if (trashFolder) {
@@ -270,7 +280,6 @@ namespace luciole {
     }
     entry.details = readEntryMetadata(info);
     entry.setIdentity(readFileIdentity(info));
-    entry.contentType = readContentType(info);
     if (const auto size = infoUint64(info, G_FILE_ATTRIBUTE_STANDARD_SIZE); size && *size <= G_MAXINT64) {
       entry.size = size;
     }
@@ -292,6 +301,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   std::deque<std::size_t> factsOrder;
   FileIconPool icons;
   struct Scan {
+    CancelToken preparation;
     GioPtr<GCancellable> cancellable{g_cancellable_new()};
     GioPtr<GFileEnumerator> enumerator;
     std::vector<DirectoryEntry> entries;
@@ -323,6 +333,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     // is dropped then.
     std::unordered_map<std::string, std::uint64_t> identities;
     bool local = false;
+    bool network = false;
     bool trash = false;
     DirectoryMetadata metadata;
     std::optional<FileError> accessError;
@@ -417,6 +428,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     struct Job {
       DirectoryEntries entries;
       std::shared_ptr<const Location> folder;
+      bool network = false;
       std::vector<std::pair<std::size_t, std::uint8_t>> requests;
       std::vector<std::pair<std::size_t, DirectoryEntry>> facts;
       CatalogueValidation validation;
@@ -424,6 +436,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     auto job = std::make_unique<Job>();
     job->entries = snapshot.entries;
     job->folder = scan->folder;
+    job->network = scan->network;
     while (!factsRequested.empty() && job->requests.size() < 128) {
       const auto found = factsRequested.begin();
       auto [index, details] = *found;
@@ -509,7 +522,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
         }
         const auto brief = job.entries.brief(index);
         const auto file = gioFile(job.folder->child(std::string(brief.name)));
-        const auto attributes = browseAttributes(details);
+        const auto attributes = browseAttributes(details, job.network);
         const GioPtr<GFileInfo> info(
             g_file_query_info(file.get(), attributes.c_str(), G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, cancellable, nullptr)
         );
@@ -548,6 +561,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void stopScan() {
+    if (scan) {
+      scan->preparation.cancel();
+    }
     if (factsIdle != 0) {
       g_source_remove(std::exchange(factsIdle, 0));
     }
@@ -847,10 +863,38 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     const GString localPath(scan->local ? g_file_get_path(scan->parent.get()) : nullptr);
     scan->local = scan->local && localPath;
     icons.setLocalFolder(localPath.get());
-    queryMetadata();
     if (scan->local) {
-      listNatively(localPath.get());
+      runJob<bool>(
+          scan->preparation,
+          [location = *snapshot.location, token = scan->preparation] { return prepareSystemMount(location, token); },
+          [weak = weak_from_this(), pending = scan, path = std::string(localPath.get())](JobResult<bool> result) {
+            const auto state = weak.lock();
+            if (!state || state->scan != pending || pending->preparation.cancelled()) {
+              return;
+            }
+            if (!result) {
+              state->complete(result.error());
+              return;
+            }
+            if (*result) {
+              if (state->monitor) {
+                g_file_monitor_cancel(state->monitor.get());
+                state->monitor.reset();
+              }
+              state->snapshot.monitorError =
+                  FileError{FileErrorKind::Unsupported, "Refresh to update this network folder."};
+            } else if (!state->monitor) {
+              state->watch();
+            }
+            state->queryMetadata();
+            state->listNatively(path);
+          }
+      );
     } else {
+      if (!monitor) {
+        watch();
+      }
+      queryMetadata();
       enumerate();
     }
     notify();
@@ -892,6 +936,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void listed(NativeListing listing) {
+    scan->network = listing.network;
     if (listing.unsupported) {
       enumerate();
       return;
@@ -919,7 +964,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     }
     scan->entries = std::move(listing.entries);
     collectLinks();
-    collectIconCandidates();
+    if (!scan->network) {
+      collectIconCandidates();
+    }
     const auto listedScan = scan;
     if (listing.limited) {
       complete(FileError{FileErrorKind::Unsupported, std::string(kEntryLimitMessage)});
@@ -1020,6 +1067,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
       // Over the network every target icon would cost requests; such links keep their listing's icons.
       const bool readIcons = !networkFilesystem(job.folder);
+      const auto mounts = configuredSystemMounts();
+      const auto mounted = mounts.empty() ? std::vector<MountedFilesystem>{} : readMountedFilesystems();
       job.complete = true;
       for (const auto& [index, name] : *job.links) {
         if (g_cancellable_is_cancelled(cancellable) != FALSE) {
@@ -1027,12 +1076,16 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           break;
         }
         const auto path = std::string(job.folder).append(separator).append(name);
+        // Following a link strictly inside an idle automount would activate it just by listing this folder.
+        if (!mounts.empty() && symlinkEntersUnmountedAutomount(path, mounts, mounted)) {
+          continue;
+        }
         if (job.linksToDirectory(path)) {
           job.directoryLinks.insert(index);
         }
         // The target just answered, so following it again for its icon does not risk a second hung worker.
         if (readIcons) {
-          if (auto icon = linkTargetIcon(path)) {
+          if (auto icon = linkTargetIcon(path, mounts)) {
             job.icons.emplace_back(name, std::move(*icon));
           }
         }
@@ -1154,6 +1207,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
         g_task_return_boolean(task, TRUE);
         return;
       }
+      const auto mounts = configuredSystemMounts();
       const auto deadline = std::chrono::steady_clock::now() + job.interval;
       const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
       for (job.end = job.begin; job.end < job.candidates->size(); ++job.end) {
@@ -1166,7 +1220,12 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           break;
         }
         const auto& name = (*job.candidates)[job.end];
-        if (auto icon = customFolderIcon(std::string(job.folder).append(separator).append(name))) {
+        const auto path = std::string(job.folder).append(separator).append(name);
+        // Opening .directory inside a configured automount would activate it while browsing its parent.
+        if (automountFor(Location::fromPath(path), mounts)) {
+          continue;
+        }
+        if (auto icon = customFolderIcon(path)) {
           job.icons.emplace_back(name, std::move(*icon));
         }
       }
@@ -1407,6 +1466,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
 
   void enumerate() {
     std::string attributes = kAttributes;
+    if (!scan->network) {
+      attributes.append(kProbeAttributes);
+    }
     if (!scan->local) {
       attributes.append(",").append(kIconAttribute).append(",").append(G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
     }
@@ -1626,7 +1688,6 @@ void luciole::DirectorySession::open(const Location& location) {
     state->openNetwork();
     return;
   }
-  state->watch();
   state->begin();
 }
 
@@ -1640,7 +1701,6 @@ void luciole::DirectorySession::refresh() {
   if (state->snapshot.location) {
     if (!state->monitor) {
       state->snapshot.monitorError.reset();
-      state->watch();
       // Changes before this new watch were not observed.
       state->identities.clear();
     }

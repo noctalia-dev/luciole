@@ -43,7 +43,8 @@ namespace luciole {
     DirectoryModel(DirectoryModel&&) = delete;
     DirectoryModel& operator=(DirectoryModel&&) = delete;
 
-    // Returns false for an obsolete generation. Observers must not throw.
+    // Returns false for an obsolete generation. Completed same-folder removals continue the cursor through
+    // surviving visible IDs. Observers must not throw.
     bool applySnapshot(
         DirectorySnapshot snapshot, std::unordered_map<EntryId, EntryId> parents = {}, bool preserveRootOrder = false
     );

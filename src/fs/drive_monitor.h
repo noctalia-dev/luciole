@@ -50,6 +50,8 @@ namespace luciole {
     DriveRemoval removal = DriveRemoval::None;
     // Filesystem usage of the mounted root; null until queried, when unmounted, or when the size is unknown.
     std::optional<DriveUsage> usage;
+    // A system-owned automount can be opened while its filesystem is idle. This is not a mounted root.
+    std::optional<Location> activation = std::nullopt;
   };
 
   // Main-context view of GIO's volume monitor. Callbacks run on the main context and must not throw.

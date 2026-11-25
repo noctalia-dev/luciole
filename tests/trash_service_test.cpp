@@ -420,13 +420,20 @@ namespace {
     pump.until([&] { return model.snapshot().status == luciole::DirectoryStatus::Ready && model.rows().size() == 2; });
     const auto selected = std::ranges::find(model.snapshot().entries, "selected", &luciole::DirectoryEntry::name);
     TEST_CHECK(selected != model.snapshot().entries.end());
+    const auto remaining = std::ranges::find(model.snapshot().entries, "remaining", &luciole::DirectoryEntry::name);
+    TEST_CHECK(remaining != model.snapshot().entries.end());
     const auto id = selected->id;
-    model.select(id);
+    const auto remainingId = remaining->id;
+    TEST_CHECK(model.select(id));
     luciole::TrashService service;
     pump.prepare(service, parent, {parent / "selected"});
     pump.trash(service);
     pump.until([&] { return model.rows().size() == 1 && model.entry(id) == nullptr; });
-    TEST_CHECK(model.selectedIds().empty() && read(parent / "remaining") == "keep");
+    TEST_CHECK(model.selectedIds() == std::vector{remainingId});
+    TEST_CHECK(model.selection().focused == remainingId && model.selection().anchor == remainingId);
+    TEST_CHECK(read(parent / "remaining") == "keep");
+    const auto archived = fixture.archived(parent / "selected");
+    TEST_CHECK(archived.size() == 1 && read(archived.front()) == "content");
     session.setChangedCallback({});
   }
 } // namespace

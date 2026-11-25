@@ -1013,7 +1013,7 @@ luciole::WindowId WorkspaceApplication::newWindow(std::unique_ptr<FileChooserSes
            .minWidth = 620,
            .minHeight = 400,
            .title = choosing ? host->chooser->windowTitle() : "Luciole",
-           .appId = "dev.noctalia.luciole"}
+           .appId = choosing ? "dev.noctalia.luciole-chooser" : "dev.noctalia.luciole"}
       )) {
     throw std::runtime_error("Cannot initialize a Luciole window.");
   }

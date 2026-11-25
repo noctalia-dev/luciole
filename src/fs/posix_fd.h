@@ -34,6 +34,9 @@ namespace luciole {
   bool sameIdentity(const struct stat& a, const struct stat& b);
   // Rename history ignores access time; metadata/content changes invalidate a captured revision.
   bool sameFileRevision(const struct stat& a, const struct stat& b);
+  // A completed rename changes ctime; an atomic directory exchange can also change mtime (XFS).
+  // Use only immediately after our own successful syscall, before adopting the new revision.
+  bool sameRenamedRevision(const struct stat& before, const struct stat& after, bool exchanged = false);
   // fstat of an item pinned before it was unlinked from `parent`. NFS turns unlinking an open file into a rename to
   // `.nfsXXXX`, so the pinned inode keeps its link count, and a removed folder's handle goes stale; report what a
   // local filesystem would instead.

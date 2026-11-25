@@ -618,6 +618,7 @@ void TransferController::syncConflict() {
   }
   const bool archive = job->kind() == JobKind::Archive;
   const bool restore = job->kind() == JobKind::Restore;
+  const bool nativeReplace = !archive && !restore && conflict->destination.isNative();
   const ActiveConflict active{.job = job->id(), .conflict = conflict->id};
   const float width = m_page.dialogWidth(DialogWidth::Medium);
   auto facts = [&](const std::string& title, bool folder, std::optional<std::uint64_t> bytes,
@@ -700,6 +701,15 @@ void TransferController::syncConflict() {
            .maxLines = 2,
            .visible = conflict->destinationDirectory,
            .participatesInLayout = conflict->destinationDirectory}
+      ),
+      ui::label(
+          {.text = "Replace is permanent. Undo cannot restore the existing item.",
+           .fontSize = Style::fontSizeCaption,
+           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+           .maxWidth = width - 24.0F,
+           .maxLines = 2,
+           .visible = nativeReplace,
+           .participatesInLayout = nativeReplace}
       ),
       ui::row(
           {.align = FlexAlign::Center,

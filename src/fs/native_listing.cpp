@@ -238,7 +238,13 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
   }
   struct statfs filesystem{};
   struct stat folderInfo{};
-  if (::fstatfs(fd, &filesystem) != 0 || remoteFilesystem(filesystem) || ::fstat(fd, &folderInfo) != 0) {
+  if (::fstatfs(fd, &filesystem) != 0 || ::fstat(fd, &folderInfo) != 0) {
+    result.unsupported = true;
+    return result;
+  }
+  const bool remote = remoteFilesystem(filesystem);
+  result.network = networkFilesystem(filesystem, folderInfo.st_dev);
+  if (remote && (!catalogue || !result.network)) {
     result.unsupported = true;
     return result;
   }
@@ -246,7 +252,7 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
       .path = path,
       .device = folderInfo.st_dev,
       .owner = folderInfo.st_uid,
-      .writable = ::faccessat(AT_FDCWD, path.c_str(), W_OK, 0) == 0,
+      .writable = !catalogue && ::faccessat(AT_FDCWD, path.c_str(), W_OK, 0) == 0,
       .sticky = (folderInfo.st_mode & S_ISVTX) != 0,
       .mountRoot = false,
       .utf8Names = g_get_filename_charsets(nullptr) != FALSE,
@@ -305,6 +311,10 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
     if (catalogue && item->d_type != DT_UNKNOWN && (!folder.mountRoot || std::strcmp(name, "lost+found") != 0)) {
       // Linux dirent types use the same kind bits as st_mode, without permissions or access claims.
       info.stx_mode = static_cast<std::uint16_t>(DTTOIF(item->d_type));
+    } else if (result.network && catalogue && item->d_type == DT_UNKNOWN) {
+      // Network servers that omit dirent kinds fall back to GIO enumeration instead of issuing per-entry statx calls.
+      result.unsupported = true;
+      break;
     } else {
       if (::statx(fd, name, AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT, STATX_BASIC_STATS | STATX_BTIME, &info) != 0) {
         if (errno == ENOENT) {
@@ -417,7 +427,12 @@ luciole::listNativeFolder(const std::string& path, std::size_t entryLimit, GCanc
   if (catalogue && !result.unsupported) {
     // Small folders retain immediate complete facts. A second short pass costs less than repeated row-worker
     // publications and preserves immediate selection/history behavior there.
-    if (browse.items.size() <= 512 || result.limited) {
+    if (result.network) {
+      if (browse.items.size() <= 64 || result.limited) {
+        result.unsupported = true;
+        return result;
+      }
+    } else if (browse.items.size() <= 512 || result.limited) {
       return listNativeFolder(path, entryLimit, cancellable, false);
     }
     browse.items.shrink_to_fit();

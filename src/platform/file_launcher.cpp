@@ -185,7 +185,8 @@ void luciole::FileLauncher::applications(
         if (!id
             || (suggested && std::ranges::any_of(supporting, [id](const auto& ids) { return !ids.contains(id); }))
             || !name
-            || !g_app_info_should_show(app)
+            // Associated handlers may use NoDisplay to stay out of launcher menus.
+            || (!suggested && !g_app_info_should_show(app))
             || (!g_app_info_supports_files(app) && !g_app_info_supports_uris(app))
             || !seen.emplace(id).second) {
           continue;

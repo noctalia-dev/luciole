@@ -3,6 +3,7 @@
 #include "fs/background_job.h"
 #include "fs/file_error.h"
 #include "fs/posix_fd.h"
+#include "operations/copied_move_receipt.h"
 #include "operations/copy_history_tree.h"
 #include "operations/copy_receipt.h"
 #include "operations/history_mount.h"
@@ -33,6 +34,42 @@ bool luciole::MoveEffect::usesMount(const HistoryMount& mount) const {
       || (m_identity->root && mount.contains(m_identity->root->parent.get()))
       || (m_previous && m_previous->usesMount(mount))
       || (m_retained && m_retained->usesMount(mount));
+}
+
+std::shared_ptr<const luciole::MoveReceipt>
+luciole::MoveReceipt::withoutPredecessors(std::shared_ptr<const MoveReceipt> receipt) {
+  if (!receipt) {
+    return {};
+  }
+  if (const auto copied = std::dynamic_pointer_cast<const CopiedMoveReceipt>(receipt)) {
+    return copied->withoutPredecessors();
+  }
+  if (receipt->m_undone || !std::ranges::any_of(receipt->m_effects, [](const auto& effect) {
+        return effect->m_previous || effect->m_retained;
+      })) {
+    return receipt;
+  }
+  if (receipt->m_sequence
+      || std::ranges::any_of(receipt->m_effects, [](const auto& effect) { return effect->m_retained != nullptr; })) {
+    return {};
+  }
+  for (const auto& effect : receipt->m_effects) {
+    if (effect->m_previous && std::ranges::any_of(receipt->m_effects, [&](const auto& ancestor) {
+          return ancestor != effect && ancestor->encloses(effect->m_destination);
+        })) {
+      return {};
+    }
+  }
+  auto result = std::make_shared<MoveReceipt>(*receipt);
+  for (auto& effect : result->m_effects) {
+    if (effect->m_previous) {
+      auto incoming = std::shared_ptr<MoveEffect>(new MoveEffect(*effect));
+      incoming->m_previous.reset();
+      incoming->m_previousTrees.reset();
+      effect = std::move(incoming);
+    }
+  }
+  return result;
 }
 
 bool luciole::MoveReceipt::usesMount(const HistoryMount& mount) const {
@@ -231,8 +268,8 @@ std::shared_ptr<const luciole::MoveEffect> luciole::MoveEffect::prepareReplaceme
 }
 
 std::shared_ptr<const luciole::MoveEffect> luciole::MoveEffect::publishedReplacement() const {
-  m_identity->revisions->renamed(m_revision, statFd(m_identity->item.get()));
-  auto expected = m_identity->revisions->expected(m_revision);
+  const auto expected = statFd(m_identity->item.get());
+  m_identity->revisions->renamed(m_revision, expected, true);
   if (!sameFileRevision(expected, statFd(m_identity->item.get()))
       || !sameFileRevision(expected, namedStamp(destinationParent(), m_destination))) {
     throwFileError(FileErrorKind::Changed, "The incoming move changed during replacement. Inspect both locations.");

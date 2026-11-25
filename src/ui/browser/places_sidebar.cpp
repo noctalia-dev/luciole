@@ -17,8 +17,8 @@
 namespace {
   constexpr float kUsageBarHeight = 3.0F;
   constexpr float kUsageWarningFraction = 0.9F;
-  // Gap between a usage bar and the bottom of its row.
-  constexpr float kUsageBarInset = 4.0F;
+  // Gap between the font's descent line and a usage bar, so descenders never reach the bar.
+  constexpr float kUsageBarGap = 2.0F;
 
   // Colors a drive row's usage bar for its selection, and shows the bar only for a known usage.
   void applyDriveState(ProgressBar& bar, const std::optional<luciole::DriveUsage>& usage, bool selected) {
@@ -129,7 +129,10 @@ const luciole::Drive* luciole::PlacesSidebar::driveAt(const Location& root) cons
     return nullptr;
   }
   const auto& drives = m_drives.drives();
-  const auto found = std::ranges::find(drives, std::optional(root), &Drive::root);
+  const auto found = std::ranges::find_if(drives, [&](const Drive& drive) {
+    const auto& target = drive.activation ? drive.activation : drive.root;
+    return target == root;
+  });
   return found == drives.end() ? nullptr : &*found;
 }
 InputArea* luciole::PlacesSidebar::focusArea(const Location& location) const {
@@ -503,11 +506,12 @@ void luciole::PlacesSidebar::rebuild() {
       };
       addChild(std::move(tree));
     }
-    // The tree can only expand mounted drives; unmounted ones appear once mounted.
+    // Explicit expansion can activate an idle system automount through DirectorySession.
     std::vector<Drive> drives;
     if (m_showDrives) {
       std::ranges::copy_if(m_drives.drives(), std::back_inserter(drives), [this](const Drive& drive) {
-        return drive.root && !m_pins.contains(*drive.root);
+        const auto& target = drive.activation ? drive.activation : drive.root;
+        return target && !m_pins.contains(*target);
       });
     }
     m_tree->setRoots(m_pins, drives, m_showNetwork, m_trashFull);
@@ -586,12 +590,12 @@ void luciole::PlacesSidebar::doArrange(Renderer& renderer, const LayoutRect& rec
     m_tree->prepare();
   }
   Flex::doArrange(renderer, rect);
-  if (layoutDriveRows()) {
+  if (layoutDriveRows(renderer)) {
     Flex::doArrange(renderer, rect);
-    layoutDriveRows();
+    layoutDriveRows(renderer);
   }
 }
-bool luciole::PlacesSidebar::layoutDriveRows() {
+bool luciole::PlacesSidebar::layoutDriveRows(Renderer& renderer) {
   bool changed = false;
   for (const auto& row : m_driveRows) {
     auto* button = row.button;
@@ -605,7 +609,15 @@ bool luciole::PlacesSidebar::layoutDriveRows() {
       row.name->setMaxWidth(budget);
       changed = true;
     }
-    row.usage->setPosition(start, button->height() - kUsageBarHeight - kUsageBarInset);
+    if (!row.usage->visible()) {
+      continue;
+    }
+    // Font metrics, not the string's ink, so every drive's name and bar sit at the same height.
+    const auto font = renderer.measureFont(row.name->fontSize(), row.name->font());
+    const float barOffset = font.bottom + kUsageBarGap;
+    const float baseline = std::round((button->height() + font.capHeight - barOffset - kUsageBarHeight) * 0.5F);
+    row.name->setPosition(row.name->x(), baseline - row.name->baselineOffset());
+    row.usage->setPosition(start, baseline + std::round(barOffset));
     row.usage->setSize(std::max(0.0F, end - start), kUsageBarHeight);
   }
   return changed;

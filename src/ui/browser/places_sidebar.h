@@ -71,9 +71,9 @@ namespace luciole {
     void addRow(const Bookmark& bookmark, const std::string& glyph, std::optional<std::size_t> index);
     void addDriveRow(const Drive& drive);
     std::optional<Bookmark> folderAt(float x, float y, float verticalInset) const;
-    // Fits drive names between the glyph and the eject button and places usage bars under them; true when a
-    // name's width budget changed and the rows need another arrange.
-    bool layoutDriveRows();
+    // Fits drive names between the glyph and the eject button and places usage bars under them, lifting the name
+    // so name and bar center together; true when a name's width budget changed and the rows need another arrange.
+    bool layoutDriveRows(Renderer& renderer);
     const Drive* driveAt(const Location& root) const;
     PinService& m_pins;
     DriveMonitor& m_drives;

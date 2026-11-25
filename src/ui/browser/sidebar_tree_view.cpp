@@ -234,7 +234,8 @@ void luciole::SidebarTreeView::setRoots(
     entries.push_back(std::move(entry));
   }
   for (const auto& drive : drives) {
-    const auto& uri = drive.root->uri();
+    const auto& target = drive.activation ? *drive.activation : *drive.root;
+    const auto& uri = target.uri();
     if (roots.contains(uri)) {
       continue;
     }
@@ -244,7 +245,7 @@ void luciole::SidebarTreeView::setRoots(
     m_glyphs.emplace(id, drive.glyph);
     DirectoryEntry entry{
         .id = id,
-        .place = *drive.root,
+        .place = target,
         .name = {},
         .type = FileType::Directory,
         .size = {},

@@ -52,7 +52,7 @@ luciole::ChooserDecision luciole::chooserDecision(
   std::vector<FileType> types;
   types.reserve(entries.size());
   for (const auto& entry : entries) {
-    types.push_back(chosenType(entry));
+    types.push_back(entry.type);
   }
   const auto every = [&](FileType type) {
     return std::ranges::all_of(types, [type](FileType t) { return t == type; });

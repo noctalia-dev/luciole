@@ -47,11 +47,10 @@ public:
   explicit IconResolver(bool cacheMissing);
 
   // targetSize is the intended on-screen pixel size. The first theme in
-  // inheritance order that has the icon wins. When > 0, a vector (SVG) icon is
-  // preferred within that theme and, among its bitmaps, the smallest size that is
-  // still >= targetSize wins (falling back to the largest available) so we
-  // downscale gently instead of crushing a 1024px PNG. targetSize == 0 keeps the
-  // legacy "prefer scalable, then largest" behavior for callers that have no size.
+  // inheritance order that has the icon wins. When > 0, prefer its matching size
+  // range and closest nominal drawing, then SVG over PNG at the same size. Fallbacks
+  // prefer gentle downscaling to enlargement. targetSize == 0 keeps the legacy
+  // "prefer scalable, then largest" behavior for callers that have no size.
   const std::string& resolve(const std::string& iconName, int targetSize = 0);
 
   // Caller owns the settings object; nullptr when the desktop schema is absent.

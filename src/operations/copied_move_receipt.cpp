@@ -110,6 +110,30 @@ struct luciole::CopiedMoveReceipt::State {
   std::uint64_t generation = 0;
 };
 
+std::shared_ptr<const luciole::MoveReceipt> luciole::CopiedMoveReceipt::withoutPredecessors() const {
+  if (m_state->dependent && std::ranges::any_of(m_state->destinations->m_effects, [](const auto& effect) {
+        return effect->m_previous != nullptr;
+      })) {
+    return {};
+  }
+  auto native = MoveReceipt::withoutPredecessors(m_state->native);
+  if (m_state->native && !native) {
+    return {};
+  }
+  auto state = std::make_shared<State>();
+  state->sources = m_state->sources;
+  state->destinations = CopyReceipt::withoutPredecessors(m_state->destinations);
+  state->native = std::move(native);
+  state->root = m_state->root;
+  state->dependent = m_state->dependent;
+  state->nativeLocations = m_state->nativeLocations;
+  state->locations = m_state->locations;
+  state->origins = m_state->origins;
+  state->restored = m_state->restored;
+  state->generation = m_state->generation;
+  return std::shared_ptr<const MoveReceipt>(new CopiedMoveReceipt(std::move(state), m_generation, m_undone));
+}
+
 bool luciole::CopiedMoveReceipt::usesMount(const HistoryMount& mount) const {
   return (m_state->sources && m_state->sources->usesMount(mount))
       || (m_state->destinations && m_state->destinations->usesMount(mount))

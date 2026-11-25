@@ -65,6 +65,26 @@ def run_case(binary, mode, names):
             mime_cache += "image/png=other.desktop;\n"
         (root / "config/mimeapps.list").write_text(associations)
         (root / "data/applications/mimeinfo.cache").write_text(mime_cache)
+        if mode == "nodisplay":
+            # MIME handlers can be hidden from launcher menus without being uninstalled.
+            desktop.write_text(desktop.read_text().replace("Private launch fixture", "Luciole NoDisplay fixture default"))
+            for filename, extra in (
+                ("common.desktop", "NoDisplay=true\nMimeType=text/plain;image/png;"),
+                ("unrelated.desktop", "NoDisplay=true\nMimeType=application/pdf;"),
+                ("removed.desktop", "Hidden=true\nMimeType=text/plain;image/png;"),
+                ("unavailable.desktop", "TryExec=/luciole-fixture-missing-program\nMimeType=text/plain;image/png;"),
+                ("no-files.desktop", "NoDisplay=true\nMimeType=text/plain;image/png;"),
+            ):
+                arguments = "" if filename == "no-files.desktop" else "%U"
+                (root / "data/applications" / filename).write_text(
+                    "[Desktop Entry]\nType=Application\n" + f"Name=Luciole NoDisplay fixture {filename}\n"
+                    f"Exec={sys.executable} {handler} {arguments}\n{extra}\n"
+                )
+            (root / "data/applications/mimeinfo.cache").write_text(
+                "[MIME Cache]\ntext/plain=fixture.desktop;common.desktop;removed.desktop;unavailable.desktop;no-files.desktop;\n"
+                "image/png=common.desktop;removed.desktop;unavailable.desktop;no-files.desktop;\n"
+                "application/pdf=unrelated.desktop;\n"
+            )
         if mode == "remote":
             (root / "config/mimeapps.list").write_text(associations + "x-scheme-handler/sftp=fixture.desktop;\n")
             (root / "data/applications/mimeinfo.cache").write_text(mime_cache + "x-scheme-handler/sftp=fixture.desktop;\n")
@@ -181,7 +201,7 @@ def run_case(binary, mode, names):
         )
         if result.returncode != 0:
             raise AssertionError((result.returncode, result.stdout.decode(errors="replace"), result.stderr.decode(errors="replace")))
-        if mode in ("open", "native-files", "remote", "symlink", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
+        if mode in ("open", "native-files", "remote", "symlink", "sequential", "with", "other", "default", "batch", "batch-single", "grouped-open", "tokens", "nodisplay", "terminal-setting", "terminal-env", "terminal-with", "terminal-auto"):
             deadline = time.monotonic() + 5
             expected = [b"sftp://fixture.invalid/private.txt".hex()] if mode == "remote" else sorted(path.hex() for path in paths)
             while True:
@@ -267,6 +287,7 @@ def main():
     run_case(binary, "batch-single", [b"individual1.txt", b"individual2.txt"])
     run_case(binary, "grouped-open", [b"episode-01.txt", b"artwork.png", b"episode-02.txt"])
     run_case(binary, "mixed-catalog", [b"unused.txt"])
+    run_case(binary, "nodisplay", [b"handler.txt", "space ' $() café\n.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "dbus", [b"via-bus.txt", "space café.txt".encode(), b"raw-\xff.txt"])
     run_case(binary, "tokens", [b"explicit-token.txt", b"default-token.txt"])
     run_case(binary, "activation-destroy", [b"never-launched.txt"])

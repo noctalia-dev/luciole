@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Luciole File Chooser
+Exec=luciole --file-chooser-service
+Icon=dev.noctalia.luciole
+Terminal=false
+NoDisplay=true

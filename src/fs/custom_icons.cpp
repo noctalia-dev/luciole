@@ -2,6 +2,7 @@
 
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
+#include "fs/system_mounts.h"
 
 #include <cstdlib>
 #include <fcntl.h>
@@ -116,7 +117,8 @@ std::optional<luciole::FileIconSource> luciole::customFolderIcon(const std::stri
   return directoryFileIcon(path);
 }
 
-std::optional<luciole::FileIconSource> luciole::linkTargetIcon(const std::string& path) {
+std::optional<luciole::FileIconSource>
+luciole::linkTargetIcon(const std::string& path, std::span<const MountConfiguration> mounts) {
   struct statx target{};
   if (::statx(AT_FDCWD, path.c_str(), AT_NO_AUTOMOUNT, STATX_TYPE, &target) != 0) {
     return std::nullopt;
@@ -130,6 +132,10 @@ std::optional<luciole::FileIconSource> luciole::linkTargetIcon(const std::string
     if (resolved) {
       if (auto icon = metadataIcon(resolved.get())) {
         return icon;
+      }
+      // Opening .directory inside a configured automount would activate it while listing a link to it.
+      if (!mounts.empty() && automountFor(Location::fromPath(resolved.get()), mounts)) {
+        return *localFolderIcon();
       }
     }
     if (auto icon = directoryFileIcon(path)) {

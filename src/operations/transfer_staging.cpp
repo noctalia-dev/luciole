@@ -148,6 +148,16 @@ namespace luciole::transfer {
       );
     }
 
+    void
+    checkReplacementSource(const Source& source, TransferAction action, const std::optional<struct stat>& replace) {
+      if (action != TransferAction::Move
+          && replace
+          && S_ISDIR(replace->st_mode)
+          && (sameIdentity(source.metadata, *replace) || hasAncestor(source.parent.get(), *replace))) {
+        throwFileError(FileErrorKind::WouldRecurse, "Replacement would remove the transfer source.");
+      }
+    }
+
     TransferResult transferItem(Node& node, int destination, TransferAction action, Work& work) {
       auto& source = node.source;
       const auto& binding = *node.destination;
@@ -315,6 +325,7 @@ namespace luciole::transfer {
                   )
                 : nullptr;
             work.check();
+            checkReplacementSource(source, action, replace);
             const auto placed = replace ? renameExchange(stage.fd(), "item", destination, target.c_str())
                                         : renameNoReplace(stage.fd(), "item", destination, target.c_str());
             if (placed != 0) {
@@ -332,7 +343,7 @@ namespace luciole::transfer {
             }
             published = true;
             result.destination = binding.location.child(target);
-            if (replace && !sameContent(*replace, info(stage.fd(), "item"))) {
+            if (replace && !sameRenamedRevision(*replace, info(stage.fd(), "item"), true)) {
               stage.retain();
               throwFileError(
                   FileErrorKind::Changed, "The previous destination changed and was retained in " + stage.name()

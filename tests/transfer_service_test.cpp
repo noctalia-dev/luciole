@@ -30,6 +30,7 @@ namespace {
   using luciole::TransferAction;
   using luciole::TransferConflictChoice;
   using luciole::TransferOutcome;
+  std::string fixtureParent = "/tmp";
   void write(const fs::path& path, const std::string& text) { std::ofstream(path) << text; }
   std::string read(const fs::path& path) {
     std::ifstream input(path);
@@ -49,7 +50,7 @@ namespace {
   }
   struct Fixture {
     fs::path root;
-    explicit Fixture(const std::string& parent = "/tmp") {
+    explicit Fixture(const std::string& parent = fixtureParent) {
       std::string name = parent + "/luciole-transfer-XXXXXX";
       TEST_CHECK(::mkdtemp(name.data()) != nullptr);
       root = name;
@@ -338,6 +339,128 @@ namespace {
     }
     throw std::runtime_error("Retained destination not found");
   }
+  void testRenameRevisions() {
+    struct stat before{};
+    before.st_dev = 1;
+    before.st_ino = 2;
+    before.st_mode = S_IFDIR | 0750;
+    before.st_nlink = 2;
+    before.st_mtim = {123, 456};
+    before.st_ctim = {123, 789};
+    auto after = before;
+    ++after.st_ctim.tv_sec;
+    TEST_CHECK(luciole::sameRenamedRevision(before, after));
+    ++after.st_mtim.tv_nsec;
+    TEST_CHECK(!luciole::sameRenamedRevision(before, after));
+    TEST_CHECK(luciole::sameRenamedRevision(before, after, true));
+    for (int mutation = 0; mutation < 7; ++mutation) {
+      auto changed = after;
+      switch (mutation) {
+      case 0:
+        ++changed.st_ino;
+        break;
+      case 1:
+        ++changed.st_dev;
+        break;
+      case 2:
+        changed.st_mode ^= S_IWUSR;
+        break;
+      case 3:
+        ++changed.st_uid;
+        break;
+      case 4:
+        ++changed.st_gid;
+        break;
+      case 5:
+        ++changed.st_size;
+        break;
+      case 6:
+        ++changed.st_nlink;
+        break;
+      }
+      TEST_CHECK(!luciole::sameRenamedRevision(before, changed, true));
+    }
+    luciole::HistoryRevisions history;
+    history.capture(before);
+    history.renamed(before, after, true);
+    history.validate(after, after);
+    auto changed = after;
+    ++changed.st_mtim.tv_nsec;
+    bool rejected = false;
+    try {
+      history.validate(after, changed);
+    } catch (const luciole::FileErrorException&) {
+      rejected = true;
+    }
+    TEST_CHECK(rejected);
+    for (const auto type : {S_IFREG, S_IFLNK}) {
+      before.st_mode = type | 0640;
+      after.st_mode = before.st_mode;
+      TEST_CHECK(!luciole::sameRenamedRevision(before, after, true));
+    }
+  }
+  void testReplacementSourceGuard(Pump& pump) {
+    for (const auto action : {TransferAction::Copy, TransferAction::Link}) {
+      for (bool alias : {false, true}) {
+        Fixture f;
+        fs::create_directory(f.destination("item"));
+        write(f.destination("item/item"), "source bytes");
+        write(f.destination("item/keep"), "unrelated bytes");
+        if (alias) {
+          fs::create_directory_symlink(f.destination("item"), f.root / "alias");
+        }
+        luciole::TransferService service;
+        pump.run(
+            service, {location(alias ? f.root / "alias/item" : f.destination("item/item"))}, f.destination(""), action,
+            [](const auto&) { return TransferConflictChoice::Replace; }
+        );
+        TEST_CHECK(service.results()[0].outcome == TransferOutcome::Failed);
+        TEST_CHECK(service.results()[0].error->kind == luciole::FileErrorKind::WouldRecurse);
+        TEST_CHECK(read(f.destination("item/item")) == "source bytes");
+        TEST_CHECK(read(f.destination("item/keep")) == "unrelated bytes");
+        f.clean();
+      }
+    }
+  }
+  void testReplacementTimestampGuards(Pump& pump) {
+    for (const auto action : {TransferAction::Copy, TransferAction::Move}) {
+      for (const bool changeRetained : {false, true}) {
+        Fixture f;
+        fs::create_directories(f.source("item/sub"));
+        fs::create_directories(f.destination("item/sub"));
+        write(f.source("item/sub/file"), "incoming");
+        write(f.destination("item/sub/file"), "previous");
+        const auto old = luciole::transfer::info(AT_FDCWD, f.destination("item").native());
+        luciole::TransferService service;
+        pump.run(service, {location(f.source("item"))}, f.destination(""), action, [](const auto&) {
+          return TransferConflictChoice::Replace;
+        });
+        TEST_CHECK(service.copyReceipt() || service.receipt());
+        const auto retained = retainedItem(f, old);
+        const auto changed = changeRetained ? retained : f.destination("item");
+        struct stat current{};
+        TEST_CHECK(::lstat(changed.c_str(), &current) == 0);
+        const timespec times[]{{0, UTIME_OMIT}, {current.st_mtim.tv_sec - 10, current.st_mtim.tv_nsec}};
+        TEST_CHECK(::utimensat(AT_FDCWD, changed.c_str(), times, AT_SYMLINK_NOFOLLOW) == 0);
+        if (action == TransferAction::Copy) {
+          pump.replayCopy(service, service.copyReceipt());
+        } else {
+          pump.replay(service, service.receipt());
+        }
+        TEST_CHECK(service.historyRetired() && !service.copyReceipt() && !service.receipt());
+        TEST_CHECK(service.results()[0].outcome == TransferOutcome::Failed);
+        TEST_CHECK(read(f.destination("item/sub/file")) == "incoming");
+        TEST_CHECK(read(retained / "sub/file") == "previous");
+        service.takeCopyReceipt().reset();
+        service.takeReceipt().reset();
+        pump.until([] { return !luciole::CopyReceipt::cleanupPending() && !luciole::MoveReceipt::cleanupPending(); });
+        (void)luciole::CopyReceipt::takeCleanupErrors();
+        if (changeRetained) {
+          TEST_CHECK(read(retained / "sub/file") == "previous");
+        }
+      }
+    }
+  }
   void testReplacementHistory(Pump& pump) {
     for (const auto action : {TransferAction::Copy, TransferAction::Link}) {
       for (const bool finishUndone : {false, true}) {
@@ -393,9 +516,12 @@ namespace {
             TEST_CHECK(
                 restored.st_ino == old.st_ino && restored.st_dev == old.st_dev && restored.st_mode == old.st_mode
             );
-            TEST_CHECK(
-                restored.st_mtim.tv_sec == old.st_mtim.tv_sec && restored.st_mtim.tv_nsec == old.st_mtim.tv_nsec
-            );
+            // XFS updates a directory's mtime during an exchange. File mtimes must remain exact.
+            if (!previousFolder) {
+              TEST_CHECK(
+                  restored.st_mtim.tv_sec == old.st_mtim.tv_sec && restored.st_mtim.tv_nsec == old.st_mtim.tv_nsec
+              );
+            }
             if (previousFolder) {
               TEST_CHECK(read(f.destination(name) / "sub/old") == "previous");
             } else if (variant == 4) {
@@ -4438,8 +4564,27 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string_view(argv[1]) == "--mount-history") {
       return mountedHistoryChecks();
     }
-    TEST_CHECK(argc == 1);
     Pump pump;
+    if (argc == 3 && std::string_view(argv[1]) == "--replacement-filesystem") {
+      fixtureParent = argv[2];
+      TEST_CHECK(fs::is_directory(fixtureParent));
+      testRenameRevisions();
+      testReplacementHistory(pump);
+      testReplacementGuards(pump);
+      testFailedRetentionHandoff();
+      testMoveReplacementRecovery(pump);
+      testMoveRecoveryGuards(pump);
+      testMoveRetentionHandoffFailure();
+      testReplacementSourceGuard(pump);
+      testReplacementTimestampGuards(pump);
+      drainHistoryCleanup();
+      std::println("Replacement filesystem checks passed: {}", fixtureParent);
+      return 0;
+    }
+    TEST_CHECK(argc == 1);
+    testRenameRevisions();
+    testReplacementSourceGuard(pump);
+    testReplacementTimestampGuards(pump);
     testSymbolicLinkDrops(pump);
     testCopyHistory(pump);
     testCopyHistoryGuards(pump);

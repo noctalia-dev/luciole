@@ -1,6 +1,7 @@
 #include "app/operation_hub.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
+#include "fs/posix_fd.h"
 #include "operations/copy_receipt.h"
 #include "operations/trash_item.h"
 #include "test_check.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <glib.h>
@@ -20,10 +22,16 @@ namespace {
   using luciole::ActivityState;
   struct Fixture {
     fs::path root;
-    Fixture() {
-      const luciole::GString path(g_dir_make_tmp("luciole-activity-XXXXXX", nullptr));
-      TEST_CHECK(path != nullptr);
-      root = path.get();
+    explicit Fixture(const fs::path& parent = {}) {
+      if (parent.empty()) {
+        const luciole::GString path(g_dir_make_tmp("luciole-activity-XXXXXX", nullptr));
+        TEST_CHECK(path != nullptr);
+        root = path.get();
+      } else {
+        auto pattern = (parent / "luciole-activity-XXXXXX").native();
+        TEST_CHECK(mkdtemp(pattern.data()));
+        root = pattern;
+      }
       fs::create_directory(root / "destination");
     }
     ~Fixture() {
@@ -400,6 +408,101 @@ namespace {
       workspace.hub.detach(other);
     }
   }
+  void overwriteHistory(Pump& pump, const fs::path& parent = {}) {
+    for (const auto action :
+         {luciole::TransferAction::Copy, luciole::TransferAction::Move, luciole::TransferAction::Link}) {
+      for (bool cross : {false, true}) {
+        if (cross && (!parent.empty() || ::access("/dev/shm", W_OK) != 0)) {
+          continue;
+        }
+        for (unsigned shape = 0; shape < 5; ++shape) {
+          Fixture source(parent), target(cross ? fs::path("/dev/shm") : parent);
+          const auto incoming = source.root / "item", destination = target.root / "destination/item";
+          const bool folder = shape < 4 && (shape & 1U), oldFolder = shape < 4 && (shape & 2U);
+          if (folder) {
+            fs::create_directory(incoming);
+            std::ofstream(incoming / "new") << "incoming bytes";
+          } else if (shape == 4) {
+            fs::create_symlink("missing-new", incoming);
+          } else {
+            std::ofstream(incoming) << "incoming bytes";
+          }
+          if (oldFolder) {
+            fs::create_directory(destination);
+            std::ofstream(destination / "old") << "old bytes";
+          } else if (shape == 4) {
+            fs::create_symlink("missing-old", destination);
+          } else {
+            std::ofstream(destination) << "old bytes";
+          }
+          if (shape == 1) {
+            fs::create_hard_link(destination, target.root / "outside-alias");
+          }
+          const auto old = luciole::checkedFd(::open(destination.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
+          std::ofstream(source.root / "canary") << "unrelated bytes";
+          Workspace workspace;
+          auto job = workspace.hub.create<luciole::TransferService>(workspace.page);
+          auto& service = job->service<luciole::TransferService>();
+          TEST_CHECK(service.start({{source.at("item")}, target.at("destination"), action}));
+          std::uint64_t answered = 0;
+          pump.until([&] {
+            if (const auto conflict = service.conflict(); conflict && conflict->id != answered) {
+              answered = conflict->id;
+              TEST_CHECK(service.resolve(answered, luciole::TransferConflictChoice::Replace));
+            }
+            return !workspace.hub.busy();
+          });
+          TEST_CHECK(workspace.hub.canUndo());
+          TEST_CHECK(luciole::statFd(old.get()).st_nlink == (shape == 1 ? 1U : 0U));
+          const auto noBackups = [&] {
+            for (const auto& entry : fs::recursive_directory_iterator(target.root)) {
+              TEST_CHECK(!entry.path().filename().native().starts_with(".luciole-"));
+            }
+          };
+          const auto verify = [&](const fs::path& path, bool linked) {
+            if (linked) {
+              TEST_CHECK(fs::read_symlink(path) == incoming);
+            } else if (folder) {
+              std::string bytes;
+              std::getline(std::ifstream(path / "new"), bytes);
+              TEST_CHECK(bytes == "incoming bytes" && !fs::exists(path / "old"));
+            } else if (shape == 4) {
+              TEST_CHECK(fs::read_symlink(path) == "missing-new");
+            } else {
+              std::string bytes;
+              std::getline(std::ifstream(path), bytes);
+              TEST_CHECK(bytes == "incoming bytes");
+            }
+          };
+          noBackups();
+          verify(destination, action == luciole::TransferAction::Link);
+          if (shape == 1) {
+            std::ofstream(target.root / "outside-alias") << "edited outside alias";
+          }
+          for (int cycle = 0; cycle < 2; ++cycle) {
+            TEST_CHECK(workspace.hub.replayHistory(workspace.page, false));
+            pump.until([&] { return !workspace.hub.busy(); });
+            TEST_CHECK(workspace.hub.canRedo());
+            TEST_CHECK(fs::symlink_status(destination).type() == fs::file_type::not_found);
+            verify(incoming, false);
+            TEST_CHECK(workspace.hub.replayHistory(workspace.page, true));
+            pump.until([&] { return !workspace.hub.busy(); });
+            TEST_CHECK(workspace.hub.canUndo());
+            verify(destination, action == luciole::TransferAction::Link);
+            noBackups();
+          }
+          std::string bytes;
+          std::getline(std::ifstream(source.root / "canary"), bytes);
+          TEST_CHECK(bytes == "unrelated bytes");
+          workspace.hub.shutdown();
+          pump.until([&] { return !workspace.hub.busy(); });
+          workspace.hub.detach(workspace.page);
+          noBackups();
+        }
+      }
+    }
+  }
+
   void replacementMergeHistory(Pump& pump) {
     Fixture fixture;
     fs::create_directory(fixture.root / "tree");
@@ -443,17 +546,18 @@ namespace {
     TEST_CHECK(workspace.hub.canUndo() && fs::exists(fixture.root / "destination/tree/new"));
     TEST_CHECK(workspace.hub.replayHistory(other, false));
     pump.until([&] { return !workspace.hub.busy(); });
+    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/document"));
     fixture.write("destination/tree/document");
     TEST_CHECK(workspace.hub.replayHistory(other, true));
     pump.until([&] { return !workspace.hub.busy(); });
-    TEST_CHECK(!workspace.hub.canUndo() && !workspace.hub.canRedo());
-    const auto failure = workspace.hub.activities().front();
-    TEST_CHECK(
-        failure.state == ActivityState::Failed && failure.report && failure.report->contains(".luciole-create-")
-    );
-    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/new") && fs::exists(fixture.root / "tree/new"));
-    workspace.hub.update(otherWindow);
-    TEST_CHECK(workspace.hub.activities().front().title == "Discard undo data");
+    TEST_CHECK(!workspace.hub.canUndo() && workspace.hub.canRedo());
+    TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Failed);
+    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/new"));
+    TEST_CHECK(fs::exists(fixture.root / "tree/new"));
+    TEST_CHECK(fs::remove(fixture.root / "destination/tree/document"));
+    TEST_CHECK(workspace.hub.replayHistory(other, true));
+    pump.until([&] { return !workspace.hub.busy(); });
+    TEST_CHECK(workspace.hub.canUndo() && fs::exists(fixture.root / "destination/tree/new"));
     workspace.hub.shutdown();
     pump.until([&] { return !workspace.hub.busy(); });
     workspace.hub.detach(other);
@@ -506,15 +610,18 @@ namespace {
     );
     TEST_CHECK(workspace.hub.replayHistory(other, false));
     pump.until([&] { return !workspace.hub.busy(); });
+    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/document"));
     fixture.write("destination/tree/document");
     TEST_CHECK(workspace.hub.replayHistory(other, true));
     pump.until([&] { return !workspace.hub.busy(); });
-    TEST_CHECK(!workspace.hub.canUndo() && !workspace.hub.canRedo());
-    const auto failure = workspace.hub.activities().front();
-    TEST_CHECK(failure.state == ActivityState::Failed && failure.report && failure.report->contains("changed"));
-    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/new") && fs::exists(fixture.root / "tree/new"));
-    workspace.hub.update(otherWindow);
+    TEST_CHECK(!workspace.hub.canUndo() && workspace.hub.canRedo());
     TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Failed);
+    TEST_CHECK(!fs::exists(fixture.root / "destination/tree/new"));
+    TEST_CHECK(fs::exists(fixture.root / "tree/new"));
+    TEST_CHECK(fs::remove(fixture.root / "destination/tree/document"));
+    TEST_CHECK(workspace.hub.replayHistory(other, true));
+    pump.until([&] { return !workspace.hub.busy(); });
+    TEST_CHECK(workspace.hub.canUndo() && fs::exists(fixture.root / "destination/tree/new"));
     workspace.hub.shutdown();
     pump.until([&] { return !workspace.hub.busy(); });
     workspace.hub.detach(other);
@@ -541,6 +648,14 @@ namespace {
         }
         return !workspace.hub.busy();
       });
+      if (action == luciole::TransferAction::Move) {
+        TEST_CHECK(!workspace.hub.canUndo() && !workspace.hub.canRedo());
+        TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Succeeded);
+        workspace.hub.shutdown();
+        pump.until([&] { return !workspace.hub.busy(); });
+        workspace.hub.detach(workspace.page);
+        continue;
+      }
       TEST_CHECK(workspace.hub.canUndo());
       const auto otherWindow = workspace.model.addWindow(), other = workspace.model.addTab(otherWindow);
       Owner otherOwner;
@@ -551,7 +666,7 @@ namespace {
       workspace.hub.update(otherWindow);
       TEST_CHECK(workspace.hub.replayHistory(other, false));
       pump.until([&] { return !workspace.hub.busy(); });
-      TEST_CHECK(workspace.hub.canRedo() && fs::equivalent(fixture.root / "destination/item", fixture.root / "alias"));
+      TEST_CHECK(workspace.hub.canRedo() && !fs::exists(fixture.root / "destination/item"));
       TEST_CHECK(fs::exists(fixture.root / "one/item") && fs::exists(fixture.root / "two/item"));
       TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Succeeded);
       TEST_CHECK(workspace.hub.replayHistory(other, true));
@@ -594,6 +709,14 @@ namespace {
         }
         return !workspace.hub.busy();
       });
+      if (action == luciole::TransferAction::Move) {
+        TEST_CHECK(!workspace.hub.canUndo() && !workspace.hub.canRedo());
+        TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Succeeded);
+        workspace.hub.shutdown();
+        pump.until([&] { return !workspace.hub.busy(); });
+        workspace.hub.detach(workspace.page);
+        continue;
+      }
       TEST_CHECK(
           workspace.hub.canUndo()
           && workspace.hub.historyLabel(false) == (action == luciole::TransferAction::Copy ? "Undo Copy" : "Undo Move")
@@ -651,6 +774,17 @@ namespace {
       }
       return !workspace.hub.busy();
     });
+    TEST_CHECK(conflicts == 3);
+    if (action == luciole::TransferAction::Move) {
+      TEST_CHECK(!workspace.hub.canUndo() && !workspace.hub.canRedo());
+      TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Succeeded);
+      TEST_CHECK(fs::exists(fixture.root / "destination/tree/final"));
+      TEST_CHECK(!fs::exists(fixture.root / "one/tree") && !fs::exists(fixture.root / "two/tree"));
+      workspace.hub.shutdown();
+      pump.until([&] { return !workspace.hub.busy(); });
+      workspace.hub.detach(workspace.page);
+      return;
+    }
     TEST_CHECK(
         conflicts == 3
         && workspace.hub.canUndo()
@@ -665,8 +799,7 @@ namespace {
     workspace.hub.update(window);
     TEST_CHECK(workspace.hub.replayHistory(page, false));
     pump.until([&] { return !workspace.hub.busy(); });
-    TEST_CHECK(workspace.hub.canRedo() && fs::exists(fixture.root / "destination/tree/keep"));
-    TEST_CHECK(fs::equivalent(fixture.root / "destination/tree/item", fixture.root / "alias"));
+    TEST_CHECK(workspace.hub.canRedo() && !fs::exists(fixture.root / "destination/tree"));
     TEST_CHECK(!fs::exists(fixture.root / "destination/tree/final"));
     TEST_CHECK(workspace.hub.activities().front().state == ActivityState::Succeeded);
     TEST_CHECK(workspace.hub.replayHistory(page, true));
@@ -943,11 +1076,16 @@ namespace {
 
 int main(int argc, char** argv) {
   Pump pump;
+  if (argc == 3 && std::string_view(argv[1]) == "--overwrite-filesystem") {
+    overwriteHistory(pump, argv[2]);
+    return 0;
+  }
   if (argc == 2 && std::string_view(argv[1]) == "--trash-provider") {
     trashMoveNotifications(pump, true);
     return 0;
   }
   TEST_CHECK(argc == 1);
+  overwriteHistory(pump);
   trashMoveNotifications(pump, false);
   transferLifecycle(pump);
   conflictCancelAndRehome(pump);

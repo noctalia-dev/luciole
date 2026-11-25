@@ -166,3 +166,12 @@ int luciole::renameExchange(int fromDir, const char* from, int toDir, const char
   }
   return 0;
 }
+
+bool luciole::sameRenamedRevision(const struct stat& before, const struct stat& after, bool exchanged) {
+  auto expected = before;
+  expected.st_ctim = after.st_ctim;
+  if (exchanged && S_ISDIR(before.st_mode)) {
+    expected.st_mtim = after.st_mtim;
+  }
+  return sameFileRevision(expected, after);
+}

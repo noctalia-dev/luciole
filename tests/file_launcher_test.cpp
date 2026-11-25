@@ -156,6 +156,24 @@ namespace {
     TEST_CHECK(other.choices.size() == 1 && !other.choices.front().suggested && !other.choices.front().isDefault);
   }
 
+  luciole::ApplicationChoice testNoDisplay(luciole::FileLauncher& launcher) {
+    for (const bool all : {false, true}) {
+      const auto apps = query(launcher, all, "Luciole NoDisplay fixture");
+      TEST_CHECK(apps.choices.size() == 2);
+      TEST_CHECK(apps.choices.front().id == "fixture.desktop" && apps.choices.front().isDefault);
+      for (const auto& app : apps.choices) {
+        TEST_CHECK(app.suggested && !g_app_info_should_show(app.app.get()));
+      }
+    }
+    const auto searched = query(launcher, true, "LUCIOLE NODISPLAY FIXTURE DEFAULT");
+    TEST_CHECK(searched.choices.size() == 1 && searched.choices.front().id == "fixture.desktop");
+    const auto mixed = query(launcher, false, "Luciole NoDisplay fixture", {"text/plain", "image/png"});
+    TEST_CHECK(mixed.choices.size() == 1 && mixed.choices.front().id == "common.desktop");
+    TEST_CHECK(mixed.choices.front().suggested && !mixed.choices.front().isDefault);
+    TEST_CHECK(query(launcher, true, "unrelated.desktop").choices.empty());
+    return mixed.choices.front();
+  }
+
   void testDefault(luciole::FileLauncher& launcher, const luciole::ApplicationChoice& app, bool failure) {
     const auto set = [&](const std::string& mime) {
       std::optional<std::string> error;
@@ -252,6 +270,22 @@ int main(int argc, char** argv) {
     }
     if (mode == "mixed-catalog") {
       testMixed(*launcher);
+      return 0;
+    }
+    if (mode == "nodisplay") {
+      const auto app = testNoDisplay(*launcher);
+      std::vector<luciole::Location> locations;
+      for (int i = 2; i < argc; ++i) {
+        locations.push_back(luciole::Location::fromPath(argv[i]));
+      }
+      launcher->openWith(locations, app);
+      const auto deadline = g_get_monotonic_time() + 5000000;
+      while (launcher->busy()) {
+        (void)g_main_context_iteration(nullptr, false);
+        TEST_CHECK(g_get_monotonic_time() < deadline);
+        g_usleep(1000);
+      }
+      TEST_CHECK(callbacks == 1 && errors == 0);
       return 0;
     }
     if (batch || groupedOpen || tokens || activationDestroy) {

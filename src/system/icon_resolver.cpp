@@ -18,6 +18,7 @@
 #include <set>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -762,14 +763,12 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
       }
     }
   } else {
-    // Search dirs are grouped by theme; stop at the end of the first theme with
-    // a match. Within it an SVG wins; among bitmaps, prefer the smallest theme
-    // size that is still >= the requested size (gentle downscale); otherwise the
-    // largest available (least upscaling). Unknown-size dirs are a last resort.
+    // Choose the size-specific drawing before its format. SVG variants can have different
+    // detail and pixel alignment, so the large scalable drawing is not always the sharpest.
     std::string best;
     std::string_view theme;
-    int bestSize = 0;
-    bool bestIsUpscale = true;
+    using Score = std::tuple<bool, bool, std::int64_t, std::int64_t, bool>;
+    std::optional<Score> bestScore;
     for (const auto& dir : m_plan->searchDirs) {
       if (dir.theme != theme) {
         if (!best.empty()) {
@@ -780,30 +779,26 @@ std::string IconResolver::findIcon(const std::string& name, int targetSize) cons
       if (!dir.exists) {
         continue;
       }
-      std::string svg = dir.path + name + ".svg";
-      if (pathExists(svg)) {
-        return svg;
-      }
-      std::string png = dir.path + name + ".png";
-      if (!pathExists(png)) {
-        continue;
-      }
-      const int size = dir.size;
-      const bool isUpscale = size < targetSize; // size 0 (unknown) counts as upscale
-      bool better = false;
-      if (best.empty()) {
-        better = true;
-      } else if (bestIsUpscale != isUpscale) {
-        better = !isUpscale; // a downscale source always beats an upscale one
-      } else if (isUpscale) {
-        better = size > bestSize; // upscaling: the bigger the source the better
-      } else {
-        better = size < bestSize; // downscaling: the closer to target the better
-      }
-      if (better) {
-        best = std::move(png);
-        bestSize = size;
-        bestIsUpscale = isUpscale;
+      const std::int64_t minimum = dir.minSize > 0 ? dir.minSize : dir.size;
+      const std::int64_t maximum = dir.maxSize > 0 ? dir.maxSize : dir.size;
+      const bool matches = minimum > 0 && targetSize >= minimum && targetSize <= maximum;
+      const auto distance = dir.size <= 0 ? std::numeric_limits<std::int64_t>::max()
+          : targetSize < minimum          ? minimum - targetSize
+          : targetSize > maximum          ? targetSize - maximum
+                                          : 0;
+      const auto nominalDistance = std::abs(static_cast<std::int64_t>(dir.size) - targetSize);
+      for (const auto* extension : {".svg", ".png"}) {
+        const Score score{
+            !matches, maximum < targetSize, distance, nominalDistance, extension == std::string_view(".png")
+        };
+        if (bestScore && score >= *bestScore) {
+          continue;
+        }
+        std::string path = dir.path + name + extension;
+        if (pathExists(path)) {
+          best = std::move(path);
+          bestScore = score;
+        }
       }
     }
     if (!best.empty()) {

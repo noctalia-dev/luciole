@@ -3,6 +3,7 @@
 #include "fs/gio_interop.h"
 #include "fs/gio_ptr.h"
 #include "fs/location_mount.h"
+#include "fs/system_mount_monitor.h"
 
 #include <algorithm>
 #include <format>
@@ -17,6 +18,7 @@ namespace {
     luciole::GioPtr<GVolume> volume;
     luciole::GioPtr<GMount> mount;
     luciole::GioPtr<GDrive> device;
+    std::optional<luciole::MountConfiguration> systemMount = std::nullopt;
   };
 
   std::string identifier(GVolume* volume) {
@@ -45,6 +47,7 @@ namespace {
 struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
   // Null until start(): GIO starts the volume-monitor services synchronously.
   GioPtr<GVolumeMonitor> monitor;
+  SystemMountMonitor systemMounts;
   std::vector<Drive> drives;
   std::map<std::string, Handle> handles;
   std::function<void()> changed;
@@ -112,9 +115,49 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
     drives.clear();
     handles.clear();
     addRoot();
+    std::map<std::string, Handle> systemHandles;
+    // A mount at a configured system mount path belongs to its system row, keyed by the target URI.
+    const auto systemMountUri = [&](GMount* mount) -> std::optional<std::string> {
+      const GioPtr<GFile> root(g_mount_get_root(mount));
+      const auto location = locationFromFile(root.get());
+      const bool owned = std::ranges::any_of(systemMounts.mounts(), [&](const SystemMount& candidate) {
+        return Location::fromPath(candidate.configuration.path) == location;
+      });
+      return owned ? std::optional(location.uri()) : std::nullopt;
+    };
     GList* volumes = g_volume_monitor_get_volumes(monitor.get());
     for (GList* item = volumes; item != nullptr; item = item->next) {
-      add({.volume = GioPtr<GVolume>(G_VOLUME(item->data)), .mount = nullptr, .device = nullptr});
+      GioPtr<GVolume> volume(G_VOLUME(item->data));
+      GioPtr<GMount> mount(g_volume_get_mount(volume.get()));
+      if (mount) {
+        if (auto uri = systemMountUri(mount.get())) {
+          systemHandles.emplace(
+              std::move(*uri), Handle{.volume = std::move(volume), .mount = std::move(mount), .device = nullptr}
+          );
+        } else {
+          add({.volume = std::move(volume), .mount = std::move(mount), .device = nullptr});
+        }
+        continue;
+      }
+      const GString kind(g_volume_get_identifier(volume.get(), G_VOLUME_IDENTIFIER_KIND_CLASS));
+      const GString device(g_volume_get_identifier(volume.get(), G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE));
+      const GioPtr<GFile> activation(g_volume_get_activation_root(volume.get()));
+      // Unmounted GVfs fstab network volumes expose no path or device identifier, only their display label.
+      const bool matchesSource = device && std::ranges::any_of(systemMounts.mounts(), [&](const auto& candidate) {
+                                   return sameMountSource(candidate.configuration.source, device.get());
+                                 });
+      const GString name(g_volume_get_name(volume.get()));
+      const bool matchesUnmountedNetwork = !activation
+          && kind
+          && std::string_view(kind.get()) == "network"
+          && name
+          && std::ranges::any_of(systemMounts.mounts(), [&](const auto& candidate) {
+               return candidate.label == name.get();
+             });
+      if (matchesSource || matchesUnmountedNetwork) {
+        continue;
+      }
+      add({.volume = std::move(volume), .mount = nullptr, .device = nullptr});
     }
     g_list_free(volumes);
     GList* mounts = g_volume_monitor_get_mounts(monitor.get());
@@ -122,10 +165,42 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
       GioPtr<GMount> mount(G_MOUNT(item->data));
       const GioPtr<GVolume> volume(g_mount_get_volume(mount.get()));
       if (!volume && g_mount_is_shadowed(mount.get()) == FALSE) {
+        if (auto uri = systemMountUri(mount.get())) {
+          systemHandles.emplace(
+              std::move(*uri), Handle{.volume = nullptr, .mount = std::move(mount), .device = nullptr}
+          );
+          continue;
+        }
         add({.volume = nullptr, .mount = std::move(mount), .device = nullptr});
       }
     }
     g_list_free(mounts);
+    for (const auto& mount : systemMounts.mounts()) {
+      if (!mount.visible) {
+        continue;
+      }
+      const auto target = Location::fromPath(mount.configuration.path);
+      auto key = "system-mount:" + target.uri();
+      Handle handle{.volume = nullptr, .mount = nullptr, .device = nullptr, .systemMount = mount.configuration};
+      if (const auto found = systemHandles.find(target.uri()); found != systemHandles.end()) {
+        handle.volume = std::move(found->second.volume);
+        handle.mount = std::move(found->second.mount);
+      }
+      const bool removable = !mount.configuration.automount
+          && mount.state == SystemMountState::Mounted
+          && handle.mount
+          && g_mount_can_unmount(handle.mount.get());
+      handles.emplace(key, std::move(handle));
+      drives.push_back(
+          {.key = std::move(key),
+           .label = mount.label,
+           .glyph = "server",
+           .root = mount.state == SystemMountState::Mounted ? std::optional(target) : std::nullopt,
+           .removal = removable ? DriveRemoval::Unmount : DriveRemoval::None,
+           .usage = std::nullopt,
+           .activation = mount.configuration.automount ? std::optional(target) : std::nullopt}
+      );
+    }
     // Mounted drives first, keeping GIO's order within each group; the root entry stays at the top.
     std::ranges::stable_partition(drives, [](const Drive& drive) { return drive.root.has_value(); });
     // Keep the last known usage until the next query answers, so bars do not flicker on rebuilds.
@@ -172,6 +247,11 @@ void luciole::DriveMonitor::start() {
     );
   }
   m_state->refresh();
+  m_state->systemMounts.start([weak = std::weak_ptr(m_state)] {
+    if (const auto state = weak.lock()) {
+      state->refresh();
+    }
+  });
 }
 
 const std::vector<luciole::Drive>& luciole::DriveMonitor::drives() const { return m_state->drives; }
@@ -233,7 +313,7 @@ void luciole::DriveMonitor::refreshUsage() {
     }
   };
   for (const auto& drive : m_state->drives) {
-    if (!drive.root || !m_state->usagePending.insert(drive.key).second) {
+    if (drive.activation || !drive.root || !m_state->usagePending.insert(drive.key).second) {
       continue;
     }
     g_file_query_filesystem_info_async(
@@ -249,16 +329,24 @@ void luciole::DriveMonitor::mount(
 ) {
   request.cancel();
   const auto* drive = find(key);
+  if (drive != nullptr && drive->activation) {
+    done(*drive->activation);
+    return;
+  }
   if (drive != nullptr && drive->root) {
     done(*drive->root);
     return;
   }
   const auto handle = m_state->handles.find(key);
-  if (drive == nullptr || handle == m_state->handles.end() || !handle->second.volume) {
+  if (drive == nullptr || handle == m_state->handles.end() || (!handle->second.systemMount && !handle->second.volume)) {
     done(std::unexpected(FileError{FileErrorKind::Unavailable, "This drive is no longer available."}));
     return;
   }
-  request.startVolume(handle->second.volume.get(), std::move(done));
+  if (handle->second.systemMount) {
+    request.startFstabMount(Location::fromPath(handle->second.systemMount->path), std::move(done));
+  } else {
+    request.startVolume(handle->second.volume.get(), std::move(done));
+  }
 }
 
 void luciole::DriveMonitor::remove(const std::string& key, std::function<void(DriveRemoveResult)> done) {

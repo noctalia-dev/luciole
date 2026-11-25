@@ -492,6 +492,10 @@ void OperationHub::recordHistory(OperationJob& job) {
     if (job.m_historyGeneration != m_historyGeneration) {
       return;
     }
+    if (job.historyReplay() == HistoryReplay::None) {
+      copyReceipt = luciole::CopyReceipt::withoutPredecessors(std::move(copyReceipt));
+      receipt = luciole::MoveReceipt::withoutPredecessors(std::move(receipt));
+    }
     if (copyReceipt) {
       m_copyReceipt = std::move(copyReceipt);
       m_moveReceipt.reset();

@@ -19,6 +19,7 @@ namespace luciole {
     std::vector<Location> locations;
     std::string_view reason; // empty when nothing needs explaining
   };
+  // Decides based on each entry's resolved type; callers resolve selected links asynchronously via chosenType().
   ChooserDecision
   chooserDecision(ChooserMode mode, const std::optional<Location>& folder, std::span<const DirectoryEntry> entries);
   // Whether choosing `entry` depends on a link target that chosenType() has to read.

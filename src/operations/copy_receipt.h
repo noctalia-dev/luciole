@@ -70,7 +70,8 @@ namespace luciole {
     bool ownsProof() const;
     void validate(const CancelToken& token, const std::map<std::string, int>& parents = {}) const;
     void vacant() const;
-    std::shared_ptr<const CopyEffect> afterMove(bool hidden, const std::map<std::string, int>& parents = {}) const;
+    std::shared_ptr<const CopyEffect>
+    afterMove(bool hidden, const std::map<std::string, int>& parents = {}, bool exchanged = false) const;
     Location m_destination;
     std::shared_ptr<CopyStorage> m_storage;
     std::shared_ptr<const transfer::Tree> m_tree;
@@ -86,6 +87,8 @@ namespace luciole {
     static std::shared_ptr<const CopyReceipt> capture(
         const std::vector<std::shared_ptr<const CopyEffect>>& effects, TransferAction action, const CancelToken& token
     );
+    // Application history reverses incoming effects without retaining overwritten originals.
+    static std::shared_ptr<const CopyReceipt> withoutPredecessors(std::shared_ptr<const CopyReceipt> receipt);
     static std::vector<std::shared_ptr<const CopyEffect>> checkpoint(
         const std::vector<std::shared_ptr<const CopyEffect>>& effects, const Location& destination,
         TransferAction action, const CancelToken& token

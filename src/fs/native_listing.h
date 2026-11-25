@@ -17,6 +17,7 @@ namespace luciole {
     std::vector<DirectoryEntry> entries; // IDs are 0; the session assigns them on the main thread.
     bool unsupported = false;            // Use GIO's enumeration instead; it also reports the folder's errors.
     bool limited = false;                // entryLimit was reached.
+    bool network = false;                // True when the folder sits on a mounted network filesystem.
     // Entries whose content type comes from the name although GIO would sniff the contents; see
     // sniffContentType().
     std::vector<std::uint32_t> uncertain;
@@ -27,8 +28,9 @@ namespace luciole {
   // dirent kinds, with statx only for missing kinds and mount-root lost+found hiddenness.
   // Every fact equals what GIO's local backend reports for the session's attributes with NOFOLLOW_SYMLINKS, except
   // access read/write/execute, which are deferred to entryAccess(), and the content type of `uncertain` entries.
-  // Network and FUSE filesystems, unreadable entries and any other failure report unsupported. A cancelled listing
-  // is empty.
+  // Network filesystems use the browse catalogue above 64 entries when dirent kinds are present, and otherwise report
+  // unsupported with `network = true` so GIO enumerates them without deferred main-thread access checks. Unreadable
+  // entries, non-network FUSE filesystems, and other failures report unsupported. A cancelled listing is empty.
   NativeListing
   listNativeFolder(const std::string& path, std::size_t entryLimit, GCancellable* cancellable, bool catalogue = false);
   struct CatalogueValidation {

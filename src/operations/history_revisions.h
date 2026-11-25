@@ -11,7 +11,7 @@
 
 namespace luciole {
   // One native job's confirmed rename/unlink revisions, shared with its retained-item cleanup.
-  // Rebase only ctime/link count caused by our own operations; content and metadata remain strict.
+  // Rebase revisions caused by our own operations; subsequent content and metadata checks remain strict.
   class HistoryRevisions {
   public:
     using Key = std::pair<dev_t, ino_t>;
@@ -42,14 +42,16 @@ namespace luciole {
       return result;
     }
     void validate(const struct stat& original, const struct stat& actual) const { require(expected(original), actual); }
-    void renamed(const struct stat& original, const struct stat& actual) {
+    void renamed(const struct stat& original, const struct stat& actual, bool exchanged = false) {
       const auto guard = lock();
       if (!m_known.contains({original.st_dev, original.st_ino})) {
         capture(original);
       }
-      auto result = expected(original);
-      result.st_ctim = actual.st_ctim;
-      require(result, actual);
+      if (!sameRenamedRevision(expected(original), actual, exchanged)) {
+        throwFileError(
+            FileErrorKind::Changed, "The file or its hard-link aliases changed. History is no longer valid."
+        );
+      }
       m_known[{actual.st_dev, actual.st_ino}] = actual;
     }
     void directoryChanged(const struct stat& original, const struct stat& actual) {

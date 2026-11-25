@@ -283,10 +283,10 @@ void luciole::CopyEffect::vacant() const {
 }
 
 std::shared_ptr<const luciole::CopyEffect>
-luciole::CopyEffect::afterMove(bool hidden, const std::map<std::string, int>& parents) const {
+luciole::CopyEffect::afterMove(bool hidden, const std::map<std::string, int>& parents, bool exchanged) const {
   auto tree = std::make_shared<transfer::Tree>(*m_tree);
   const auto current = statFd(m_storage->item.get());
-  revisions()->renamed(tree->metadata, current);
+  revisions()->renamed(tree->metadata, current, exchanged);
   tree->metadata = current;
   ++m_storage->generation;
   auto result = std::shared_ptr<const CopyEffect>(new CopyEffect(m_destination, m_storage, tree, hidden));
@@ -297,7 +297,7 @@ luciole::CopyEffect::afterMove(bool hidden, const std::map<std::string, int>& pa
   return result;
 }
 std::shared_ptr<const luciole::CopyEffect> luciole::CopyEffect::published(int from, int retentionParent) const {
-  auto incoming = afterMove(false);
+  auto incoming = afterMove(false, {}, m_previous != nullptr);
   if (!m_previous) {
     return incoming;
   }
@@ -328,19 +328,22 @@ std::shared_ptr<const luciole::CopyEffect>
 luciole::CopyEffect::retainedFrom(int from, const std::string& name, int retentionParent) const {
   auto& storage = *m_storage;
   try {
-    auto expected = *m_tree;
-    revisions()->renamed(expected.metadata, statFd(item()));
-    expected.metadata = revisions()->expected(expected.metadata);
-    verify(from, name, expected, {}, *revisions());
+    auto expected = std::make_shared<transfer::Tree>(*m_tree);
+    const auto exchanged = statFd(item());
+    // Rebase the exchanged root, then verify every captured child before retaining the predecessor.
+    revisions()->renamed(expected->metadata, exchanged, true);
+    expected->metadata = exchanged;
+    verify(from, name, *expected, {}, *revisions());
     auto stage = std::make_unique<CreationStage>(retentionParent >= 0 ? retentionParent : parent(), false);
     stage->adopt(checkedFd(::fcntl(item(), F_DUPFD_CLOEXEC, 0)));
     (void)currentParent(m_destination, parent());
-    verify(from, name, expected, {}, *revisions());
+    verify(from, name, *expected, {}, *revisions());
     if (luciole::renameNoReplace(from, name.c_str(), stage->fd(), "item") != 0) {
       throwErrno(errno);
     }
     storage.stage = std::move(stage);
-    return afterMove(true);
+    const CopyEffect observed(m_destination, m_storage, std::move(expected), false);
+    return observed.afterMove(true);
   } catch (const std::exception&) {
     auto error = currentFileError();
     if (storage.stage) {
@@ -651,6 +654,23 @@ luciole::CopyReceipt::reverse(const CancelToken& token, std::atomic<std::size_t>
   return reverseImpl(token, completed, {}, -1, true);
 }
 
+std::shared_ptr<const luciole::CopyReceipt>
+luciole::CopyReceipt::withoutPredecessors(std::shared_ptr<const CopyReceipt> receipt) {
+  if (!receipt
+      || !std::ranges::any_of(receipt->m_effects, [](const auto& effect) { return effect->m_previous != nullptr; })) {
+    return receipt;
+  }
+  auto result = std::make_shared<CopyReceipt>(*receipt);
+  for (auto& effect : result->m_effects) {
+    if (effect->m_previous) {
+      effect = std::shared_ptr<const CopyEffect>(
+          new CopyEffect(effect->m_destination, effect->m_storage, effect->m_tree, effect->m_hidden)
+      );
+    }
+  }
+  return result;
+}
+
 luciole::CopyReplayResult luciole::CopyReceipt::reverseImpl(
     const CancelToken& token, std::atomic<std::size_t>& completed, const std::map<std::string, int>& parents,
     int retentionParent, bool captureInverse
@@ -733,8 +753,8 @@ luciole::CopyReplayResult luciole::CopyReceipt::reverseImpl(
         result.destination = effect->m_destination;
         result.children.emplace_back(effect->m_destination, TransferOutcome::Moved).destination = retainedPath;
         result.children.emplace_back(retainedPath, TransferOutcome::Moved).destination = effect->m_destination;
-        auto retained = effect->afterMove(true, parents);
-        auto restored = effect->m_previous->afterMove(false, parents);
+        auto retained = effect->afterMove(true, parents, true);
+        auto restored = effect->m_previous->afterMove(false, parents, true);
         inverse.push_back(
             std::shared_ptr<const CopyEffect>(new CopyEffect(
                 restored->m_destination, restored->m_storage, restored->m_tree, false, std::move(retained)

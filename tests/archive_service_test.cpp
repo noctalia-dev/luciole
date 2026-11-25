@@ -14,12 +14,14 @@
 #include <archive_entry.h>
 #include <array>
 #include <chrono>
+#include <clocale>
 #include <csignal>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <gio/gio.h>
+#include <map>
 #include <print>
 #include <stdexcept>
 #include <sys/resource.h>
@@ -158,6 +160,125 @@ namespace {
       TEST_CHECK(!fs::exists(temporary));
     }
   }
+  void testLiteralSourceLinks(const Fixture& fixture, Pump& pump) {
+    struct ReadLocale {
+      locale_t value = ::newlocale(LC_CTYPE_MASK, "C.UTF-8", nullptr);
+      locale_t previous = nullptr;
+      ReadLocale() {
+        TEST_CHECK(value);
+        previous = ::uselocale(value);
+        TEST_CHECK(previous);
+      }
+      ~ReadLocale() {
+        ::uselocale(previous);
+        ::freelocale(value);
+      }
+      ReadLocale(const ReadLocale&) = delete;
+      ReadLocale& operator=(const ReadLocale&) = delete;
+    } readLocale;
+    const auto source = fixture.root / "literal-links", outside = fixture.root / "outside-links";
+    fs::create_directory(source);
+    fs::create_directory(outside);
+    const std::string payload = "selected source bytes", secret(8192, 'S');
+    write(source / "payload", payload);
+    write(outside / "canary", secret);
+    TEST_CHECK(::mkfifo((outside / "pipe").c_str(), 0600) == 0);
+    const std::map<std::string, std::string> targets{
+        {"absolute-file", (outside / "canary").native()},
+        {"absolute-folder", outside.native()},
+        {"parent-target", "../outside-links/canary"},
+        {"missing-target", (outside / "missing").native()},
+        {"chain", "absolute-file"},
+        {"cycle-a", "cycle-b"},
+        {"cycle-b", "cycle-a"},
+        {"literal-target", "../literal \\ ' $() café\n文"}
+    };
+    for (const auto& [name, target] : targets) {
+      fs::create_symlink(target, source / name);
+    }
+    for (const auto& format : luciole::archiveFormats()) {
+      const auto path = fixture.root / ("literal-source" + std::string(format.suffix));
+      luciole::ArchiveLimits limits;
+      // Following either the outside file or directory would violate this bound or encounter the FIFO.
+      limits.maxExpandedBytes = payload.size();
+      luciole::ArchiveService service(limits);
+      TEST_CHECK(service.compress({location(source)}, location(path), format.format));
+      wait(service, pump);
+      if (service.error()) {
+        throw std::runtime_error(service.error()->message);
+      }
+
+      // Read the actual archive independently of Luciole's restrictive browsing/extraction catalog.
+      const std::unique_ptr<struct archive, decltype(&archive_read_free)> reader(
+          archive_read_new(), &archive_read_free
+      );
+      TEST_CHECK(archive_read_support_filter_all(reader.get()) == ARCHIVE_OK);
+      TEST_CHECK(archive_read_support_format_all(reader.get()) == ARCHIVE_OK);
+      TEST_CHECK(archive_read_open_filename(reader.get(), path.c_str(), 65536) == ARCHIVE_OK);
+      std::map<std::string, std::string> stored;
+      std::size_t entries = 0;
+      struct archive_entry* item = nullptr;
+      int status = ARCHIVE_OK;
+      while ((status = archive_read_next_header(reader.get(), &item)) == ARCHIVE_OK) {
+        ++entries;
+        const std::string name(archive_entry_pathname(item));
+        if (archive_entry_filetype(item) == AE_IFLNK) {
+          TEST_CHECK(archive_entry_symlink(item));
+          TEST_CHECK(stored.emplace(fs::path(name).filename().native(), archive_entry_symlink(item)).second);
+        } else if (archive_entry_filetype(item) == AE_IFREG) {
+          TEST_CHECK(name == "literal-links/payload");
+          std::array<char, 64> data{};
+          TEST_CHECK(
+              archive_read_data(reader.get(), data.data(), data.size()) == static_cast<la_ssize_t>(payload.size())
+          );
+          TEST_CHECK(std::string(data.data(), payload.size()) == payload);
+          TEST_CHECK(archive_read_data(reader.get(), data.data(), data.size()) == 0);
+        } else {
+          TEST_CHECK(archive_entry_filetype(item) == AE_IFDIR && (name == "literal-links/" || name == "literal-links"));
+        }
+      }
+      if (status != ARCHIVE_EOF || stored != targets || entries != targets.size() + 2) {
+        std::println(
+            stderr, "literal-link format {}: status {}, entries {}, error {}", format.label, status, entries,
+            archive_error_string(reader.get()) ? archive_error_string(reader.get()) : "none"
+        );
+        for (const auto& [name, target] : stored) {
+          std::println(stderr, "stored {} -> {}", name, target);
+        }
+      }
+      TEST_CHECK(status == ARCHIVE_EOF && stored == targets && entries == targets.size() + 2);
+      TEST_CHECK(archive_read_close(reader.get()) == ARCHIVE_OK);
+      const auto bytes = read(path);
+      luciole::ArchiveService guarded;
+      TEST_CHECK(guarded.inspect(location(path)));
+      wait(guarded, pump);
+      TEST_CHECK(
+          guarded.error() && guarded.error()->kind == luciole::FileErrorKind::InvalidArgument && !guarded.catalog()
+      );
+      const auto destination = fixture.root / ("literal-rejected" + std::to_string(static_cast<int>(format.format)));
+      TEST_CHECK(guarded.extract(location(path), location(destination)));
+      wait(guarded, pump);
+      TEST_CHECK(
+          guarded.error()
+          && guarded.error()->kind == luciole::FileErrorKind::InvalidArgument
+          && !fs::exists(destination)
+      );
+      TEST_CHECK(read(path) == bytes && read(outside / "canary") == secret);
+      for (const auto& [name, target] : targets) {
+        TEST_CHECK(fs::is_symlink(source / name) && fs::read_symlink(source / name).native() == target);
+      }
+      TEST_CHECK(fs::is_empty(fixture.root / "tmp"));
+    }
+    const auto longLink = fixture.root / "long-link";
+    fs::create_symlink(std::string(128, 'x'), longLink);
+    luciole::ArchiveLimits limits;
+    limits.maxMetadataBytes = 64;
+    luciole::ArchiveService limited(limits);
+    const auto output = fixture.root / "limited-link.zip";
+    TEST_CHECK(limited.compress({location(longLink)}, location(output), luciole::ArchiveFormat::Zip));
+    wait(limited, pump);
+    TEST_CHECK(limited.error() && !fs::exists(output) && fs::is_empty(fixture.root / "tmp"));
+  }
   void testConflicts(const Fixture& fixture, Pump& pump) {
     const auto source = fixture.root / "conflict.txt", archive = fixture.root / "conflict.zip";
     write(source, "first");
@@ -183,6 +304,9 @@ namespace {
     TEST_CHECK(fs::exists(fixture.root / "conflict (1).zip"));
   }
   void testHostile(const Fixture& fixture, Pump& pump) {
+    const auto outside = fixture.root / "hostile-outside";
+    fs::create_directory(outside);
+    write(outside / "canary", "unchanged outside bytes");
     const std::vector<std::vector<Entry>> cases{
         {{"../escaped", "bad", {}}},
         {{"/absolute", "bad", {}}},
@@ -195,7 +319,10 @@ namespace {
         {{"dir/file", "bad", {}}, {"dir", {}, "target", AE_IFLNK}},
         {{"same", "one", {}}, {"same", "two", {}}},
         {{"pipe", {}, {}, AE_IFIFO}},
-        {{"hard", {}, "../outside", AE_IFREG}}
+        {{"hard", {}, "../outside", AE_IFREG}},
+        {{"redirect", {}, outside.native(), AE_IFLNK}, {"redirect/canary", "overwrite attempt", {}}},
+        {{"cycle-a", {}, "cycle-b", AE_IFLNK}, {"cycle-b", {}, "cycle-a", AE_IFLNK}},
+        {{"hard", {}, (outside / "canary").native(), AE_IFREG}}
     };
     std::size_t index = 0;
     for (const auto& entries : cases) {
@@ -206,6 +333,7 @@ namespace {
       TEST_CHECK(service.extract(location(source), location(dest)));
       wait(service, pump);
       TEST_CHECK(service.error() && !fs::exists(dest));
+      TEST_CHECK(read(outside / "canary") == "unchanged outside bytes");
     }
     TEST_CHECK(!fs::exists(fixture.root / "escaped"));
   }
@@ -1924,6 +2052,7 @@ int main(int argc, char** argv) {
     }
     Fixture fixture;
     Pump pump;
+    testLiteralSourceLinks(fixture, pump);
     testRarProviders(fixture, pump);
     testRarStoredChunks(fixture, pump);
     testRarFailures(fixture, pump);

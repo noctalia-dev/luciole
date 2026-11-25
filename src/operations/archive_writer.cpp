@@ -9,7 +9,6 @@
 #include <fcntl.h>
 #include <functional>
 #include <glib.h>
-#include <map>
 #include <set>
 #include <unistd.h>
 
@@ -95,7 +94,6 @@ namespace {
     Fd output;
     std::uint64_t bytes = 0;
     std::size_t metadataBytes = 0;
-    std::map<std::string, std::string> links;
     std::unique_ptr<struct archive, decltype(&archive_write_free)> value{archive_write_new(), &archive_write_free};
     Writer(const std::string& filename, const ArchiveFormatInfo& format, Work& request, const Passwords& passwords)
         : work(request),
@@ -226,12 +224,11 @@ namespace {
         throwFileError(FileErrorKind::Other, "Could not read archive source link.");
       }
       const std::string link(target.data(), static_cast<std::size_t>(size));
-      (void)linkTarget(path, link, work);
+      // Creation stores the link itself. Only reading/extraction resolves and validates its target.
       writer.metadataBytes += link.size();
       if (writer.metadataBytes > work.limits.maxMetadataBytes) {
         throwFileError(FileErrorKind::Unsupported, "Archive link names exceed the metadata limit.");
       }
-      writer.links.emplace(path, link);
       archive_entry_set_filetype(entry.get(), AE_IFLNK);
       archive_entry_set_size(entry.get(), 0);
       archive_entry_set_symlink(entry.get(), link.c_str());
@@ -324,7 +321,6 @@ luciole::archive_work::Prepared luciole::archive_work::compress(
     const auto inputParent = opened(::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
     compressItem(inputParent.get(), path.filename().native(), path.filename().native(), writer, names, 0);
   }
-  validateLinks(writer.links, work);
   requireArchive(archive_write_close(writer.value.get()), writer.value.get(), work);
   if (::fsync(writer.output.get()) != 0) {
     systemError("Could not synchronize the archive");

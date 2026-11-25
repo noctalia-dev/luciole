@@ -17,11 +17,14 @@ namespace {
 
   class PixbufImageDecoder final : public ImageDecoder {
   public:
-    std::expected<DecodedRasterImage, std::string> decode(const std::uint8_t* data, std::size_t size) override {
+    std::expected<DecodedRasterImage, std::string>
+    decode(const std::uint8_t* data, std::size_t size, std::size_t maxPixels) override {
       if (!data || !size || size > kMaxEncodedImageBytes) {
         return std::unexpected("encoded image exceeds its budget");
       }
-      auto image = luciole::decodeRasterImage({data, size}, kMaxImageSide, kMaxImagePixels, nullptr);
+      const std::uint64_t pixelBudget =
+          maxPixels > 0 ? std::min<std::uint64_t>(maxPixels, kMaxImagePixels) : kMaxImagePixels;
+      auto image = luciole::decodeRasterImage({data, size}, kMaxImageSide, pixelBudget, nullptr);
       if (!image) {
         return std::unexpected(image.error());
       }

@@ -101,9 +101,12 @@ namespace {
       };
     };
     const auto folder = std::optional(Location::fromPath(root.string()));
-    const std::vector dirLink{link(1, "dir-link")};
-    const std::vector fileLink{link(2, "file-link")};
+    std::vector dirLink{link(1, "dir-link")};
+    std::vector fileLink{link(2, "file-link")};
     const std::vector dangling{link(3, "dangling")};
+    TEST_CHECK(luciole::chooserDecision({}, folder, dirLink).kind == Kind::Unavailable);
+    dirLink.front().type = FileType::Directory;
+    fileLink.front().type = FileType::Regular;
     TEST_CHECK(luciole::chooserDecision({}, folder, dirLink).kind == Kind::Enter);
     TEST_CHECK(luciole::chooserDecision({}, folder, fileLink).kind == Kind::Accept);
     TEST_CHECK(luciole::chooserDecision({}, folder, dangling).kind == Kind::Unavailable);

@@ -98,6 +98,8 @@ namespace luciole {
   class MoveReceipt {
   public:
     virtual ~MoveReceipt() = default;
+    // Returns no history when discarding overwritten data prevents complete source restoration.
+    static std::shared_ptr<const MoveReceipt> withoutPredecessors(std::shared_ptr<const MoveReceipt> receipt);
     using Revisions = std::map<std::pair<dev_t, ino_t>, struct stat>;
     static std::shared_ptr<const MoveReceipt> capture(
         const std::vector<std::shared_ptr<const MoveEffect>>& effects,

@@ -37,6 +37,23 @@ sudo dnf install luciole-git
 
 For Trash and network locations, install `gvfs` and the backends you need, such as `gvfs-smb`; see [optional features](#optional-features).
 
+## openSUSE
+
+[home:neifua:Noctalia](https://build.opensuse.org/project/show/home:neifua:Noctalia) OBS repo provides `Luciole` for both **Tumbleweed** and **Slowroll** favors
+
+#### Tumbleweed
+
+```sh
+sudo zypper addrepo --refresh --name 'Noctalia Project' https://download.opensuse.org/repositories/home:neifua:Noctalia/openSUSE_Tumbleweed/home:neifua:Noctalia.repo
+sudo zypper refresh && sudo zypper install luciole
+```
+
+#### Slowroll
+```sh
+sudo zypper addrepo --refresh --name 'Noctalia Project' https://download.opensuse.org/repositories/home:neifua:Noctalia/openSUSE_Slowroll/home:neifua:Noctalia.repo
+sudo zypper refresh && sudo zypper install luciole
+```
+
 ## Debian and Ubuntu
 
 The NickH APT repository provides Luciole for Debian-based distributions.
@@ -240,6 +257,25 @@ nix flake update luciole
 
 For source development, run `nix develop` from a Luciole checkout, then use the [development build commands](#development-builds). [Nix packaging](../../PACKAGING.md#nix-integration) documents the wrapper and runtime integration.
 
+## GNU Guix
+The third-party guix channel, [`midnight`](https://codeberg.org/stampede/midnight), provides the `luciole` package under the module `(midnight packages luciole)`. In order to use it, add this to your list of channels:
+
+```scheme
+(channel
+  (name 'midnight)
+  (url "https://codeberg.org/stampede/midnight.git")
+  (branch "main")
+  (introduction
+    (make-channel-introduction
+      "d97d1568954cfcbf543c9fcdfd5771e2b730ae19"
+      (openpgp-fingerprint
+        "640A 2C3C E948 22D3 394B 40C3 CAFA EECA 00FF 9B1E"))))
+```
+
+Then perform `guix pull --select=midnight`, and the luciole package will be available to be added in your config, or for use in commands like `guix shell` (if you want to try it without permanently adding it to your config).
+
+**Important:** you must also add the `gvfs-service-type` to the list of services in your *system* configuration, as it is required by luciole for trash and remote folders such as `sftp://`, `ssh://`, `smb://`, and WebDAV. Adding the luciole package alone does not automatically enable this service.
+
 ## Build from source
 
 Luciole builds with `just`, Meson and a C++23 compiler (GCC 13+ or Clang 16+).
@@ -399,7 +435,7 @@ Log out and back in after installation and configuration, or restart the portal 
 systemctl --user restart xdg-desktop-portal.service
 ```
 
-Restart the requesting application, then try its Open or Save dialog. The application must use the FileChooser portal for Luciole to appear; application-specific portal preferences may be required. The picker has its own [view, hidden-file and preview settings](configuration.md#browser-preferences).
+Restart the requesting application, then try its Open or Save dialog. The application must use the FileChooser portal for Luciole to appear; application-specific portal preferences may be required. The chooser has its own [view, hidden-file and preview settings](configuration.md#browser-preferences). Chooser windows use the Wayland app ID `dev.noctalia.luciole-chooser`, with a hidden desktop entry that reuses Luciole's icon, so compositor rules can target them without affecting ordinary Luciole windows.
 
 If the old picker still appears, check the selected configuration's filename and precedence, Luciole's installed portal file and the requesting application's portal support. With systemd, inspect errors using:
 

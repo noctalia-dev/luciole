@@ -26,6 +26,7 @@ namespace luciole {
   };
   class CopiedMoveReceipt final : public MoveReceipt {
   public:
+    std::shared_ptr<const MoveReceipt> withoutPredecessors() const;
     static std::shared_ptr<const MoveReceipt> capture(
         const std::vector<std::shared_ptr<const CopiedMoveEffect>>& effects, const CancelToken& token,
         std::shared_ptr<const MoveReceipt> native = {}

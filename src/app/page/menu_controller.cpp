@@ -154,12 +154,15 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   if (single
       && singleLocation->isNative()
       && !trash
-      && (single->type == luciole::FileType::Regular || single->symlink)
-      && (luciole::entryAccess(*single).execute == true
-          || singleLocation->basename().value_or("").ends_with(".desktop"))) {
-    add(Action::RunProgram);
-    if (!singleLocation->basename().value_or("").ends_with(".desktop")) {
-      add(Action::RunInTerminal);
+      && (single->type == luciole::FileType::Regular || single->symlink)) {
+    const auto execute = luciole::entryAccess(*single).execute;
+    if (execute == true
+        || (!execute && single->details.mode && (*single->details.mode & 0111U) != 0)
+        || singleLocation->basename().value_or("").ends_with(".desktop")) {
+      add(Action::RunProgram);
+      if (!singleLocation->basename().value_or("").ends_with(".desktop")) {
+        add(Action::RunInTerminal);
+      }
     }
   }
   if (!trash && m_page.actionState(Action::Scripts, request).enabled) {

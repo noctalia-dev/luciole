@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstring>
 #include <gio/gio.h>
 #include <limits>
@@ -56,6 +57,10 @@ bool luciole::DirectoryModel::applySnapshot(
     notify();
     return true;
   }
+  const auto focused = m_selection.focused;
+  const auto focusedRow = focused ? rowOf(*focused) : std::nullopt;
+  const auto focusedParent = focused ? treeParent(*focused) : std::nullopt;
+  const bool focusedSelected = focused && m_selection.selected.contains(*focused);
   m_preserveRootOrder = preserveRootOrder;
   m_treeParents = std::move(parents);
   m_alternateSortKeys.clear();
@@ -123,6 +128,20 @@ bool luciole::DirectoryModel::applySnapshot(
           entry.symlink || entry.type == FileType::Symlink || (!regular && entry.type != FileType::Unknown);
     }
   }
+  std::vector<EntryId> removalOrder;
+  if (sameLocation
+      && snapshot.status == DirectoryStatus::Ready
+      && focusedRow
+      && (slots.empty() || slots[sourceSlot(slots, snapshot.entries, *focused)] == kNoRow)) {
+    // Keep the previous visible order only for an actual removal, never a filter or an incomplete scan.
+    removalOrder.reserve(m_rows.size() - 1);
+    removalOrder.insert(
+        removalOrder.end(), m_rows.begin() + static_cast<std::ptrdiff_t>(*focusedRow + 1), m_rows.end()
+    );
+    for (auto index = *focusedRow; index > 0; --index) {
+      removalOrder.push_back(m_rows[index - 1]);
+    }
+  }
   m_presentations = std::move(presentations);
   keyText.shrink_to_fit();
   m_keyText = std::move(keyText);
@@ -130,6 +149,20 @@ bool luciole::DirectoryModel::applySnapshot(
   m_typeLabels = std::move(labels);
   m_snapshot = std::move(snapshot);
   rebuildProjection();
+  if (!removalOrder.empty()) {
+    const auto next = std::ranges::find_if(removalOrder, [&](EntryId id) {
+      // Retain failed/pending selected items; a collapsed tree must not select outside its old branch.
+      return visible(id)
+          && (m_selection.selected.empty() ? treeParent(id) == focusedParent : m_selection.selected.contains(id));
+    });
+    if (next != removalOrder.end()) {
+      m_selection.focused = *next;
+      if (focusedSelected && m_selection.selected.empty()) {
+        m_selection.selected.insert(*next);
+        m_selection.anchor = *next;
+      }
+    }
+  }
   notify();
   return true;
 }
