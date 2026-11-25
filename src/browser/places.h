@@ -60,7 +60,6 @@ namespace luciole {
     bool save(std::vector<Bookmark> bookmarks);
     bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators);
     bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators, std::vector<std::string> labels);
-    std::string label(std::size_t index) const; // The heading of the index-th separator.
     // Whether a separator can go in front of row `before`: a gap inside the list that has none yet.
     bool canAddSeparator(std::size_t before) const;
   };

@@ -251,26 +251,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
   // Separators are rows of the list they were saved with. When the list has changed since, each follows the row it
   // was in front of, or the first one after it still listed; a separator with no row left below it, or that would
   // sit above the first row or share a gap, is dropped. This covers Luciole's own pin changes and bookmarks changed
-  // in another application, which leave the saved rows behind.
-  static std::vector<std::size_t> follow(
-      const std::vector<std::size_t>& rows, const std::vector<Bookmark>& saved, const std::vector<Bookmark>& current
-  ) {
-    std::vector<std::size_t> result;
-    for (const auto row : rows) {
-      for (std::size_t old = row; old < saved.size(); ++old) {
-        const auto found = std::ranges::find(current, saved[old].location, &Bookmark::location);
-        if (found != current.end()) {
-          const auto index = static_cast<std::size_t>(found - current.begin());
-          if (index > 0 && (result.empty() || result.back() < index)) {
-            result.push_back(index);
-          }
-          break;
-        }
-      }
-    }
-    return result;
-  }
-  // The same, with each separator's heading going wherever its separator goes.
+  // in another application, which leave the saved rows behind. Each heading goes wherever its separator goes.
   static void follow(
       std::vector<std::size_t>& rows, std::vector<std::string>& labels, const std::vector<Bookmark>& saved,
       const std::vector<Bookmark>& current
@@ -298,12 +279,8 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     rows = std::move(followed);
     labels = std::move(headings);
   }
-  // Separators that sit inside the list: past its last row they have nothing below them.
-  static std::vector<std::size_t> within(std::vector<std::size_t> rows, std::size_t count) {
-    std::erase_if(rows, [count](std::size_t row) { return row == 0 || row >= count; });
-    return rows;
-  }
-  // The same for separators with their headings, which go wherever their separator goes.
+  // Keeps the separators, with their headings, that sit inside the list: past its last row they have nothing below
+  // them.
   static void within(std::vector<std::size_t>& rows, std::vector<std::string>& labels, std::size_t count) {
     labels.resize(rows.size());
     for (std::size_t i = rows.size(); i-- > 0;) {
@@ -317,25 +294,16 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
   run(std::optional<std::vector<Bookmark>> proposed, std::optional<std::vector<SavedWindow>> proposedWindows = {},
       std::optional<std::vector<std::size_t>> proposedSeparators = {},
       std::optional<std::vector<std::string>> proposedLabels = {}) {
-    auto labels = proposedLabels ? std::move(*proposedLabels) : separatorLabels;
-    auto rows = proposedSeparators ? std::move(*proposedSeparators) : separators;
-    labels.resize(rows.size());
     queue.push_back(
         {.bookmarks = std::move(proposed),
-         .separators = std::move(rows),
-         .separatorLabels = std::move(labels),
+         .separators = proposedSeparators ? std::move(*proposedSeparators) : separators,
+         .separatorLabels = proposedLabels ? std::move(*proposedLabels) : separatorLabels,
          .windows = std::move(proposedWindows),
          .expected = bookmarks,
          .expectedSeparators = separators,
-         .expectedLabels = expectedLabels()}
+         .expectedLabels = separatorLabels}
     );
     startNext();
-  }
-  // The headings as they stand, one per separator.
-  std::vector<std::string> expectedLabels() const {
-    auto labels = separatorLabels;
-    labels.resize(separators.size());
-    return labels;
   }
   void startNext() {
     if (busy || queue.empty()) {
@@ -521,19 +489,12 @@ bool luciole::PinService::save(std::vector<Bookmark> bookmarks) {
   State::follow(separators, labels, m_state->bookmarks, bookmarks);
   return save(std::move(bookmarks), std::move(separators), std::move(labels));
 }
-std::string luciole::PinService::label(std::size_t index) const {
-  return index < m_state->separatorLabels.size() ? m_state->separatorLabels[index] : std::string{};
-}
 bool luciole::PinService::save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators) {
   // Separators that stay on the same row keep their heading.
   std::vector<std::string> labels;
   labels.reserve(separators.size());
   for (const auto row : separators) {
-    const auto found = std::ranges::find(m_state->separators, row);
-    labels.push_back(
-        found == m_state->separators.end() ? std::string{}
-                                           : label(static_cast<std::size_t>(found - m_state->separators.begin()))
-    );
+    labels.push_back(separatorLabel(row));
   }
   return save(std::move(bookmarks), std::move(separators), std::move(labels));
 }
@@ -544,21 +505,17 @@ bool luciole::PinService::save(
     return false;
   }
   labels.resize(separators.size());
-  auto current = m_state->separatorLabels;
-  current.resize(m_state->separators.size());
-  if (bookmarks != m_state->bookmarks || separators != m_state->separators || labels != current) {
+  if (bookmarks != m_state->bookmarks || separators != m_state->separators || labels != m_state->separatorLabels) {
     // A change to the separators or headings alone writes only state.toml, so nothing but the end of the write would
     // redraw Places: show it now, in the frame that closes the menu, dialog or drag. The write's result replaces it,
     // so a conflict or a failed write still shows what is on disk. Not when pins change too, since the rows would
     // then refer to the new list while Places still shows the old one.
     const bool separatorsOnly = bookmarks == m_state->bookmarks;
-    auto shownRows = separatorsOnly ? std::optional(separators) : std::nullopt;
-    auto shownLabels = separatorsOnly ? std::optional(labels) : std::nullopt;
     m_state->pinBusy = true;
-    m_state->run(std::move(bookmarks), std::nullopt, std::move(separators), std::move(labels));
-    if (shownRows) {
-      m_state->separators = std::move(*shownRows);
-      m_state->separatorLabels = std::move(*shownLabels);
+    m_state->run(std::move(bookmarks), std::nullopt, separators, labels);
+    if (separatorsOnly) {
+      m_state->separators = std::move(separators);
+      m_state->separatorLabels = std::move(labels);
       m_state->notify();
     }
   }
@@ -567,8 +524,9 @@ bool luciole::PinService::save(
 const std::vector<std::size_t>& luciole::PinService::separators() const { return m_state->separators; }
 std::string luciole::PinService::separatorLabel(std::size_t before) const {
   const auto found = std::ranges::find(m_state->separators, before);
-  return found == m_state->separators.end() ? std::string{}
-                                            : label(static_cast<std::size_t>(found - m_state->separators.begin()));
+  return found == m_state->separators.end()
+      ? std::string{}
+      : m_state->separatorLabels[static_cast<std::size_t>(found - m_state->separators.begin())];
 }
 bool luciole::PinService::setSeparatorLabel(std::size_t before, std::string text) {
   const auto found = std::ranges::find(m_state->separators, before);
@@ -576,7 +534,6 @@ bool luciole::PinService::setSeparatorLabel(std::size_t before, std::string text
     return false;
   }
   auto labels = m_state->separatorLabels;
-  labels.resize(m_state->separators.size());
   labels[static_cast<std::size_t>(found - m_state->separators.begin())] = std::move(text);
   return save(m_state->bookmarks, m_state->separators, std::move(labels));
 }
