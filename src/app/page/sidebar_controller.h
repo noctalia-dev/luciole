@@ -21,6 +21,7 @@ namespace luciole {
   class PlacesSidebar;
   class ViewPreferenceWriter;
   struct Bookmark;
+  struct PinSlot;
   struct BrowserSettings;
 } // namespace luciole
 
@@ -90,7 +91,7 @@ public:
   // Focuses the entry for `location` once no popup or overlay is open.
   void focusPlace(luciole::Location location) { m_restorePlaceFocus = std::move(location); }
   // Pins `bookmarks` before the pin at `before`, or reports why pins cannot change.
-  void pinFolders(std::vector<luciole::Bookmark> bookmarks, std::size_t before);
+  void pinFolders(std::vector<luciole::Bookmark> bookmarks, std::size_t before, bool belowSeparator = false);
 
   // Scene: the places list and the resize handle, which the page places beside the file pane and detaches once
   // the page root exists, and the pin drop line for the drag overlay.
@@ -99,7 +100,7 @@ public:
   void detach();
   std::unique_ptr<Box> buildDropLine();
   void hideDropLine();
-  void showDropLine(Renderer& renderer, std::size_t slot);
+  void showDropLine(Renderer& renderer, luciole::PinSlot slot);
 
   // BrowserPage::syncBrowser(): highlights the current folder.
   void sync(const std::optional<luciole::Location>& location);

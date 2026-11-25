@@ -488,6 +488,77 @@ namespace {
     TEST_CHECK(drawn.gap(network) == after && drawn.separatorAbove(after) == network && !drawn.free(after));
     TEST_CHECK(luciole::SeparatorGaps(service, true).free(after));
   }
+  // Pins dropped next to a separator land on the side of its line the drop line showed, and the separators stay with
+  // the rows that don't move.
+  void testSeparatorDrops(const Fixture& fixture) {
+    Pump pump;
+    const auto path = fixture.root / "drops/state.toml";
+    const auto shared = fixture.root / "drops/bookmarks";
+    const auto a = fixture.pin("drop-a");
+    const auto b = fixture.pin("drop-b");
+    const auto c = fixture.pin("drop-c");
+    const auto d = fixture.pin("drop-d");
+    const auto e = fixture.pin("drop-e");
+    write(
+        shared,
+        a.location.uri()
+            + " drop-a\n"
+            + b.location.uri()
+            + " drop-b\n"
+            + c.location.uri()
+            + " drop-c\n"
+            + d.location.uri()
+            + " drop-d\n"
+    );
+    luciole::PinService service(path, shared, {});
+    service.reload();
+    pump.ready(service);
+    const auto first = row(service, a.location);
+    // The pins from `a` on, with "|" for a separator, to compare whole layouts.
+    const auto layout = [&] {
+      std::string text;
+      for (std::size_t i = first; i < service.bookmarks().size(); ++i) {
+        if (std::ranges::contains(service.separators(), i)) {
+          text += "| ";
+        }
+        text += service.bookmarks()[i].label + " ";
+      }
+      return text;
+    };
+    const auto pin = [&](const luciole::Bookmark& place) { return service.bookmarks()[row(service, place.location)]; };
+    TEST_CHECK(service.addSeparator(row(service, c.location)));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-a drop-b | drop-c drop-d ");
+
+    // Dropped below the line in front of c: b goes under it, in front of c.
+    TEST_CHECK(service.add({pin(b)}, row(service, c.location), true));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-a | drop-b drop-c drop-d ");
+    // Dropped above the line it now sits under: b goes back over it.
+    TEST_CHECK(service.add({pin(b)}, row(service, b.location), false));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-a drop-b | drop-c drop-d ");
+    // The row right under a separator, dragged elsewhere, leaves the separator in front of the row after it.
+    TEST_CHECK(service.add({pin(c)}, row(service, a.location)));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-c drop-a drop-b | drop-d ");
+    // A new pin dropped below or above a line.
+    TEST_CHECK(service.add({e}, row(service, d.location), true));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-c drop-a drop-b | drop-e drop-d ");
+    TEST_CHECK(service.add({pin(e)}, row(service, e.location), false));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-c drop-a drop-b drop-e | drop-d ");
+    // Moving the only row of a group away empties it: its separator merges with the next one.
+    TEST_CHECK(service.addSeparator(row(service, a.location)));
+    pump.ready(service);
+    TEST_CHECK(service.addSeparator(row(service, b.location)));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-c | drop-a | drop-b drop-e | drop-d ");
+    TEST_CHECK(service.add({pin(a)}, row(service, d.location), true));
+    pump.ready(service);
+    TEST_CHECK(layout() == "drop-c | drop-b drop-e | drop-a drop-d ");
+  }
   void testSeparatorsFollowExternalChanges(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "external/state.toml";
@@ -544,6 +615,7 @@ int main() {
     testExistingNetworkLayout(fixture);
     testSeparators(fixture);
     testSeparatorGaps(fixture);
+    testSeparatorDrops(fixture);
     testSeparatorsFollowExternalChanges(fixture);
     std::println("Shared bookmarks and Places checks passed");
     return 0;

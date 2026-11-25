@@ -30,8 +30,8 @@ namespace luciole {
     void sync(std::optional<Location> current);
     void setTrashFull(bool full);
     void cancelDragCandidate();
-    std::optional<std::size_t> dropSlot(float x, float y) const;
-    LayoutRect dropLine(std::size_t slot) const;
+    std::optional<PinSlot> dropSlot(float x, float y) const;
+    LayoutRect dropLine(PinSlot slot) const;
     void dragScroll(float delta);
     float dragScrollSpeed(float x, float y) const;
     void setOpenCallback(std::function<void(const Location&)> callback);
@@ -65,6 +65,9 @@ namespace luciole {
       Bookmark bookmark;
       std::optional<std::size_t> pinIndex;
       Button* button = nullptr;
+      // The separator line drawn above the row, as the row it is saved in front of, and its button.
+      std::optional<std::size_t> separator;
+      Button* separatorButton = nullptr;
     };
     struct DriveRow {
       std::string key;
@@ -77,7 +80,7 @@ namespace luciole {
       bool selected = false;
     };
     void rebuild();
-    void addSeparatorRow(std::size_t before);
+    Button* addSeparatorRow(std::size_t before);
     // The row a dragged separator at scene `y` would sit in front of, if it can go there.
     std::optional<std::size_t> separatorTarget(float y) const;
     void showSeparatorIndicator(std::optional<std::size_t> target);

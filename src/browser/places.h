@@ -26,14 +26,16 @@ namespace luciole {
     PinService(const PinService&) = delete;
     PinService& operator=(const PinService&) = delete;
     void reload();
-    bool add(std::vector<Bookmark> bookmarks, std::size_t before);
+    // Inserts pins, or moves ones already listed, in front of row `before`. Separators stay with the rows that don't
+    // move; one in front of row `before` stays above the new pins only with `belowSeparator`, a drop below its line.
+    bool add(std::vector<Bookmark> bookmarks, std::size_t before, bool belowSeparator = false);
     bool remove(const Location& location);
     bool removeMany(const std::vector<Location>& locations);
     bool move(const Location& location, std::size_t position);
     bool rename(const Bookmark& expected, std::string label);
     bool setIcon(const Bookmark& expected, std::string iconName);
-    // Separator lines between Places rows, each as the row it sits before. Moving a pin keeps them where they are,
-    // so the pin crosses them; adding or removing pins keeps each in front of the same row.
+    // Separator lines between Places rows, each as the row it sits before. move() keeps them where they are, so the
+    // pin crosses them; add() and removing pins keep each in front of the same row that stays.
     const std::vector<std::size_t>& separators() const;
     bool addSeparator(std::size_t before);
     bool removeSeparator(std::size_t before);
@@ -56,6 +58,13 @@ namespace luciole {
     bool save(std::vector<Bookmark> bookmarks, std::vector<std::size_t> separators);
     // Whether a separator can go in front of row `before`: a gap inside the list that has none yet.
     bool canAddSeparator(std::size_t before) const;
+  };
+
+  // Where pins dropped on Places go: in front of row `before`, and in a gap with a separator line, which side of it.
+  struct PinSlot {
+    std::size_t before = 0;
+    bool belowSeparator = false;
+    bool operator==(const PinSlot&) const = default;
   };
 
   // Whether the flat Places list shows a row; Settings can hide Network.

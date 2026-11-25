@@ -363,7 +363,7 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   );
   m_scroll->content()->addChild(std::move(button));
 }
-void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
+Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged.
   auto button = ui::button(
       {.controlHeight = 13.0F,
@@ -413,6 +413,7 @@ void luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
     showSeparatorIndicator(std::nullopt);
   });
   m_scroll->content()->addChild(std::move(button));
+  return raw;
 }
 std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y) const {
   // The first row whose upper half is below the pointer; past the last row there is nothing to separate.
@@ -526,7 +527,9 @@ void luciole::PlacesSidebar::addRow(
     m_scroll->requestScrollIntoView(raw);
   });
   raw->inputArea()->setOnFocusLoss([raw] { raw->setKeyboardFocusHint(false); });
-  m_rows.push_back({bookmark, index, raw});
+  m_rows.push_back(
+      {.bookmark = bookmark, .pinIndex = index, .button = raw, .separator = {}, .separatorButton = nullptr}
+  );
   m_scroll->content()->addChild(std::move(button));
 }
 void luciole::PlacesSidebar::setTreeEnabled(bool enabled) {
@@ -634,9 +637,8 @@ void luciole::PlacesSidebar::rebuild() {
     if (!placeShown(pins[i], m_showNetwork)) {
       continue;
     }
-    if (const auto separator = gaps.separatorAbove(i)) {
-      addSeparatorRow(*separator);
-    }
+    const auto separator = gaps.separatorAbove(i);
+    auto* line = separator ? addSeparatorRow(*separator) : nullptr;
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;
     });
@@ -648,6 +650,8 @@ void luciole::PlacesSidebar::rebuild() {
                                                  : known->glyphName,
         i
     );
+    m_rows.back().separator = separator;
+    m_rows.back().separatorButton = line;
   }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
@@ -710,9 +714,11 @@ bool luciole::PlacesSidebar::layoutDriveRows(Renderer& renderer) {
   }
   return changed;
 }
-std::optional<std::size_t> luciole::PlacesSidebar::dropSlot(float x, float y) const {
+std::optional<luciole::PinSlot> luciole::PlacesSidebar::dropSlot(float x, float y) const {
   if (m_tree) {
-    return m_tree->dropSlot(x, y);
+    // The tree draws no separators: a drop goes above the line of its gap.
+    const auto slot = m_tree->dropSlot(x, y);
+    return slot ? std::optional(PinSlot{.before = *slot}) : std::nullopt;
   }
   float localX = 0, localY = 0;
   if (!Node::mapFromScene(this, x, y, localX, localY)
@@ -722,18 +728,29 @@ std::optional<std::size_t> luciole::PlacesSidebar::dropSlot(float x, float y) co
       || localY >= height()) {
     return std::nullopt;
   }
+  // A gap with a separator line has two slots, split at the line's middle: above it, in front of the row it is saved
+  // in front of, and below it, in front of the row under it.
+  const auto above = [y](const Button* button) {
+    float buttonX = 0, buttonY = 0;
+    Node::absolutePosition(button, buttonX, buttonY);
+    return y < buttonY + button->height() * 0.5F;
+  };
   for (const auto& row : m_rows) {
-    float rowX = 0, rowY = 0;
-    Node::absolutePosition(row.button, rowX, rowY);
-    if (row.pinIndex && y < rowY + row.button->height() * 0.5F) {
-      return row.pinIndex;
+    if (!row.pinIndex) {
+      continue;
+    }
+    if (row.separatorButton != nullptr && above(row.separatorButton)) {
+      return PinSlot{.before = *row.separator};
+    }
+    if (above(row.button)) {
+      return PinSlot{.before = *row.pinIndex, .belowSeparator = row.separatorButton != nullptr};
     }
   }
-  return m_pins.bookmarks().size();
+  return PinSlot{.before = m_pins.bookmarks().size()};
 }
-LayoutRect luciole::PlacesSidebar::dropLine(std::size_t slot) const {
+LayoutRect luciole::PlacesSidebar::dropLine(PinSlot slot) const {
   if (m_tree) {
-    return m_tree->dropLine(slot);
+    return m_tree->dropLine(slot.before);
   }
   float x = 0, y = 0;
   Node::absolutePosition(this, x, y);
@@ -751,7 +768,12 @@ LayoutRect luciole::PlacesSidebar::dropLine(std::size_t slot) const {
     float rowX = 0, rowY = 0;
     Node::absolutePosition(row.button, rowX, rowY);
     line = rowY - 2.0F;
-    if (*row.pinIndex >= slot) {
+    if (*row.pinIndex >= slot.before) {
+      // Above the separator line for a drop above it.
+      if (row.separatorButton != nullptr && !slot.belowSeparator) {
+        Node::absolutePosition(row.separatorButton, rowX, rowY);
+        line = rowY - 2.0F;
+      }
       break;
     }
     line = rowY + row.button->height() + 2.0F;

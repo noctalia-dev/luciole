@@ -1,6 +1,7 @@
 #pragma once
 
 #include "browser/directory_model.h"
+#include "browser/places.h"
 #include "clipboard/text_clipboard.h"
 #include "config/state_store.h"
 #include "core/timer_manager.h"
@@ -106,7 +107,7 @@ private:
   bool dragCurrent() const;
   bool validDropFolder(const luciole::Location& destination) const;
   std::optional<DropTarget> dropTarget() const;
-  std::optional<std::size_t> pinDropSlot() const;
+  std::optional<luciole::PinSlot> pinDropSlot() const;
   VirtualGridView* dragView() const;
   float dragScrollSpeed(bool& places) const;
   void updateExternalScroll();
@@ -131,7 +132,7 @@ private:
   Timer m_externalScroll;
   float m_externalScrollDelta = 0;
   bool m_externalScrollInPlaces = false;
-  std::optional<std::size_t> m_externalPinSlot;
+  std::optional<luciole::PinSlot> m_externalPinSlot;
   std::optional<DropTarget> m_externalDropTarget;
   Timer m_dragScroll;
   float m_dragScrollDelta = 0;

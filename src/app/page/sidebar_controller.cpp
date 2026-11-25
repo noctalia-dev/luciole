@@ -322,8 +322,8 @@ void SidebarController::openDriveMenu(const std::string& key, float x, float y) 
   );
 }
 
-void SidebarController::pinFolders(std::vector<luciole::Bookmark> bookmarks, std::size_t before) {
-  if (!m_pins.add(std::move(bookmarks), before)) {
+void SidebarController::pinFolders(std::vector<luciole::Bookmark> bookmarks, std::size_t before, bool belowSeparator) {
+  if (!m_pins.add(std::move(bookmarks), before, belowSeparator)) {
     m_page.actionError(
         m_pins.busy() ? "Pins are being saved. Try again shortly." : "Reload valid pins before editing them."
     );
@@ -448,7 +448,7 @@ std::unique_ptr<Box> SidebarController::buildDropLine() {
 
 void SidebarController::hideDropLine() { m_placeDropLine->setVisible(false); }
 
-void SidebarController::showDropLine(Renderer& renderer, std::size_t slot) {
+void SidebarController::showDropLine(Renderer& renderer, luciole::PinSlot slot) {
   m_placeDropLine->setVisible(true);
   m_placeDropLine->arrange(renderer, m_places->dropLine(slot));
 }

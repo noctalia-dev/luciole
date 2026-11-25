@@ -507,27 +507,25 @@ bool luciole::PinService::saveWindows(std::vector<SavedWindow> windows) {
   m_state->run(std::nullopt, std::move(windows));
   return true;
 }
-bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t before) {
+bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t before, bool belowSeparator) {
   if (!editable() || std::ranges::any_of(bookmarks, [](const auto& bookmark) {
         return bookmark.location.isTrash() && bookmark.location != Location::trash();
       })) {
     return false;
   }
-  auto proposed = m_state->bookmarks;
-  before = std::min(before, proposed.size());
+  const auto& current = m_state->bookmarks;
+  before = std::min(before, current.size());
+  std::vector<bool> moved(current.size());
   std::vector<Bookmark> incoming;
   for (auto& bookmark : bookmarks) {
     if (std::ranges::any_of(incoming, [&](const auto& pin) { return pin.location == bookmark.location; })) {
       continue;
     }
-    const auto existing = std::ranges::find(proposed, bookmark.location, &Bookmark::location);
-    if (existing != proposed.end()) {
+    const auto existing = std::ranges::find(current, bookmark.location, &Bookmark::location);
+    if (existing != current.end()) {
       bookmark.label = existing->label;
       bookmark.iconName = existing->iconName;
-      if (static_cast<std::size_t>(existing - proposed.begin()) < before) {
-        --before;
-      }
-      proposed.erase(existing);
+      moved[static_cast<std::size_t>(existing - current.begin())] = true;
     } else {
       const auto known = std::ranges::find_if(m_state->places, [&](const auto& place) {
         return place.bookmark.location == bookmark.location;
@@ -536,8 +534,30 @@ bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t befor
     }
     incoming.push_back(std::move(bookmark));
   }
-  proposed.insert(proposed.begin() + static_cast<std::ptrdiff_t>(before), incoming.begin(), incoming.end());
-  return save(std::move(proposed));
+  // The rows that stay, then the new or moved pins inserted among them, at the stayed rows above `before`.
+  std::vector<Bookmark> proposed;
+  std::vector<std::size_t> stayed(current.size() + 1); // How many rows above each row stay.
+  for (std::size_t i = 0; i < current.size(); ++i) {
+    stayed[i + 1] = stayed[i] + (moved[i] ? 0 : 1);
+    if (!moved[i]) {
+      proposed.push_back(current[i]);
+    }
+  }
+  const auto at = stayed[before];
+  proposed.insert(proposed.begin() + static_cast<std::ptrdiff_t>(at), incoming.begin(), incoming.end());
+  // Each separator stays in front of the same staying row. One that ends up at the drop goes below the new pins, or
+  // above them for a drop below its line; one left with nothing between it and the one before it is dropped.
+  std::vector<std::size_t> separators;
+  for (const auto row : m_state->separators) {
+    auto gap = stayed[std::min(row, current.size())];
+    if (gap > at || (gap == at && !belowSeparator)) {
+      gap += incoming.size();
+    }
+    if (gap > 0 && gap < proposed.size() && (separators.empty() || separators.back() < gap)) {
+      separators.push_back(gap);
+    }
+  }
+  return save(std::move(proposed), std::move(separators));
 }
 bool luciole::PinService::remove(const Location& location) { return removeMany({location}); }
 bool luciole::PinService::removeMany(const std::vector<Location>& locations) {
