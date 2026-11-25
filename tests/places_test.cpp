@@ -452,6 +452,13 @@ namespace {
     pump.ready(service);
     TEST_CHECK(!service.error().empty() && read(path) == theirs);
     TEST_CHECK((service.separators() == other.separators()));
+
+    // A write that can't read state.toml keeps showing the separators on record, not the unsaved ones.
+    const auto kept = service.separators();
+    write(path, "schema_version = 999\n");
+    TEST_CHECK(service.addSeparator(row(service, a.location)));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(!service.error().empty() && service.separators() == kept && read(path) == "schema_version = 999\n");
   }
   // With Network hidden, a gap on screen spans two rows: separators are placed, moved and drawn per shown gap.
   void testSeparatorGaps(const Fixture& fixture) {

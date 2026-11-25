@@ -304,7 +304,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
          expectedSeparators = std::move(work.expectedSeparators)] mutable {
           Result result;
           result.bookmarks = expected;
-          result.separators = separators;
+          result.separators = expectedSeparators;
           auto& store = owner->store;
           auto& shared = owner->shared;
           try {
