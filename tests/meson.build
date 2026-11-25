@@ -80,7 +80,7 @@ rename_flags_unsupported = shared_module('rename-flags-unsupported',
   'rename_flags_unsupported.c',
   dependencies: dependency('dl'),
 )
-without_rename_flags = ['posix-rename', 'create-service', 'rename-service', 'batch-rename-service',
+without_rename_flags = ['posix-rename', 'atomic-file', 'create-service', 'rename-service', 'batch-rename-service',
   'provider-move-history', 'provider-transfer', 'transfer-service']
 
 foreach entry : test_table
