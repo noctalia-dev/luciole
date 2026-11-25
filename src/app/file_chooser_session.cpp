@@ -7,6 +7,7 @@
 #include "core/input/key_symbols.h"
 #include "core/log.h"
 #include "fs/background_job.h"
+#include "fs/file_error.h"
 #include "platform/desktop_integration.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
@@ -24,8 +25,8 @@
 namespace {
   const Logger kLog("file-chooser");
 
-  // Listings report links as links, without their target's kind; the chooser policy resolves the selected ones, so
-  // every filter keeps links (and entries of unread kind) rather than hiding a linked folder or file.
+  // Listings report links as links, without their target's kind; the session resolves the selected ones on a worker,
+  // so every filter keeps links (and entries of unread kind) rather than hiding a linked folder or file.
   bool unresolved(const luciole::EntryBrief& brief) {
     return brief.symlink || brief.type == luciole::FileType::Symlink || brief.type == luciole::FileType::Unknown;
   }
@@ -81,6 +82,8 @@ FileChooserSession::FileChooserSession(
 
 FileChooserSession::~FileChooserSession() {
   m_nameLookup.cancel();
+  m_typeToken.cancel();
+  m_saveToken.cancel();
   m_dropdown.closeSelectDropdown();
 }
 
@@ -103,8 +106,98 @@ luciole::ChooserMode FileChooserSession::mode() const {
   return {.directory = m_request.directory, .multiple = m_request.multiple};
 }
 
-luciole::ChooserDecision FileChooserSession::decision(const std::vector<luciole::DirectoryEntry>& entries) const {
-  return luciole::chooserDecision(mode(), m_page->location(), entries);
+luciole::ChooserDecision
+FileChooserSession::decision(const std::vector<luciole::DirectoryEntry>& entries, bool refresh) {
+  const auto folder = m_page->location();
+  if (!std::ranges::any_of(entries, &luciole::isLink)) {
+    m_typeToken.cancel();
+    m_typesPending = false;
+    m_typeSources.clear();
+    m_typeResolved.clear();
+    m_openAfterTypes.reset();
+    return luciole::chooserDecision(mode(), folder, entries);
+  }
+  if (std::ranges::any_of(entries, &luciole::DirectoryEntry::metadataPending)) {
+    // Preserve an in-flight lookup and queued activation across transient rescans of the same selected links.
+    const bool samePending = m_typesPending
+        && folder == m_typeFolder
+        && std::ranges::equal(entries, m_typeSources, [](const auto& a, const auto& b) {
+                               return a.id == b.id && a.location() == b.location();
+                             });
+    if (!samePending) {
+      m_typeToken.cancel();
+      m_typesPending = false;
+      m_typeSources.clear();
+      m_typeResolved.clear();
+      m_openAfterTypes.reset();
+    }
+    return luciole::chooserDecision(mode(), folder, entries);
+  }
+  const bool same =
+      folder == m_typeFolder && std::ranges::equal(entries, m_typeSources, [](const auto& a, const auto& b) {
+        return a.id == b.id
+            && a.location() == b.location()
+            && a.type == b.type
+            && a.symlink == b.symlink
+            && a.identity() == b.identity()
+            && a.etag() == b.etag()
+            && a.contentRevision == b.contentRevision;
+      });
+  if (!same || (refresh && !m_typesPending)) {
+    if (!same) {
+      m_openAfterTypes.reset();
+    }
+    m_typeToken.cancel();
+    m_typeToken = luciole::CancelToken{};
+    m_typeSources = entries;
+    m_typeFolder = folder;
+    m_typeResolved.clear();
+    m_typesPending = true;
+    const std::weak_ptr<int> lifetime = m_lifetime;
+    luciole::runJob<std::vector<luciole::DirectoryEntry>>(
+        m_typeToken,
+        [entries = std::vector(entries), token = m_typeToken] mutable {
+          for (auto& entry : entries) {
+            if (token.cancelled()) {
+              luciole::throwFileError(luciole::FileErrorKind::Cancelled, "Cancelled.");
+            }
+            if (luciole::isLink(entry)) {
+              entry.type = luciole::chosenType(entry);
+              entry.symlink = false;
+            }
+          }
+          return entries;
+        },
+        [this, lifetime, token = m_typeToken, folder](auto result) {
+          if (lifetime.expired() || token.cancelled()) {
+            return;
+          }
+          m_typesPending = false;
+          if (m_page->location() != folder || !result) {
+            m_openAfterTypes.reset();
+            m_typeSources.clear();
+            if (!result) {
+              m_surface->requestUpdate();
+            }
+            return;
+          }
+          m_typeResolved = std::move(*result);
+          m_surface->requestUpdate();
+          auto activation = std::exchange(m_openAfterTypes, std::nullopt);
+          if (activation && !m_call->finished() && activation->selection == m_page->browser().model().selectedIds()) {
+            if (activation->acceptButton) {
+              apply(luciole::chooserDecision(mode(), folder, m_typeResolved));
+            } else {
+              finishOpen(activation->targets, m_typeResolved);
+            }
+          }
+        }
+    );
+  }
+  if (m_typesPending) {
+    return {.kind = luciole::ChooserDecision::Kind::Unavailable, .locations = {}, .reason = "Reading item metadata…"};
+  }
+  return luciole::chooserDecision(mode(), folder, m_typeResolved);
 }
 
 std::unique_ptr<Node> FileChooserSession::attach(
@@ -137,7 +230,15 @@ std::unique_ptr<Node> FileChooserSession::attach(
              .value = m_request.currentName,
              .placeholder = "Name",
              .width = 280.0F,
-             .onChange = [this](const std::string&) { m_confirm.clear(); },
+             .onChange =
+                 [this](const std::string&) {
+                   m_nameLookup.cancel();
+                   m_openAfterTypes.reset();
+                   m_confirm.clear();
+                   m_saveError.clear();
+                   m_saveToken.cancel();
+                   m_savePending = false;
+                 },
              .onSubmit = [this](const std::string&) { save(); }}
         )
     );
@@ -218,7 +319,13 @@ std::unique_ptr<Node> FileChooserSession::attach(
              if (saving()) {
                save();
              } else {
-               apply(decision(luciole::chooserSelection(m_page->browser().model())));
+               const auto selection = luciole::chooserSelection(m_page->browser().model());
+               const auto current = decision(selection, true);
+               if (m_typesPending) {
+                 m_openAfterTypes.emplace(selection, m_page->browser().model().selectedIds(), true);
+               } else {
+                 apply(current);
+               }
              }
            }}
       )
@@ -249,7 +356,13 @@ void FileChooserSession::syncSave() {
   const auto folder = m_page->location();
   if (folder != m_folder) {
     m_folder = folder;
+    m_namedFrom.reset();
+    m_nameLookup.cancel();
+    m_openAfterTypes.reset();
     m_confirm.clear();
+    m_saveError.clear();
+    m_saveToken.cancel();
+    m_savePending = false;
   }
   if (m_name != nullptr) {
     // Only once the page is active: activating it focuses its file list.
@@ -262,9 +375,14 @@ void FileChooserSession::syncSave() {
       m_name->selectRange(0, dot != std::string::npos && dot > 0 ? dot : value.size());
     }
     const auto selection = luciole::chooserSelection(m_page->browser().model());
-    if (selection.size() == 1 && selection.front().id != m_namedFrom) {
-      m_namedFrom = selection.front().id;
-      offerName(selection.front());
+    if (selection.size() == 1) {
+      if (selection.front().id != m_namedFrom) {
+        m_namedFrom = selection.front().id;
+        offerName(selection.front());
+      }
+    } else if (m_namedFrom) {
+      m_namedFrom.reset();
+      m_nameLookup.cancel();
     }
   }
   std::string_view problem;
@@ -273,9 +391,13 @@ void FileChooserSession::syncSave() {
   } else if (m_name != nullptr) {
     problem = luciole::fileNameProblem(m_name->value());
   }
-  m_accept->setEnabled(problem.empty());
+  m_accept->setEnabled(problem.empty() && !m_savePending);
   m_accept->setText(m_confirm.empty() ? std::string_view(m_acceptText) : std::string_view("Replace"));
-  m_reason->setText(!m_confirm.empty() ? std::string_view(m_reasonText) : problem);
+  m_reason->setText(
+      !m_confirm.empty()     ? std::string_view(m_reasonText)
+          : !problem.empty() ? problem
+                             : std::string_view(m_saveError)
+  );
 }
 
 void FileChooserSession::offerName(const luciole::DirectoryEntry& entry) {
@@ -285,6 +407,9 @@ void FileChooserSession::offerName(const luciole::DirectoryEntry& entry) {
     if (luciole::offersSaveName(chosen)) {
       m_name->setValue(name);
       m_confirm.clear();
+      m_saveError.clear();
+      m_saveToken.cancel();
+      m_savePending = false;
     }
   };
   if (!luciole::isLink(entry)) {
@@ -298,20 +423,45 @@ void FileChooserSession::offerName(const luciole::DirectoryEntry& entry) {
   const std::weak_ptr<int> lifetime = m_lifetime;
   luciole::runJob<luciole::FileType>(
       token, [entry] { return luciole::chosenType(entry); },
-      [this, lifetime, token, offer, name = entry.name, typed = m_name->value()](auto result) {
-        if (!lifetime.expired() && !token.cancelled() && result && m_name->value() == typed) {
+      [this, lifetime, token, offer, id = entry.id, name = entry.name, typed = m_name->value()](auto result) {
+        if (!lifetime.expired() && !token.cancelled() && result && m_namedFrom == id && m_name->value() == typed) {
           offer(*result, name);
+          m_surface->requestUpdate();
         }
       }
   );
 }
 
 void FileChooserSession::open(const std::vector<luciole::DirectoryEntry>& targets) {
-  // Activating one linked folder enters it, as activating a folder does, in every mode.
+  if (saving()) {
+    m_saveToken.cancel();
+    m_savePending = false;
+  }
+  // Resolve the same selection the footer displays, including when only one selected link was double-clicked.
+  const auto selection = luciole::chooserSelection(m_page->browser().model());
+  const bool inSelection = !saving()
+      && targets.size() == 1
+      && std::ranges::any_of(selection, [&](const auto& entry) { return entry.id == targets.front().id; });
+  const auto& entries = inSelection ? selection : targets;
+  (void)decision(entries, true);
+  if (m_typesPending) {
+    m_openAfterTypes.emplace(targets, m_page->browser().model().selectedIds(), false);
+    return;
+  }
+  if (m_typeSources.empty()) {
+    finishOpen(targets, entries);
+  } else {
+    finishOpen(targets, m_typeResolved);
+  }
+}
+
+void FileChooserSession::finishOpen(
+    const std::vector<luciole::DirectoryEntry>& targets, const std::vector<luciole::DirectoryEntry>& resolved
+) {
   if (targets.size() == 1) {
-    auto entered = luciole::chooserDecision({}, m_page->location(), targets);
-    if (entered.kind == luciole::ChooserDecision::Kind::Enter) {
-      apply(entered);
+    const auto target = std::ranges::find(resolved, targets.front().id, &luciole::DirectoryEntry::id);
+    if (target != resolved.end() && !target->metadataPending && target->type == luciole::FileType::Directory) {
+      apply(luciole::chooserDecision({}, m_page->location(), std::span(&*target, 1)));
       return;
     }
   }
@@ -326,11 +476,7 @@ void FileChooserSession::open(const std::vector<luciole::DirectoryEntry>& target
     }
     return;
   }
-  // Enter or a double click on one item of a selection opens the whole selection.
-  auto selection = luciole::chooserSelection(m_page->browser().model());
-  const bool inSelection = targets.size() == 1
-      && std::ranges::any_of(selection, [&](const auto& entry) { return entry.id == targets.front().id; });
-  apply(decision(inSelection ? selection : targets));
+  apply(luciole::chooserDecision(mode(), m_page->location(), resolved));
 }
 
 void FileChooserSession::save() {
@@ -358,24 +504,86 @@ void FileChooserSession::save() {
     }
     targets.push_back(folder->child(name));
   }
-  std::size_t existing = 0;
-  for (const auto& target : targets) {
-    std::error_code error;
-    const auto status = std::filesystem::symlink_status(target.nativePath().value_or(""), error);
-    // A folder named like the file is entered, as typing a folder's name does in a location.
-    if (m_name != nullptr && std::filesystem::is_directory(std::filesystem::status(*target.nativePath(), error))) {
-      m_page->open(target);
-      m_name->setValue({});
-      m_confirm.clear();
-      return;
-    }
-    existing += std::filesystem::exists(status) ? 1 : 0;
+  if (m_savePending) {
+    return;
   }
-  if (existing > 0 && m_confirm != targets) {
-    m_confirm = std::move(targets);
+  m_nameLookup.cancel();
+  m_openAfterTypes.reset();
+  m_typeToken.cancel();
+  m_typesPending = false;
+  m_typeSources.clear();
+  m_typeResolved.clear();
+  m_saveToken.cancel();
+  m_saveToken = luciole::CancelToken{};
+  m_savePending = true;
+  m_saveError.clear();
+  struct Checked {
+    std::vector<luciole::Location> targets;
+    std::vector<luciole::Location> existing;
+    std::optional<luciole::Location> folder;
+  };
+  const std::weak_ptr<int> lifetime = m_lifetime;
+  luciole::runJob<Checked>(
+      m_saveToken,
+      [targets = std::move(targets), enterFolders = m_name != nullptr, token = m_saveToken] mutable {
+        Checked result;
+        result.targets = std::move(targets);
+        for (const auto& target : result.targets) {
+          if (token.cancelled()) {
+            luciole::throwFileError(luciole::FileErrorKind::Cancelled, "Cancelled.");
+          }
+          std::error_code error;
+          const auto status = std::filesystem::symlink_status(target.nativePath().value_or(""), error);
+          if (error && error != std::errc::no_such_file_or_directory) {
+            luciole::throwErrno(error.value());
+          }
+          if (!std::filesystem::exists(status)) {
+            continue;
+          }
+          result.existing.push_back(target);
+          // A folder named like the file is entered, as typing a folder's name does in a location.
+          if (enterFolders) {
+            std::error_code targetError;
+            if (status.type() == std::filesystem::file_type::directory
+                || (status.type() == std::filesystem::file_type::symlink
+                    && std::filesystem::is_directory(std::filesystem::status(*target.nativePath(), targetError))
+                    && !targetError)) {
+              result.folder = target;
+              break;
+            }
+          }
+        }
+        return result;
+      },
+      [this, lifetime, token = m_saveToken, folder, names](auto result) {
+        if (lifetime.expired() || token.cancelled()) {
+          return;
+        }
+        m_savePending = false;
+        if (m_call->finished() || m_page->location() != folder || (m_name && m_name->value() != names.front())) {
+          return;
+        }
+        m_surface->requestUpdate();
+        if (!result) {
+          m_confirm.clear();
+          m_saveError = result.error().message;
+        } else if (result->folder) {
+          m_page->open(*result->folder);
+          m_name->setValue({});
+          m_confirm.clear();
+        } else {
+          savedTargets(std::move(result->targets), std::move(result->existing));
+        }
+      }
+  );
+}
+
+void FileChooserSession::savedTargets(std::vector<luciole::Location> targets, std::vector<luciole::Location> existing) {
+  if (!existing.empty() && m_confirm != existing) {
+    m_confirm = std::move(existing);
     m_reasonText = m_name != nullptr ? std::format("“{}” already exists.", m_name->value())
-        : existing == 1              ? std::string("1 file already exists.")
-                                     : std::format("{} files already exist.", existing);
+        : m_confirm.size() == 1      ? std::string("1 file already exists.")
+                                     : std::format("{} files already exist.", m_confirm.size());
     return;
   }
   apply({.kind = luciole::ChooserDecision::Kind::Accept, .locations = std::move(targets), .reason = {}});
@@ -476,6 +684,9 @@ bool FileChooserSession::keyboard(const KeyboardEvent& event) {
 }
 
 void FileChooserSession::windowClosed() {
+  m_nameLookup.cancel();
+  m_typeToken.cancel();
+  m_saveToken.cancel();
   m_dropdown.closeSelectDropdown();
   m_call->cancel();
 }
