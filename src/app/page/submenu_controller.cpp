@@ -84,6 +84,7 @@ void SubmenuController::show(
     return;
   }
   const bool overflowing = contentHeight > height + 0.5F;
+  applyContextMenuIconPreference(entries, m_page.settings().contextMenuIcons);
   m_menu->setMaxVisible(entries.size());
   m_menu->setEntries(std::move(entries));
   m_menu->setMenuWidth(width - (overflowing ? Style::scrollbarWidth + Style::scrollbarGap : 0.0F));

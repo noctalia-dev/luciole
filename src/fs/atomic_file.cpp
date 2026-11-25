@@ -1,16 +1,16 @@
 #include "fs/atomic_file.h"
 
+#include "fs/posix_fd.h"
+
 #include <array>
 #include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
 #include <format>
-#include <linux/fs.h>
 #include <string_view>
 #include <sys/file.h>
 #include <sys/random.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -277,9 +277,9 @@ luciole::updateTextFileAtomic(const std::filesystem::path& path, const AtomicTra
   if (!stillCurrent(parent->fd, name, *current)) {
     return {.error = "private file changed before replacement; reload and retry"};
   }
-  const long renamed = current->content
+  const int renamed = current->content
       ? ::renameat(parent->fd, temporary.name.c_str(), parent->fd, name.c_str())
-      : ::syscall(SYS_renameat2, parent->fd, temporary.name.c_str(), parent->fd, name.c_str(), RENAME_NOREPLACE);
+      : luciole::renameNoReplace(parent->fd, temporary.name.c_str(), parent->fd, name.c_str());
   if (renamed < 0) {
     return {.error = failure("replace private file")};
   }

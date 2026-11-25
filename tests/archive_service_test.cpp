@@ -5,6 +5,7 @@
 #include "operations/archive_input.h"
 #include "operations/archive_service.h"
 #include "operations/archive_sevenzip.h"
+#include "operations/archive_support.h"
 #include "operations/archive_work.h"
 #include "operations/archive_xz_input.h"
 #include "test_check.h"
@@ -337,6 +338,151 @@ namespace {
     }
     TEST_CHECK(!fs::exists(fixture.root / "escaped"));
   }
+  void testNativeJobCapacity(const Fixture& fixture) {
+    using namespace luciole::archive_work;
+    Progress progress;
+    const luciole::CancelToken cancel;
+    auto work = workFor({}, cancel, progress);
+    TEST_CHECK(work.deadline == Clock::time_point::max());
+    TEST_CHECK(decodedContainerBudget(work.limits) == UINT64_MAX);
+    work.check();
+    const auto folder = opened(::open(fixture.root.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC));
+    requireSpace(folder.get(), 0);
+    bool noSpace = false;
+    try {
+      requireSpace(folder.get(), UINT64_MAX);
+    } catch (const luciole::FileErrorException& error) {
+      noSpace = error.error().kind == luciole::FileErrorKind::NoSpace;
+    }
+    TEST_CHECK(noSpace);
+    work.account(UINT64_MAX);
+    bool overflow = false;
+    try {
+      work.account(1);
+    } catch (const luciole::FileErrorException&) {
+      overflow = true;
+    }
+    TEST_CHECK(overflow);
+
+    // A valid TAR can have more than 4 GiB of trailing zero padding without allocating it.
+    const auto source = fixture.root / "large-input.tar";
+    tar(source, {{"payload", "large archive payload", {}}});
+    fs::resize_file(source, 4ULL * 1024 * 1024 * 1024 + 4096);
+    auto known = inspect(location(source), {}, cancel, progress);
+    TEST_CHECK(known.catalog && known.catalog->entries.size() == 1);
+    auto extracted = extract(
+        location(source), location(fixture.root / "large-input"), {}, known.catalog, false, {}, cancel, progress
+    );
+    TEST_CHECK(read(fs::path(*extracted.output->nativePath()) / "payload") == "large archive payload");
+    TEST_CHECK(!cleanup({extracted.stage}) && fs::is_empty(fixture.root / "tmp"));
+    fs::remove(source);
+  }
+
+  int makeLargeSparseFixture(const fs::path& source) {
+    std::signal(SIGXFSZ, SIG_IGN);
+    rlimit limit{};
+    TEST_CHECK(::getrlimit(RLIMIT_FSIZE, &limit) == 0);
+    limit.rlim_cur = std::min<rlim_t>(limit.rlim_max, 1024U * 1024U);
+    TEST_CHECK(::setrlimit(RLIMIT_FSIZE, &limit) == 0);
+    constexpr std::uint64_t size = 9ULL * 1024 * 1024 * 1024;
+    const std::unique_ptr<struct archive, decltype(&archive_write_free)> writer(
+        archive_write_new(), &archive_write_free
+    );
+    TEST_CHECK(archive_write_set_format_pax_restricted(writer.get()) == ARCHIVE_OK);
+    TEST_CHECK(archive_write_set_bytes_per_block(writer.get(), 0) == ARCHIVE_OK);
+    TEST_CHECK(archive_write_open_filename(writer.get(), source.c_str()) == ARCHIVE_OK);
+    const std::unique_ptr<struct archive_entry, decltype(&archive_entry_free)> entry(
+        archive_entry_new(), &archive_entry_free
+    );
+    archive_entry_set_pathname(entry.get(), "sparse");
+    archive_entry_set_filetype(entry.get(), AE_IFREG);
+    archive_entry_set_perm(entry.get(), 0644);
+    archive_entry_set_size(entry.get(), static_cast<la_int64_t>(size));
+    archive_entry_sparse_add_entry(entry.get(), 0, 4);
+    archive_entry_sparse_add_entry(entry.get(), static_cast<la_int64_t>(size - 4), 4);
+    TEST_CHECK(archive_write_header(writer.get(), entry.get()) == ARCHIVE_OK);
+    TEST_CHECK(archive_write_data(writer.get(), "HEAD", 4) == 4);
+    const std::vector<char> zeros(1024U * 1024U);
+    for (std::uint64_t remaining = size - 8; remaining;) {
+      const auto bytes = std::min<std::uint64_t>(remaining, zeros.size());
+      TEST_CHECK(archive_write_data(writer.get(), zeros.data(), bytes) == static_cast<la_ssize_t>(bytes));
+      remaining -= bytes;
+    }
+    TEST_CHECK(archive_write_data(writer.get(), "TAIL", 4) == 4);
+    TEST_CHECK(archive_write_close(writer.get()) == ARCHIVE_OK);
+    TEST_CHECK(fs::file_size(source) < 65536);
+    return 0;
+  }
+
+  void testLargeSparseMember(const Fixture& fixture) {
+    const auto source = fixture.root / "large-sparse.tar";
+    constexpr std::uint64_t size = 9ULL * 1024 * 1024 * 1024;
+    const luciole::GioPtr<GSubprocess> encoder(g_subprocess_new(
+        G_SUBPROCESS_FLAGS_NONE, nullptr, "/proc/self/exe", "--large-sparse-fixture", source.c_str(), nullptr
+    ));
+    TEST_CHECK(encoder && g_subprocess_wait_check(encoder.get(), nullptr, nullptr));
+    luciole::archive_work::Progress progress;
+    const luciole::CancelToken cancel;
+    const auto known = luciole::archive_work::inspect(location(source), {}, cancel, progress);
+    TEST_CHECK(known.catalog->entries[0].size == size && known.catalog->entries[0].dataBytes == 8);
+    auto result = luciole::archive_work::extract(
+        location(source), location(fixture.root / "large-sparse"), {}, known.catalog, false, {}, cancel, progress
+    );
+    const auto path = fs::path(*result.output->nativePath()) / "sparse";
+    const auto data = luciole::checkedFd(::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+    const auto facts = luciole::statFd(data.get());
+    TEST_CHECK(static_cast<std::uint64_t>(facts.st_size) == size && facts.st_blocks * 512 < 65536);
+    std::array<char, 4> bytes{};
+    TEST_CHECK(::pread(data.get(), bytes.data(), bytes.size(), 0) == 4 && std::string_view(bytes.data(), 4) == "HEAD");
+    TEST_CHECK(
+        ::pread(data.get(), bytes.data(), bytes.size(), static_cast<off_t>(size - 4)) == 4
+        && std::string_view(bytes.data(), 4) == "TAIL"
+    );
+    TEST_CHECK(!luciole::archive_work::cleanup({result.stage}) && fs::is_empty(fixture.root / "tmp"));
+  }
+
+  void testLargeCatalogue(const Fixture& fixture) {
+    std::vector<Entry> entries;
+    entries.reserve(50002);
+    for (unsigned i = 0; i < 50001; ++i) {
+      entries.push_back({"many/" + std::to_string(i) + std::string(180, 'n'), {}, {}});
+    }
+    std::string deep;
+    for (unsigned i = 0; i < 140; ++i) {
+      deep += "d/";
+    }
+    deep += "payload";
+    entries.push_back({deep, "deep archive payload", {}});
+    const auto source = fixture.root / "large-catalogue.tar";
+    tar(source, entries);
+    luciole::archive_work::Progress progress;
+    const luciole::CancelToken cancel;
+    auto known = luciole::archive_work::inspect(location(source), {}, cancel, progress);
+    TEST_CHECK(known.catalog->entries.size() > 50000);
+    std::size_t metadata = 0;
+    for (const auto& item : known.catalog->entries) {
+      metadata += item.path.size() + item.name.size() + item.link.size();
+    }
+    TEST_CHECK(metadata > 16U * 1024U * 1024U);
+    const auto output = fixture.root / "large-catalogue";
+    auto result = luciole::archive_work::extract(
+        location(source), location(output), {}, known.catalog, false, {}, cancel, progress
+    );
+    const auto root = fs::path(*result.output->nativePath());
+    TEST_CHECK(fs::file_size(root / entries.front().name) == 0 && read(root / deep) == "deep archive payload");
+    luciole::archive_work::Progress createdProgress;
+    auto created = luciole::archive_work::compress(
+        {location(root / "many"), location(root / "d")}, location(fixture.root / "large-created.zip"),
+        luciole::ArchiveFormat::Zip, {}, cancel, createdProgress
+    );
+    const auto recreated = luciole::archive_work::inspect(*created.output, {}, cancel, createdProgress);
+    TEST_CHECK(recreated.catalog->entries.size() > 50000);
+    TEST_CHECK(std::ranges::any_of(recreated.catalog->entries, [&](const auto& item) { return item.path == deep; }));
+    TEST_CHECK(!luciole::archive_work::cleanup({created.stage}));
+    TEST_CHECK(!luciole::archive_work::cleanup({result.stage}) && fs::is_empty(fixture.root / "tmp"));
+    fs::remove(source);
+  }
+
   void testLimitsAndTruncation(const Fixture& fixture, Pump& pump) {
     const auto source = fixture.root / "limits.tar";
     tar(source, {{"a/b/file", std::string(4096, 'x'), {}}});
@@ -673,6 +819,13 @@ namespace {
     service.shutdown();
     wait(service, pump);
     TEST_CHECK(fs::is_empty(fixture.root / "tmp"));
+    const auto manyParts = splitZip(fixture.root / "many-zip-parts", "test.zip", read(archive), 1);
+    TEST_CHECK(manyParts.size() > 128 && manyParts.size() <= 999);
+    luciole::ArchiveService manyVolumes;
+    const auto manyOutput = fixture.root / "many-zip-output";
+    TEST_CHECK(manyVolumes.extract(location(manyParts.front()), location(manyOutput)));
+    wait(manyVolumes, pump);
+    TEST_CHECK(!manyVolumes.error() && read(manyOutput / plain.filename()) == read(plain));
     write(parts[1], "changed second volume");
     luciole::ArchiveService changed;
     TEST_CHECK(changed.extract(location(parts.front()), location(fixture.root / "stale-split"), {}, known));
@@ -1480,6 +1633,10 @@ esac
 IFS= read -r secret
 [ "$secret" = fixture-pass ] || exit 7
 case "$NF_SEVENZIP_TEST_MODE" in
+  resources)
+    [ "$(ulimit -v)" = "$NF_SEVENZIP_TEST_AS" ] || exit 8
+    [ "$(ulimit -t)" = "$NF_SEVENZIP_TEST_CPU" ] || exit 8
+    printf 'Path = member\nSize = 0\nAttributes = A -rw-r--r--\n';;
   corrupt) echo 'ERROR: Data Error in encrypted file. Wrong password? : same.txt'; exit 2;;
   fatal) echo 'ERROR: Unsupported Method : same.txt'; exit 2;;
   memory) exit 8;;
@@ -1564,6 +1721,20 @@ esac
                                                                      : luciole::FileErrorKind::InvalidArgument;
       TEST_CHECK(rejected == expected && !progress.passwordNeeded.load() && fs::is_empty(fixture.root / "tmp"));
     }
+    rlimit memory{}, cpu{};
+    TEST_CHECK(::getrlimit(RLIMIT_AS, &memory) == 0 && ::getrlimit(RLIMIT_CPU, &cpu) == 0);
+    const auto addressSpace = memory.rlim_cur == RLIM_INFINITY ? "unlimited" : std::to_string(memory.rlim_cur / 1024);
+    const auto cpuTime = cpu.rlim_cur == RLIM_INFINITY ? "unlimited" : std::to_string(cpu.rlim_cur);
+    TEST_CHECK(::setenv("NF_SEVENZIP_TEST_AS", addressSpace.c_str(), 1) == 0);
+    TEST_CHECK(::setenv("NF_SEVENZIP_TEST_CPU", cpuTime.c_str(), 1) == 0);
+    TEST_CHECK(::setenv("NF_SEVENZIP_TEST_MODE", "resources", 1) == 0);
+    luciole::archive_work::Progress progress;
+    auto work = luciole::archive_work::workFor({}, {}, progress);
+    luciole::archive_work::Input input(location(source), work);
+    luciole::archive_work::Passwords passwords;
+    passwords.values.emplace_back("fixture-pass");
+    const auto members = luciole::archive_work::sevenZipCatalog(input, work, passwords);
+    TEST_CHECK(members.size() == 1 && members[0].path == "member");
     return 0;
   }
   void testSevenZipProviders(const Fixture& fixture, Pump& pump) {
@@ -1719,7 +1890,7 @@ esac
     encoded.resize(position);
     return encoded;
   }
-  std::string oversizedXzDictionary(std::string encoded) {
+  std::string largeXzDictionary(std::string encoded) {
     TEST_CHECK(encoded.size() > 16);
     lzma_block block{};
     std::array<lzma_filter, LZMA_FILTERS_MAX + 1> filters{};
@@ -1772,14 +1943,16 @@ esac
       const auto count = archive_read_data(reader.get(), bytes.data(), bytes.size());
       TEST_CHECK(count == 18 && std::string_view(bytes.data(), static_cast<std::size_t>(count)) == read(source));
     }
-    for (unsigned variant = 0; variant < 4; ++variant) {
+    for (unsigned variant = 0; variant < 6; ++variant) {
       const auto source = fixture.root / ("independent-xz-" + std::to_string(variant) + ".txz");
       // Independent encoder, legal padding and multiple streams, including a
       // frame boundary inside a TAR header rather than between TAR members.
       const auto bytes = variant == 0 ? encoded
           : variant == 1              ? encoded + std::string(4, '\0')
           : variant == 2 ? xz(std::string_view(data).substr(0, 700)) + xz(std::string_view(data).substr(700))
-                         : xz({}) + encoded + xz({});
+          : variant == 3 ? xz({}) + encoded + xz({})
+          : variant == 4 ? largeXzDictionary(encoded)
+                         : xz({}) + largeXzDictionary(encoded) + xz({});
       write(source, bytes);
       luciole::ArchiveService service;
       TEST_CHECK(service.inspect(location(source)));
@@ -1811,12 +1984,14 @@ esac
     tar(hostile, {{"../escaped-xz", "bad", {}}});
     const auto link = fixture.root / "xz-hostile-link.tar";
     tar(link, {{"link", {}, "../escaped-xz", AE_IFLNK}});
+    auto corruptLargeDictionary = largeXzDictionary(valid);
+    corruptLargeDictionary[corruptLargeDictionary.size() - 13] ^= 0x01;
     std::vector<std::string> rejected{
         valid.substr(0, valid.size() - 1),
         valid.substr(0, valid.size() / 2),
         valid + std::string(1, '\0'),
         valid + "garbage",
-        oversizedXzDictionary(valid),
+        corruptLargeDictionary,
         xz(data + std::string(4U * 1024U * 1024U, '\0')),
         xz(read(hostile)),
         xz(read(link)),
@@ -1834,7 +2009,7 @@ esac
     TEST_CHECK(indexSize + 13 < valid.size());
     badDataCheck[valid.size() - indexSize - 13] ^= 0x01;
     rejected.push_back(std::move(badDataCheck));
-    rejected.push_back(valid + oversizedXzDictionary(valid));
+    rejected.push_back(valid + corruptLargeDictionary);
     rejected.push_back(valid + valid.substr(0, valid.size() - 1));
     for (std::size_t i = 0; i < rejected.size(); ++i) {
       const auto source = fixture.root / ("bad-xz-" + std::to_string(i) + ".tar.xz");
@@ -1851,9 +2026,11 @@ esac
       TEST_CHECK(service.inspect(location(source)));
       wait(service, pump);
       TEST_CHECK(service.error() && !service.catalog());
-      if (i == 4 || i == 5) {
+      if (i == 4) {
+        TEST_CHECK(service.error()->kind == luciole::FileErrorKind::InvalidArgument);
+      } else if (i == 5) {
         TEST_CHECK(service.error()->kind == luciole::FileErrorKind::Unsupported);
-        TEST_CHECK(service.error()->message.contains(i == 4 ? "128 MiB" : "decoded-container"));
+        TEST_CHECK(service.error()->message.contains("decoded-container"));
       }
       const auto destination = fixture.root / ("xz-rejected-" + std::to_string(i));
       TEST_CHECK(service.extract(location(source), location(destination)));
@@ -2032,6 +2209,9 @@ esac
 } // namespace
 int main(int argc, char** argv) {
   try {
+    if (argc == 3 && std::string_view(argv[1]) == "--large-sparse-fixture") {
+      return makeLargeSparseFixture(argv[2]);
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--bounded-write-failure") {
       return boundedWriteFailure();
     }
@@ -2076,6 +2256,9 @@ int main(int argc, char** argv) {
     testCompressedTarFailures(fixture, pump);
     testCompressedPaddingLimit(fixture, pump);
     testRoundTrips(fixture, pump);
+    testNativeJobCapacity(fixture);
+    testLargeSparseMember(fixture);
+    testLargeCatalogue(fixture);
     testConflicts(fixture, pump);
     testHostile(fixture, pump);
     testLimitsAndTruncation(fixture, pump);

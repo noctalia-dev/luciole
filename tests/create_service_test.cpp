@@ -10,10 +10,12 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <linux/fs.h>
 #include <print>
 #include <stdexcept>
 #include <sys/inotify.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
 
@@ -71,6 +73,19 @@ namespace {
   private:
     GlibPollSource m_source;
   };
+  // Where renameat2 flags are rejected (NFS, many FUSE filesystems), no-replace falls back to a check and a plain
+  // rename, so racing creates of one name can both succeed.
+  bool atomicNoReplace(const fs::path& directory) {
+    const auto from = directory / ".rename-probe-from";
+    const auto to = directory / ".rename-probe-to";
+    std::ofstream(from) << "";
+    const bool supported =
+        ::syscall(SYS_renameat2, AT_FDCWD, from.c_str(), AT_FDCWD, to.c_str(), RENAME_NOREPLACE) == 0;
+    std::error_code ignored;
+    fs::remove(from, ignored);
+    fs::remove(to, ignored);
+    return supported;
+  }
   std::string contents(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(input), {}};
@@ -581,16 +596,18 @@ namespace {
     TEST_CHECK(
         service.snapshot().status == luciole::CreateStatus::Succeeded && fs::file_size(fixture.root / "retry.txt") == 0
     );
-    luciole::CreateService other;
-    pump.prepare(service, fixture.root, luciole::CreateKind::EmptyFile);
-    pump.prepare(other, fixture.root, luciole::CreateKind::EmptyFile);
-    TEST_CHECK(service.create("racing.txt") && other.create("racing.txt"));
-    pump.until([&] { return !service.busy() && !other.busy(); });
-    TEST_CHECK(
-        (service.snapshot().status == luciole::CreateStatus::Succeeded)
-            != (other.snapshot().status == luciole::CreateStatus::Succeeded)
-        && fs::file_size(fixture.root / "racing.txt") == 0
-    );
+    if (atomicNoReplace(fixture.root)) {
+      luciole::CreateService other;
+      pump.prepare(service, fixture.root, luciole::CreateKind::EmptyFile);
+      pump.prepare(other, fixture.root, luciole::CreateKind::EmptyFile);
+      TEST_CHECK(service.create("racing.txt") && other.create("racing.txt"));
+      pump.until([&] { return !service.busy() && !other.busy(); });
+      TEST_CHECK(
+          (service.snapshot().status == luciole::CreateStatus::Succeeded)
+              != (other.snapshot().status == luciole::CreateStatus::Succeeded)
+          && fs::file_size(fixture.root / "racing.txt") == 0
+      );
+    }
     pump.prepare(service, fixture.root, luciole::CreateKind::EmptyFile);
     TEST_CHECK(service.create("cancelled.txt"));
     service.cancel();

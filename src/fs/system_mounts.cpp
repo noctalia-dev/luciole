@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <fcntl.h>
 #include <format>
 #include <gio/gunixmounts.h>
@@ -14,6 +15,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <sys/stat.h>
 #include <sys/vfs.h>
 #include <unistd.h>
 #include <utility>
@@ -295,6 +298,55 @@ namespace {
       cache.queried = true;
     }
   }
+  std::vector<luciole::MountConfiguration>
+  automountsInside(const luciole::Location& location, std::span<const luciole::MountConfiguration> configuration) {
+    const auto path = location.nativePath();
+    if (!path
+        || readLinkTarget(*path).has_value()
+        || !std::ranges::any_of(configuration, &luciole::MountConfiguration::automount)) {
+      return {};
+    }
+    std::vector<luciole::MountConfiguration> result;
+    std::set<std::string> seen;
+    const auto collect = [&](std::string_view dir) {
+      for (const auto& config : configuration) {
+        if (config.automount && inside(config.path, dir) && seen.emplace(normalizeMountPath(config.path)).second) {
+          result.push_back(config);
+        }
+      }
+    };
+    collect(*path);
+    const std::unique_ptr<char, decltype(&std::free)> canonical(::realpath(path->c_str(), nullptr), &std::free);
+    if (canonical && std::string_view(canonical.get()) != *path) {
+      collect(canonical.get());
+    }
+    return result;
+  }
+
+  luciole::Fd openConfiguredAutomount(const luciole::MountConfiguration& config, const luciole::CancelToken& token) {
+    const auto slotMutex = mountSlotMutex(config.path);
+    const auto slot = lockTimed(*slotMutex, token);
+    if (luciole::mountState(config, luciole::readMountedFilesystems()) == luciole::SystemMountState::Unavailable) {
+      luciole::throwFileError(
+          luciole::FileErrorKind::NotMounted, std::format("The system automount at {} is unavailable.", config.path)
+      );
+    }
+    auto directory = luciole::checkedFd(::open((config.path + "/.").c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC));
+    struct statfs filesystem{};
+    if (::fstatfs(directory.get(), &filesystem) != 0) {
+      luciole::throwErrno(errno);
+    }
+    if (luciole::mountState(config, luciole::readMountedFilesystems()) != luciole::SystemMountState::Mounted
+        || !shareFilesystem(config.type, filesystem)) {
+      luciole::throwFileError(
+          luciole::FileErrorKind::NotMounted, std::format("The expected share is not mounted at {}.", config.path)
+      );
+    }
+    if (token.cancelled()) {
+      luciole::throwFileError(luciole::FileErrorKind::Cancelled, "Cancelled.");
+    }
+    return directory;
+  }
 } // namespace
 
 bool luciole::networkMountType(std::string_view type) {
@@ -303,6 +355,10 @@ bool luciole::networkMountType(std::string_view type) {
 
 bool luciole::sameMountSource(std::string_view left, std::string_view right) {
   return normalizeMountSource(left) == normalizeMountSource(right);
+}
+
+bool luciole::bindMount(std::string_view root, std::string_view options) {
+  return normalizeMountPath(root) != "/" && option(options, "subvol") != normalizeMountPath(root);
 }
 
 std::vector<luciole::MountConfiguration> luciole::readFstabMounts() {
@@ -416,6 +472,12 @@ bool luciole::symlinkEntersUnmountedAutomount(
   return resolved && resolved->crossesMount && mountState(resolved->config, mounted) != SystemMountState::Mounted;
 }
 
+std::optional<luciole::MountConfiguration>
+luciole::automountInside(const Location& location, std::span<const MountConfiguration> configuration) {
+  auto matches = automountsInside(location, configuration);
+  return matches.empty() ? std::nullopt : std::optional(std::move(matches.front()));
+}
+
 void luciole::publishNativeMounts(std::vector<MountConfiguration> configuration) {
   const std::scoped_lock lock(configurationCache().mutex);
   configurationCache().native = std::move(configuration);
@@ -450,28 +512,47 @@ luciole::mergeMountConfiguration(std::vector<MountConfiguration> result, std::sp
   return result;
 }
 
-bool luciole::prepareSystemMount(const Location& location, const CancelToken& token) {
+luciole::Fd luciole::openSystemMount(const Location& location, const CancelToken& token, bool followFinal) {
   discoverSystemMountsOnce(token);
-  const auto config = resolveAutomountFor(location, configuredSystemMounts());
+  const auto config = resolveAutomountFor(location, configuredSystemMounts(), followFinal);
   if (!config) {
-    return false;
+    return {};
   }
-  const auto slotMutex = mountSlotMutex(config->path);
-  const auto slot = lockTimed(*slotMutex, token);
-  if (mountState(*config, readMountedFilesystems()) == SystemMountState::Unavailable) {
-    throwFileError(FileErrorKind::NotMounted, std::format("The system automount at {} is unavailable.", config->path));
+  return openConfiguredAutomount(*config, token);
+}
+
+std::vector<luciole::Fd>
+luciole::openSystemMounts(std::span<const Location> locations, const CancelToken& token, bool followFinal) {
+  discoverSystemMountsOnce(token);
+  const auto configuration = configuredSystemMounts();
+  std::set<std::string> seen;
+  std::vector<Fd> mounts;
+  for (const auto& location : locations) {
+    if (const auto config = resolveAutomountFor(location, configuration, followFinal)) {
+      if (seen.emplace(normalizeMountPath(config->path)).second) {
+        mounts.push_back(openConfiguredAutomount(*config, token));
+      }
+    }
   }
-  const auto directory = checkedFd(::open((config->path + "/.").c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC));
-  struct statfs filesystem{};
-  if (::fstatfs(directory.get(), &filesystem) != 0) {
-    throwErrno(errno);
+  return mounts;
+}
+
+std::vector<luciole::Fd>
+luciole::openSystemMountsInside(std::span<const Location> locations, const CancelToken& token) {
+  discoverSystemMountsOnce(token);
+  const auto configuration = configuredSystemMounts();
+  if (!std::ranges::any_of(configuration, &MountConfiguration::automount)) {
+    return {};
   }
-  if (mountState(*config, readMountedFilesystems()) != SystemMountState::Mounted
-      || !shareFilesystem(config->type, filesystem)) {
-    throwFileError(FileErrorKind::NotMounted, std::format("The expected share is not mounted at {}.", config->path));
+  std::set<std::string> seen;
+  std::vector<Fd> mounts;
+  for (const auto& location : locations) {
+    for (const auto& config : automountsInside(location, configuration)) {
+      struct stat entry{};
+      if (::lstat(config.path.c_str(), &entry) == 0 && seen.emplace(normalizeMountPath(config.path)).second) {
+        mounts.push_back(openConfiguredAutomount(config, token));
+      }
+    }
   }
-  if (token.cancelled()) {
-    throwFileError(FileErrorKind::Cancelled, "Cancelled.");
-  }
-  return true;
+  return mounts;
 }

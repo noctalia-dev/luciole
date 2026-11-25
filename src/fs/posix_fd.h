@@ -37,6 +37,18 @@ namespace luciole {
   // A completed rename changes ctime; an atomic directory exchange can also change mtime (XFS).
   // Use only immediately after our own successful syscall, before adopting the new revision.
   bool sameRenamedRevision(const struct stat& before, const struct stat& after, bool exchanged = false);
+  // fstat of an item pinned before it was unlinked from `parent`. NFS turns unlinking an open file into a rename to
+  // `.nfsXXXX`, so the pinned inode keeps its link count, and a removed folder's handle goes stale; report what a
+  // local filesystem would instead.
+  struct stat statUnlinked(int parent, int pinned, const struct stat& before);
+
+  // renameat2 with RENAME_NOREPLACE. Where the filesystem rejects the flag (NFS, many FUSE filesystems), checks
+  // that `to` is vacant and renames, which is not atomic. Returns 0, or -1 with errno set.
+  int renameNoReplace(int fromDir, const char* from, int toDir, const char* to);
+  // renameat2 with RENAME_EXCHANGE. Where the filesystem rejects the flag, swaps through a temporary name beside
+  // `from` and restores both names on failure; `to` is briefly absent. Returns 0, or -1 with errno set.
+  int renameExchange(int fromDir, const char* from, int toDir, const char* to);
+
   // Raises the soft open-file limit to the hard limit at startup. The 1024 default exists for select(), which
   // Luciole never uses; undo history for large transfers needs several descriptors per item.
   void raiseFileDescriptorLimit();

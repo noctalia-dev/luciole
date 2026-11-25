@@ -3,6 +3,7 @@
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
+#include "fs/system_mounts.h"
 
 #include <atomic>
 #include <cerrno>
@@ -132,6 +133,8 @@ bool luciole::TrashService::prepareSources(const std::optional<Location>& parent
     if (parent && !expectedParent) {
       throwFileError(FileErrorKind::Unsupported, "Moving remote items to Trash is not supported yet.");
     }
+    const auto sourceMounts = openSystemMounts(sources, token, false);
+    const auto parentMount = parent ? openSystemMount(*parent, token, true) : Fd{};
     auto prepared = std::make_shared<Prepared>();
     std::set<std::string, std::less<>> paths;
     for (const auto& source : sources) {
@@ -179,6 +182,18 @@ bool luciole::TrashService::trash() {
   }
   m_state->snapshot.status = TrashStatus::Trashing;
   State::launch(m_state, [owner = m_state, prepared = m_state->prepared](const CancelToken& token) {
+    std::vector<Location> parentLocations;
+    parentLocations.reserve(prepared->parents.size());
+    for (const auto& [path, _] : prepared->parents) {
+      parentLocations.push_back(Location::fromPath(path));
+    }
+    std::vector<Location> targetLocations;
+    targetLocations.reserve(prepared->targets.size());
+    for (const auto& target : prepared->targets) {
+      targetLocations.push_back(target->location);
+    }
+    const auto parentMounts = openSystemMounts(parentLocations, token, true);
+    const auto targetMounts = openSystemMounts(targetLocations, token, false);
     Reply reply{.prepared = {}, .results = {}, .finished = true};
     for (const auto& target : prepared->targets) {
       reply.results.push_back({target->location, TrashOutcome::Cancelled, {}});

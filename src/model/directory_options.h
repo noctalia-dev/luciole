@@ -92,6 +92,9 @@ namespace luciole {
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnLabels{
       "Type", "Size", "Modified", "Accessed", "Created", "Owner", "Group", "Permissions", "Location"
   };
+  inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnGlyphs{
+      "category", "scale", "pencil", "eye", "calendar-plus", "user", "users", "lock", "map-pin"
+  };
   inline std::string_view detailsColumnName(DetailsColumn column) {
     const auto index = static_cast<std::size_t>(column);
     return index < kDetailsColumnNames.size() ? kDetailsColumnNames[index] : std::string_view{};
@@ -99,6 +102,10 @@ namespace luciole {
   inline std::string_view detailsColumnLabel(DetailsColumn column) {
     const auto index = static_cast<std::size_t>(column);
     return index < kDetailsColumnLabels.size() ? kDetailsColumnLabels[index] : std::string_view{};
+  }
+  constexpr std::string_view detailsColumnGlyph(DetailsColumn column) {
+    const auto index = static_cast<std::size_t>(column);
+    return index < kDetailsColumnGlyphs.size() ? kDetailsColumnGlyphs[index] : std::string_view{};
   }
   inline std::optional<DetailsColumn> detailsColumnFromName(std::string_view name) {
     for (const auto column : kDefaultDetailsColumnOrder) {
@@ -213,6 +220,14 @@ namespace luciole {
     }
     const auto* const found = std::ranges::find(kColumnSortFields, field);
     return found == kColumnSortFields.end() ? "Unknown" : kDetailsColumnLabels[found - kColumnSortFields.begin()];
+  }
+  constexpr std::string_view sortFieldGlyph(SortField field) {
+    if (field == SortField::Name) {
+      return "text-caption";
+    }
+    const auto* const found = std::ranges::find(kColumnSortFields, field);
+    return found == kColumnSortFields.end() ? std::string_view{}
+                                            : kDetailsColumnGlyphs[found - kColumnSortFields.begin()];
   }
   struct SortOptions {
     SortField field = SortField::Name;

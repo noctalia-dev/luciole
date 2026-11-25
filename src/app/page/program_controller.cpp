@@ -195,7 +195,7 @@ void ProgramController::showScripts(
   std::vector<ContextMenuControlEntry> entries;
   entries.reserve(programs->size() + 4);
   for (std::size_t index = 0; index < programs->size(); ++index) {
-    entries.push_back({.id = static_cast<int>(index), .label = (*programs)[index].name});
+    entries.push_back({.id = static_cast<int>(index), .label = (*programs)[index].name, .glyph = "script"});
   }
   if (loading || listing.error || programs->empty()) {
     entries.push_back(
@@ -209,7 +209,7 @@ void ProgramController::showScripts(
     entries.push_back({.label = "Script list limit reached", .enabled = false});
   }
   entries.push_back({.label = "", .separator = true});
-  entries.push_back({.id = -1, .label = "Open Scripts Folder"});
+  entries.push_back({.id = -1, .label = "Open Scripts Folder", .glyph = "folder-open"});
   m_submenus.show(
       std::move(entries),
       [this, request, programs](int id) {

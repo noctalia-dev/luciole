@@ -5,6 +5,7 @@
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
+#include "fs/system_mounts.h"
 #include "operations/conflict_gate.h"
 #include "operations/copied_move_receipt.h"
 #include "operations/copy_receipt.h"
@@ -22,6 +23,7 @@
 #include <glib.h>
 #include <map>
 #include <set>
+#include <sys/stat.h>
 #include <tuple>
 #include <utility>
 
@@ -804,6 +806,111 @@ namespace {
       }
     }
   };
+  bool sourcePendingRetry(const Job& job, std::size_t index) {
+    if (job.provider) {
+      if (index >= job.outcomes.size()) {
+        return true;
+      }
+      const auto value = job.outcomes[index].outcome;
+      return value != luciole::TransferOutcome::Moved
+          && value != luciole::TransferOutcome::Copied
+          && value != luciole::TransferOutcome::Linked
+          && value != luciole::TransferOutcome::Skipped;
+    }
+    return index < job.nodes.size() && job.nodes[index] && retryCount(*job.nodes[index]) > 0;
+  }
+
+  std::vector<luciole::Location> guardSourcesFor(const Job& job, bool retry) {
+    if (!retry) {
+      return job.request.sources;
+    }
+    std::vector<luciole::Location> sources;
+    for (std::size_t i = 0; i < job.request.sources.size(); ++i) {
+      if (sourcePendingRetry(job, i)) {
+        sources.push_back(job.request.sources[i]);
+      }
+    }
+    return sources;
+  }
+
+  std::vector<luciole::Fd>
+  openTransferMounts(const Job& job, bool retry, bool allowMerge, const luciole::CancelToken& token) {
+    const auto pendingSources = guardSourcesFor(job, retry);
+    auto mounts = luciole::openSystemMounts(pendingSources, token, false);
+    if (auto destination = luciole::openSystemMount(job.request.destination, token, true); destination.valid()) {
+      mounts.push_back(std::move(destination));
+    }
+    if (job.request.action == luciole::TransferAction::Link) {
+      return mounts;
+    }
+    const auto append = [&](std::vector<luciole::Fd> opened) {
+      for (auto& fd : opened) {
+        mounts.push_back(std::move(fd));
+      }
+    };
+    append(luciole::openSystemMountsInside(pendingSources, token));
+    if (!job.request.destination.isNative()) {
+      return mounts;
+    }
+    std::vector<luciole::Location> destinationChildren;
+    std::vector<luciole::Location> mergeDirectories;
+    destinationChildren.reserve(pendingSources.size());
+    for (const auto& source : pendingSources) {
+      if (const auto base = source.basename(); base && !base->empty()) {
+        auto target = job.request.destination.child(*base);
+        if (allowMerge) {
+          if (const auto targetPath = target.nativePath()) {
+            struct stat entry{};
+            if (::lstat(targetPath->c_str(), &entry) == 0 && S_ISDIR(entry.st_mode)) {
+              mergeDirectories.push_back(target);
+            }
+          }
+        }
+        destinationChildren.push_back(std::move(target));
+      }
+    }
+    append(luciole::openSystemMounts(destinationChildren, token, false));
+    if (!mergeDirectories.empty()) {
+      append(luciole::openSystemMountsInside(mergeDirectories, token));
+    }
+    return mounts;
+  }
+
+  void updatePendingResult(
+      luciole::TransferResult& result, luciole::TransferOutcome outcome, const luciole::FileError& error
+  ) {
+    if (result.outcome != luciole::TransferOutcome::Partial) {
+      result.outcome = outcome;
+    }
+    result.error = error;
+    for (auto& child : result.children) {
+      if (child.retryable || child.outcome == luciole::TransferOutcome::Partial) {
+        updatePendingResult(child, outcome, error);
+      }
+    }
+  }
+
+  std::vector<luciole::TransferResult> failedResults(Job& job, bool retry, const luciole::FileError& failure) {
+    const bool cancelled = failure.kind == luciole::FileErrorKind::Cancelled;
+    const auto outcome = cancelled ? luciole::TransferOutcome::Cancelled : luciole::TransferOutcome::Failed;
+    const auto error = cancelled ? cancelledError() : failure;
+    if (retry && job.outcomes.size() == job.request.sources.size()) {
+      auto results = job.outcomes;
+      for (std::size_t i = 0; i < results.size(); ++i) {
+        if (sourcePendingRetry(job, i)) {
+          updatePendingResult(results[i], outcome, error);
+        }
+      }
+      job.outcomes = results;
+      return results;
+    }
+    std::vector<luciole::TransferResult> results;
+    results.reserve(job.request.sources.size());
+    for (const auto& source : job.request.sources) {
+      results.emplace_back(source, outcome, error);
+    }
+    return results;
+  }
 } // namespace
 
 bool luciole::TransferService::launch(TransferRequest request, bool retry) {
@@ -829,8 +936,9 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
   auto job = retry ? m_state->job : std::make_shared<Job>(std::move(request));
   runJob<Reply>(
       [owner = m_state, job, token = m_state->token, retry] {
-        std::map<std::pair<mode_t, mode_t>, TransferConflictChoice> policies;
         const bool allowMerge = job->request.allowMerge && job->request.action != TransferAction::Link;
+        const auto mounts = openTransferMounts(*job, retry, allowMerge, token);
+        std::map<std::pair<mode_t, mode_t>, TransferConflictChoice> policies;
         Work work{
             token, owner->bytes,
             conflictAsker(owner->gate, [owner] { State::notify(owner); }, token, allowMerge, policies)
@@ -1009,17 +1117,14 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
             .copyReceipt = std::move(copyReceipt)
         };
       },
-      [owner = m_state, job](JobResult<Reply> result) {
+      [owner = m_state, job, retry](JobResult<Reply> result) {
         if (result) {
           owner->results = std::move(result->results);
           owner->report = std::move(result->report);
           owner->receipt = std::move(result->receipt);
           owner->copyReceipt = std::move(result->copyReceipt);
         } else {
-          owner->results.clear();
-          for (const auto& source : job->request.sources) {
-            owner->results.emplace_back(source, TransferOutcome::Failed, result.error());
-          }
+          owner->results = failedResults(*job, retry, result.error());
           owner->report = jobReport(owner->results);
         }
         owner->job = job;
@@ -1029,7 +1134,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
             owner->retryable += retryCount(*node);
           }
         }
-        if (owner->retryable == 0 || !result) {
+        if (owner->retryable == 0 || (!result && !retry)) {
           owner->retryable = 0;
           owner->job.reset();
         }

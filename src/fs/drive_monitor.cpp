@@ -4,11 +4,13 @@
 #include "fs/gio_ptr.h"
 #include "fs/location_mount.h"
 #include "fs/system_mount_monitor.h"
+#include "fs/system_mounts.h"
 
 #include <algorithm>
 #include <format>
 #include <fstream>
 #include <gio/gio.h>
+#include <gio/gunixmounts.h>
 #include <map>
 #include <set>
 
@@ -41,6 +43,25 @@ namespace {
     std::string name;
     std::getline(file, name);
     return name.empty() ? std::format("process {}", pid) : name;
+  }
+
+  bool boundDirectory(GMount* mount) {
+    const luciole::GioPtr<GFile> root(g_mount_get_root(mount));
+    const luciole::GString path(g_file_get_path(root.get()));
+    if (!path) {
+      return false;
+    }
+    // These names also support the project's GLib 2.76 minimum.
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GUnixMountEntry* entry = g_unix_mount_at(path.get(), nullptr);
+    const char* rootPath = entry ? g_unix_mount_get_root_path(entry) : nullptr;
+    const char* options = entry ? g_unix_mount_get_options(entry) : nullptr;
+    const bool result = rootPath && luciole::bindMount(rootPath, options ? options : "");
+    if (entry) {
+      g_unix_mount_free(entry);
+    }
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    return result;
   }
 } // namespace
 
@@ -134,7 +155,7 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
           systemHandles.emplace(
               std::move(*uri), Handle{.volume = std::move(volume), .mount = std::move(mount), .device = nullptr}
           );
-        } else {
+        } else if (!boundDirectory(mount.get())) {
           add({.volume = std::move(volume), .mount = std::move(mount), .device = nullptr});
         }
         continue;
@@ -171,7 +192,9 @@ struct luciole::DriveMonitor::State : std::enable_shared_from_this<State> {
           );
           continue;
         }
-        add({.volume = nullptr, .mount = std::move(mount), .device = nullptr});
+        if (!boundDirectory(mount.get())) {
+          add({.volume = nullptr, .mount = std::move(mount), .device = nullptr});
+        }
       }
     }
     g_list_free(mounts);

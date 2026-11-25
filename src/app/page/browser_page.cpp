@@ -1328,7 +1328,11 @@ bool BrowserPage::windowKey(const KeyboardEvent& event) {
     return true;
   }
   if (luciole::shortcutMatches(Action::Search, event.sym, event.modifiers) && m_locationBar.hasFilterInput()) {
-    dispatchAction(Action::Search);
+    if (dispatcher().focusedArea() != m_locationBar.filterInput().inputArea()) {
+      dispatchAction(Action::Search);
+    } else if (!event.repeat) {
+      m_locationBar.toggleSearchScope();
+    }
     return true;
   }
   return false;
@@ -1916,6 +1920,13 @@ void BrowserPage::showLinkTarget(const luciole::Location& link) {
   );
 }
 
+void BrowserPage::setSearchRecursive(bool recursive) {
+  m_browser.setSearchRecursive(recursive);
+  for (const auto& column : m_miller.columns()) {
+    column->browser->setSearchRecursive(recursive);
+  }
+}
+
 void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool force) {
   m_terminal.setCommand(settings.terminalCommand);
   m_launcher.setTerminalCommand(settings.terminalCommand);
@@ -1978,10 +1989,7 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
     m_fileKeys.clearTypeahead();
     m_activationMode = settings.activationMode;
     m_fileKeys.setTypingMode(settings.typingMode);
-    m_browser.setSearchRecursive(settings.typingMode != luciole::TypingMode::Filter);
-    for (const auto& column : m_miller.columns()) {
-      column->browser->setSearchRecursive(settings.typingMode != luciole::TypingMode::Filter);
-    }
+    setSearchRecursive(settings.typingMode != luciole::TypingMode::Filter);
     for (auto* adapter : {&m_listAdapter, &m_gridAdapter}) {
       adapter->setActivationMode(m_activationMode);
     }
@@ -2931,7 +2939,6 @@ void BrowserPage::closePopup() {
     m_popupSurface->setSceneRoot(nullptr);
   }
   m_dialogTier.reset();
-  m_dialogTop.reset();
   m_dialogShadow = nullptr;
   m_dialogPosition.reset();
   m_dialogResizePending = false;
@@ -3084,19 +3091,12 @@ popup_chrome::Geometry BrowserPage::dialogGeometry(Flex& content) {
 }
 
 std::pair<int, int> BrowserPage::dialogPosition(const popup_chrome::Geometry& chrome) {
-  // Centered when it opens and when the window height changes; otherwise the top edge stays put so switching
-  // tabs or pages only moves the bottom edge. A taller page slides it up just enough to stay inside the margin.
+  const auto windowWidth = static_cast<float>(m_surface->width());
   const auto windowHeight = static_cast<float>(m_surface->height());
-  if (windowHeight != m_dialogWindowHeight) {
-    m_dialogWindowHeight = windowHeight;
-    m_dialogTop.reset();
-  }
-  const float lowest = std::max(kDialogMargin, windowHeight - kDialogMargin - chrome.contentHeight);
-  const float top = std::clamp(m_dialogTop.value_or((windowHeight - chrome.contentHeight) / 2), kDialogMargin, lowest);
-  m_dialogTop = top;
+  const float top = std::max(kDialogMargin, (windowHeight - chrome.contentHeight) * 0.5F);
   return {
-      static_cast<int>((static_cast<float>(m_surface->width()) - chrome.contentWidth) / 2) - chrome.bleed.left,
-      static_cast<int>(top) - chrome.bleed.up
+      static_cast<int>(std::round((windowWidth - chrome.contentWidth) * 0.5F)) - chrome.bleed.left,
+      static_cast<int>(std::round(top)) - chrome.bleed.up
   };
 }
 
@@ -3127,7 +3127,7 @@ void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width, Popu
        .anchorHeight = 1,
        .width = chrome.surfaceWidth,
        .height = chrome.surfaceHeight,
-       .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+       .anchor = XDG_POSITIONER_ANCHOR_TOP_LEFT,
        .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
        .constraintAdjustment =
            XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},
@@ -3153,9 +3153,12 @@ void BrowserPage::showDialog(std::unique_ptr<Flex> root, DialogWidth width, Popu
 void BrowserPage::layoutDialogFrame() {
   const auto chrome = dialogGeometry(*m_activePopup.root());
   if (chrome.surfaceWidth != m_popupSurface->width() || chrome.surfaceHeight != m_popupSurface->height()) {
+    // PopupSurface::resize invokes Surface::onConfigure synchronously, which would consume m_dialogResizePending
+    // before the compositor's real configure arrives.
+    const bool resizePending = std::exchange(m_dialogResizePending, false);
     (void)m_popupSurface->resize(chrome.surfaceWidth, chrome.surfaceHeight, false);
+    m_dialogResizePending = resizePending;
     popup_chrome::setContentInputRegion(*m_popupSurface, chrome);
-    m_dialogResizePending = true;
   }
   if (m_dialogShadow != nullptr) {
     m_dialogShadow->setFrameSize(chrome.contentWidth, chrome.contentHeight);
@@ -3168,7 +3171,7 @@ void BrowserPage::layoutDialogFrame() {
          .anchorY = position.second,
          .anchorWidth = 1,
          .anchorHeight = 1,
-         .anchor = XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT,
+         .anchor = XDG_POSITIONER_ANCHOR_TOP_LEFT,
          .gravity = XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT,
          .constraintAdjustment =
              XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y},

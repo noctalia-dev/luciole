@@ -11,6 +11,7 @@
 #include <format>
 #include <limits>
 #include <ranges>
+#include <sys/statvfs.h>
 
 namespace fs = std::filesystem;
 
@@ -62,7 +63,30 @@ namespace luciole::archive_work {
     );
   }
   Work workFor(ArchiveLimits limits, const CancelToken& cancel, luciole::archive_work::Progress& progress) {
-    return {limits, cancel, progress, Clock::now() + limits.maxTime, {}, 0, 0};
+    auto deadline = Clock::time_point::max();
+    if (limits.maxTime != std::chrono::seconds::max()) {
+      const auto now = Clock::now();
+      const auto available = std::chrono::duration_cast<std::chrono::seconds>(deadline - now);
+      if (limits.maxTime < available) {
+        deadline = now + std::max(limits.maxTime, std::chrono::seconds::zero());
+      }
+    }
+    return {limits, cancel, progress, deadline, {}, 0, 0};
+  }
+  void requireSpace(int folder, std::uint64_t bytes) {
+    struct statvfs info{};
+    if (::fstatvfs(folder, &info) != 0) {
+      systemError("Could not inspect available archive storage");
+    }
+    const auto block = info.f_frsize ? info.f_frsize : info.f_bsize;
+    if (!block) {
+      return; // This filesystem supplies no useful capacity estimate; writes still report failures.
+    }
+    const auto maximum = std::numeric_limits<std::uint64_t>::max();
+    const auto available = info.f_bavail > maximum / block ? maximum : info.f_bavail * block;
+    if (bytes > available) {
+      throwFileError(FileErrorKind::NoSpace, "Not enough available space to extract the selected archive files.");
+    }
   }
   std::string bounded(const char* text) {
     if (!text) {

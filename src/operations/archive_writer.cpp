@@ -94,6 +94,8 @@ namespace {
     Fd output;
     std::uint64_t bytes = 0;
     std::size_t metadataBytes = 0;
+    // One buffer per job, rather than a large stack frame for every nested folder.
+    std::array<char, 65536> buffer{};
     std::unique_ptr<struct archive, decltype(&archive_write_free)> value{archive_write_new(), &archive_write_free};
     Writer(const std::string& filename, const ArchiveFormatInfo& format, Work& request, const Passwords& passwords)
         : work(request),
@@ -151,10 +153,10 @@ namespace {
       throwFileError(FileErrorKind::Unsupported, "Archive paths are duplicated or too deep.");
     }
     (void)safePath(path, work);
-    writer.metadataBytes += path.size();
-    if (writer.metadataBytes > work.limits.maxMetadataBytes) {
+    if (path.size() > work.limits.maxMetadataBytes - writer.metadataBytes) {
       throwFileError(FileErrorKind::Unsupported, "Archive source names exceed the metadata limit.");
     }
+    writer.metadataBytes += path.size();
     const auto before = statAt(parent, name);
     const std::unique_ptr<struct archive_entry, decltype(&archive_entry_free)> entry(
         archive_entry_new(), &archive_entry_free
@@ -191,7 +193,7 @@ namespace {
       if (stamp(statFd(input.get())) != stamp(before)) {
         throwFileError(FileErrorKind::Changed, "An archive source changed.");
       }
-      std::array<char, 65536> buffer{};
+      auto& buffer = writer.buffer;
       auto remaining = static_cast<std::uint64_t>(before.st_size);
       while (remaining) {
         work.check();
@@ -218,17 +220,18 @@ namespace {
         throwFileError(FileErrorKind::Changed, "An archive source changed while reading.");
       }
     } else if (S_ISLNK(before.st_mode)) {
-      std::array<char, 4097> target{};
-      const auto size = ::readlinkat(parent, name.c_str(), target.data(), target.size());
-      if (size < 0 || size >= static_cast<ssize_t>(target.size())) {
+      auto& target = writer.buffer;
+      constexpr std::size_t maximum = 4097;
+      const auto size = ::readlinkat(parent, name.c_str(), target.data(), maximum);
+      if (size < 0 || size >= static_cast<ssize_t>(maximum)) {
         throwFileError(FileErrorKind::Other, "Could not read archive source link.");
       }
       const std::string link(target.data(), static_cast<std::size_t>(size));
       // Creation stores the link itself. Only reading/extraction resolves and validates its target.
-      writer.metadataBytes += link.size();
-      if (writer.metadataBytes > work.limits.maxMetadataBytes) {
+      if (link.size() > work.limits.maxMetadataBytes - writer.metadataBytes) {
         throwFileError(FileErrorKind::Unsupported, "Archive link names exceed the metadata limit.");
       }
+      writer.metadataBytes += link.size();
       archive_entry_set_filetype(entry.get(), AE_IFLNK);
       archive_entry_set_size(entry.get(), 0);
       archive_entry_set_symlink(entry.get(), link.c_str());

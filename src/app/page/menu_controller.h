@@ -58,7 +58,7 @@ public:
   void openColumnsMenu(const LayoutRect& anchor, std::optional<luciole::DetailsColumn> column = std::nullopt);
   void openBreadcrumbMenu(const luciole::Location& target, LayoutRect anchor);
   void openMenu();
-  void openSortMenu(std::optional<LayoutRect> anchor = std::nullopt, bool alignLeft = true);
+  void openSortMenu(std::optional<LayoutRect> anchor = std::nullopt);
   void openSelectionMenu();
   // Scrolls the highlighted row into view.
   void revealHighlight();
@@ -81,9 +81,12 @@ private:
   void showOpenInMenu(const luciole::ActionRequest& request);
   // Path and URI of the request's targets, or of its folder when `targets` is false.
   void showCopyLocationMenu(const luciole::ActionRequest& request, bool targets);
+  // Sort fields and order as radios, then the sort toggles.
+  std::vector<ContextMenuControlEntry> sortEntries(const luciole::ActionRequest& request) const;
+  // Shows `entries` of browser actions for `request`, after a Back row when `back` is set.
   void showActionMenu(
-      std::initializer_list<std::optional<luciole::BrowserAction>> actions, bool radio = false, bool back = false,
-      std::optional<LayoutRect> anchor = std::nullopt, bool alignLeft = true
+      std::vector<ContextMenuControlEntry> entries, const luciole::ActionRequest& request, bool back = false,
+      std::optional<LayoutRect> anchor = std::nullopt
   );
 
   PageContext& m_page;

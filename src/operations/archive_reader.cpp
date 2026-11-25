@@ -256,10 +256,12 @@ namespace {
     const auto initialCount = reader.work.count;
     bool nativeCatalog = false;
     const auto add = [&](ArchiveEntry entry) {
-      metadata += entry.path.size() + entry.link.size() + entry.name.size();
-      if (metadata > reader.work.limits.maxMetadataBytes || result->entries.size() >= reader.work.limits.maxEntries) {
+      const auto bytes = entry.path.size() + entry.link.size() + entry.name.size();
+      if (bytes > reader.work.limits.maxMetadataBytes - metadata
+          || result->entries.size() >= reader.work.limits.maxEntries) {
         throwFileError(FileErrorKind::Unsupported, "Archive contents exceed the metadata limit.");
       }
+      metadata += bytes;
       entry.displayName = filenameDisplayText(entry.name);
       known.emplace(entry.path, result->entries.size());
       result->entries.push_back(std::move(entry));
@@ -328,6 +330,24 @@ namespace {
         }
         entry.size = static_cast<std::uint64_t>(size);
         reader.work.account(*entry.size);
+        const auto extents = archive_entry_sparse_reset(header);
+        if (extents > 0) {
+          entry.dataBytes = 0;
+          std::uint64_t end = 0;
+          for (int i = 0; i < extents; ++i) {
+            la_int64_t offset = 0, length = 0;
+            if (archive_entry_sparse_next(header, &offset, &length) != ARCHIVE_OK
+                || offset < 0
+                || length < 0
+                || static_cast<std::uint64_t>(offset) < end
+                || static_cast<std::uint64_t>(offset) > *entry.size
+                || static_cast<std::uint64_t>(length) > *entry.size - static_cast<std::uint64_t>(offset)) {
+              throwFileError(FileErrorKind::InvalidArgument, "Archive contains invalid sparse file extents.");
+            }
+            *entry.dataBytes += static_cast<std::uint64_t>(length);
+            end = static_cast<std::uint64_t>(offset) + static_cast<std::uint64_t>(length);
+          }
+        }
       }
       if (explicitNames.contains(path) && entry.kind != ArchiveEntryKind::Directory) {
         throwFileError(FileErrorKind::InvalidArgument, "Archive contains duplicate file names.");
@@ -408,6 +428,7 @@ namespace {
       requireArchive(status, reader.value.get(), reader.work);
       if (offset < 0
           || static_cast<std::uint64_t>(offset) < end
+          || size > static_cast<std::uint64_t>(INT64_MAX) - static_cast<std::uint64_t>(offset)
           || static_cast<std::uint64_t>(offset) > reader.work.limits.maxExpandedBytes
           || size > reader.work.limits.maxExpandedBytes - static_cast<std::uint64_t>(offset)) {
         throwFileError(FileErrorKind::Unsupported, "Archive data exceeds its output limit.");
@@ -435,12 +456,14 @@ namespace {
     }
     const auto length = expected.value_or(end);
     if (length < end
+        || length > static_cast<std::uint64_t>(INT64_MAX)
         || length > reader.work.limits.maxExpandedBytes
         || length - end > reader.work.limits.maxExpandedBytes - total) {
       throwFileError(FileErrorKind::Unsupported, "Archive file size is inconsistent or exceeds the output limit.");
     }
     total += length - end;
-    if (::ftruncate(output, static_cast<off_t>(length)) != 0 || ::fsync(output) != 0) {
+    // Private extraction data uses buffered writes; the caller checks close before publication.
+    if (::ftruncate(output, static_cast<off_t>(length)) != 0) {
       systemError("Could not finish extracted data");
     }
   }
@@ -470,13 +493,20 @@ namespace {
       nameBytes += path.size() + 1;
       names.push_back(path);
     }
-    // Huge selections would exceed argv limits; the whole archive is already within the catalog budget.
+    // Huge selections would exceed argv limits, so the provider temporarily extracts the whole archive.
     if (nameBytes > 128U * 1024U) {
       names.clear();
+      std::uint64_t temporaryBytes = 0;
       for (const auto& entry : catalog) {
+        const auto bytes = entry.size.value_or(0);
+        if (bytes > UINT64_MAX - temporaryBytes) {
+          throwFileError(FileErrorKind::Unsupported, "Archive storage size exceeds the supported range.");
+        }
+        temporaryBytes += bytes;
         largest = std::max(largest, entry.size.value_or(0));
         encrypted = encrypted || entry.encrypted;
       }
+      requireSpace(data, temporaryBytes);
     }
     const auto directory = (fs::path(stage) / ".7z").native();
     extractSevenZip(reader.input, work, passwords, names, encrypted, largest, directory);
@@ -608,6 +638,36 @@ luciole::archive_work::Prepared luciole::archive_work::extract(
       bodies.insert(body(path));
     }
   }
+  const auto dataSize = [&](const std::string& path) {
+    const auto& entry = contents->entries[entries.at(path)];
+    return entry.dataBytes.value_or(entry.size.value_or(0));
+  };
+  const auto addSize = [](std::uint64_t& total, std::uint64_t bytes) {
+    if (bytes > UINT64_MAX - total) {
+      throwFileError(FileErrorKind::Unsupported, "Archive storage size exceeds the supported range.");
+    }
+    total += bytes;
+  };
+  std::uint64_t stagingBytes = 0;
+  for (const auto& path : bodies) {
+    addSize(stagingBytes, dataSize(path));
+  }
+  requireSpace(data.get(), stagingBytes);
+  if (!open) {
+    const auto parent = opened(::open(destinationParts(destination).first.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC));
+    auto destinationBytes = stagingBytes;
+    if (statFd(parent.get()).st_dev != statFd(data.get()).st_dev) {
+      // Cross-filesystem copies may expand holes and copy hard-link aliases independently.
+      destinationBytes = 0;
+      for (const auto& path : wanted) {
+        const auto& entry = contents->entries[entries.at(path)];
+        if (entry.kind == ArchiveEntryKind::File || entry.kind == ArchiveEntryKind::Hardlink) {
+          addSize(destinationBytes, contents->entries[entries.at(body(path))].size.value_or(0));
+        }
+      }
+    }
+    requireSpace(parent.get(), destinationBytes);
+  }
   std::uint64_t total = 0;
   std::map<std::string, std::uint64_t> bodySizes;
   const auto publish = [&](const std::string& path, int output) {
@@ -632,7 +692,7 @@ luciole::archive_work::Prepared luciole::archive_work::extract(
       const auto path = safePath(bounded(archive_entry_pathname(header)), work);
       if (bodies.contains(path)) {
         const auto& entry = contents->entries[entries.at(path)];
-        const auto output = opened(
+        auto output = opened(
             ::openat(
                 data.get(), std::to_string(entries.at(path)).c_str(),
                 O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600
@@ -641,6 +701,9 @@ luciole::archive_work::Prepared luciole::archive_work::extract(
         extractData(reader, output.get(), total, entry.size);
         bodySizes.emplace(path, static_cast<std::uint64_t>(statFd(output.get()).st_size));
         publish(path, output.get());
+        if (output.close() != 0) {
+          systemError("Could not close extracted data");
+        }
       } else {
         reader.skip();
       }

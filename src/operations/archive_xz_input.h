@@ -6,7 +6,7 @@
 #include <lzma.h>
 
 namespace luciole::archive_work {
-  // Decode outside libarchive, whose native XZ filter has no memory-limit API.
+  // Decode outside libarchive to validate concatenated frames, integrity checks and trailing padding.
   // Only TAR consumes this stream. Source identity remains owned by Input.
   class XzInput {
   public:

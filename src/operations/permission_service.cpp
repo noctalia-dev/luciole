@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/cancel_token.h"
+#include "fs/system_mounts.h"
 #include "operations/permission_jobs.h"
 #include "operations/permission_target.h"
 
@@ -50,6 +51,16 @@ namespace {
     if (snapshot.info && unavailable > 0) {
       snapshot.info->reason += std::format(" {} items cannot be edited; see Results for details.", unavailable);
     }
+  }
+  // Holds the automounts of the prepared targets for the job's duration.
+  std::vector<Fd> openBatchMounts(const PermissionBatch& batch, const CancelToken& token) {
+    std::vector<Location> locations;
+    for (std::size_t i = 0; i < batch.targets.size(); ++i) {
+      if (batch.targets[i]) {
+        locations.push_back((*batch.results)[i].location);
+      }
+    }
+    return openSystemMounts(locations, token, false);
   }
 } // namespace
 
@@ -178,6 +189,7 @@ bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
         for (std::size_t i = 0; i < entries.size() && !token.cancelled(); ++i) {
           auto& row = (*bulk->results)[i];
           try {
+            const auto mount = openSystemMount(entries[i].location(), token, false);
             auto target = preparePermissionTarget(entries[i], false);
             target->loadAcl(true);
             row.info = target->inspect();
@@ -185,6 +197,9 @@ bool luciole::PermissionService::prepare(std::vector<DirectoryEntry> entries) {
             row.message = row.info->reason;
             bulk->targets[i] = std::move(target);
           } catch (const std::exception&) {
+            if (token.cancelled()) {
+              break;
+            }
             row.outcome = PermissionOutcome::Failed;
             row.error = currentFileError();
             row.message.clear();
@@ -209,6 +224,7 @@ bool luciole::PermissionService::prepareEntry(DirectoryEntry entry, bool capture
   State::launch(
       m_state,
       [entry = std::move(entry), captureCurrentLocation](const CancelToken& token) {
+        const auto mount = openSystemMount(entry.location(), token, false);
         auto target = preparePermissionTarget(entry, captureCurrentLocation);
         if (token.cancelled()) {
           return Reply{};
@@ -245,6 +261,7 @@ bool luciole::PermissionService::apply(PermissionEdit edit) {
     State::launch(
         m_state,
         [owner = m_state, bulk = m_state->bulk, edit = std::move(edit)](const CancelToken& token) {
+          const auto mounts = openBatchMounts(*bulk, token);
           return applyBulkPermissionEdit(bulk, edit, token, owner->completed);
         },
         true
@@ -254,6 +271,7 @@ bool luciole::PermissionService::apply(PermissionEdit edit) {
   State::launch(
       m_state,
       [target = m_state->target, edit = std::move(edit)](const CancelToken& token) {
+        const auto mount = openSystemMount(target->entry.location(), token, false);
         return applyPermissionEdit(target, edit, token);
       },
       true
@@ -292,6 +310,7 @@ bool luciole::PermissionService::applyRecursive(RecursivePermissionEdit edit) {
   State::launch(
       m_state,
       [owner = m_state, roots, edit = std::move(edit)](const CancelToken& token) {
+        const auto mounts = openBatchMounts(*roots, token);
         return applyRecursivePermissionEdit(roots, edit, token, owner->completed, owner->total, owner->collecting);
       },
       true
@@ -308,6 +327,7 @@ bool luciole::PermissionService::applyAcl(AclEdit edit) {
   State::launch(
       m_state,
       [target = m_state->target, edit = std::move(edit)](const CancelToken& token) {
+        const auto mount = openSystemMount(target->entry.location(), token, false);
         return applyAclEdit(target, edit, token);
       },
       true
@@ -329,6 +349,7 @@ bool luciole::PermissionService::applyAclPatch(AclPatchEdit edit) {
   State::launch(
       m_state,
       [owner = m_state, bulk = m_state->bulk, edit = std::move(edit)](const CancelToken& token) {
+        const auto mounts = openBatchMounts(*bulk, token);
         return applyBulkAclPatch(bulk, edit, token, owner->completed);
       },
       true

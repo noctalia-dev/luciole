@@ -10,8 +10,6 @@
 #include <unistd.h>
 
 namespace {
-  constexpr unsigned maxParts = 128;
-  constexpr std::size_t maxFolderEntries = 200000;
   struct CloseDirectory {
     void operator()(DIR* value) const { ::closedir(value); }
   };
@@ -30,7 +28,6 @@ std::vector<std::string> luciole::archive_work::Input::discover() const {
     systemError("Could not inspect split ZIP parts");
   }
   std::set<unsigned> numbers;
-  std::size_t visited = 0;
   for (;;) {
     m_work.check();
     errno = 0;
@@ -41,9 +38,6 @@ std::vector<std::string> luciole::archive_work::Input::discover() const {
       }
       break;
     }
-    if (++visited > maxFolderEntries) {
-      throwFileError(FileErrorKind::Unsupported, "The folder is too large to identify split ZIP parts.");
-    }
     const std::string_view name(entry->d_name);
     if (!name.starts_with(m_prefix) || name.size() != m_prefix.size() + 3) {
       continue;
@@ -53,8 +47,8 @@ std::vector<std::string> luciole::archive_work::Input::discover() const {
       continue;
     }
     const auto index = static_cast<unsigned>((suffix[0] - '0') * 100 + (suffix[1] - '0') * 10 + suffix[2] - '0');
-    if (!index || index > maxParts) {
-      throwFileError(FileErrorKind::Unsupported, "Split ZIP input supports parts 001 through 128 only.");
+    if (!index) {
+      throwFileError(FileErrorKind::InvalidArgument, "Split ZIP parts start at 001.");
     }
     numbers.insert(index);
   }

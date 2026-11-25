@@ -28,11 +28,9 @@ namespace {
     if (::prctl(PR_SET_PDEATHSIG, SIGKILL) < 0 || ::getppid() != limits.parent || ::setsid() < 0) {
       ::_exit(1);
     }
-    const rlimit cpu{limits.seconds, limits.seconds}, memory{768U * 1024U * 1024U, 768U * 1024U * 1024U},
-        file{limits.fileBytes, limits.fileBytes}, core{0, 0};
-    // The 7-Zip CLI is outside ASan; bound its address space and written files.
-    if (::setrlimit(RLIMIT_CPU, &cpu) < 0
-        || ::setrlimit(RLIMIT_AS, &memory) < 0
+    const rlimit cpu{limits.seconds, limits.seconds}, file{limits.fileBytes, limits.fileBytes}, core{0, 0};
+    // Preserve inherited resource policy; only bound payloads by their validated sizes and explicit deadlines.
+    if ((limits.seconds != RLIM_INFINITY && ::setrlimit(RLIMIT_CPU, &cpu) < 0)
         || ::setrlimit(RLIMIT_FSIZE, &file) < 0
         || ::setrlimit(RLIMIT_CORE, &core) < 0) {
       ::_exit(1);
@@ -126,7 +124,12 @@ namespace {
     );
     std::thread watchdog([&] {
       std::unique_lock lock(state.mutex);
-      state.condition.wait_until(lock, work.deadline, [&] { return state.finished || state.cancelled; });
+      const auto done = [&] { return state.finished || state.cancelled; };
+      if (work.deadline == Clock::time_point::max()) {
+        state.condition.wait(lock, done);
+      } else {
+        state.condition.wait_until(lock, work.deadline, done);
+      }
       if (!state.finished) {
         g_subprocess_force_exit(child.process.get());
       }
@@ -183,10 +186,12 @@ int luciole::archive_work::runArchiveProvider(
     systemError("Could not pass the held archive source");
   }
   g_subprocess_launcher_take_fd(launcher.get(), descriptor, 3);
-  const auto remaining = std::chrono::duration_cast<std::chrono::seconds>(work.deadline - Clock::now()).count();
-  Limits limits{
-      ::getpid(), static_cast<rlim_t>(fileLimit), static_cast<rlim_t>(std::max<std::int64_t>(1, remaining + 1))
-  };
+  rlim_t seconds = RLIM_INFINITY;
+  if (work.deadline != Clock::time_point::max()) {
+    const auto remaining = std::chrono::duration_cast<std::chrono::seconds>(work.deadline - Clock::now()).count();
+    seconds = static_cast<rlim_t>(std::max<std::int64_t>(1, remaining + 1));
+  }
+  Limits limits{::getpid(), static_cast<rlim_t>(fileLimit), seconds};
   g_subprocess_launcher_set_child_setup(launcher.get(), childSetup, &limits, nullptr);
   Child child{GioPtr<GSubprocess>(g_subprocess_launcher_spawnv(launcher.get(), argv.data(), nullptr))};
   if (!child.process) {

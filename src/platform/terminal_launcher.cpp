@@ -1,10 +1,12 @@
 #include "platform/terminal_launcher.h"
 
+#include "fs/cancel_token.h"
 #include "fs/gio_interop.h"
+#include "fs/system_mounts.h"
 #include "platform/terminal_command.h"
 
 struct luciole::TerminalLauncher::State {
-  GioPtr<GCancellable> cancellable{g_cancellable_new()};
+  CancelToken token;
   std::string command;
   bool initialized = false, available = false;
   bool active = true;
@@ -12,7 +14,7 @@ struct luciole::TerminalLauncher::State {
 luciole::TerminalLauncher::TerminalLauncher() : m_state(std::make_shared<State>()) { setCommand({}); }
 luciole::TerminalLauncher::~TerminalLauncher() {
   m_state->active = false;
-  g_cancellable_cancel(m_state->cancellable.get());
+  m_state->token.cancel();
 }
 void luciole::TerminalLauncher::setCommand(std::string command) {
   if (m_state->initialized && m_state->command == command) {
@@ -33,10 +35,11 @@ void luciole::TerminalLauncher::open(const Location& folder, std::function<void(
     Location folder;
     std::string command;
     bool available;
+    CancelToken token;
     std::function<void(std::string)> completed;
   };
   GTask* task = g_task_new(
-      nullptr, m_state->cancellable.get(),
+      nullptr, gioCancellable(m_state->token),
       [](GObject*, GAsyncResult* result, gpointer) {
         auto& request = *static_cast<Request*>(g_task_get_task_data(G_TASK(result)));
         GError* error = nullptr;
@@ -53,7 +56,7 @@ void luciole::TerminalLauncher::open(const Location& folder, std::function<void(
         }
         auto* wait = new Request(request);
         g_subprocess_wait_check_async(
-            process.get(), request.state->cancellable.get(),
+            process.get(), gioCancellable(request.state->token),
             [](GObject* source, GAsyncResult* result, gpointer data) {
               const std::unique_ptr<Request> request(static_cast<Request*>(data));
               GError* error = nullptr;
@@ -70,7 +73,7 @@ void luciole::TerminalLauncher::open(const Location& folder, std::function<void(
       nullptr
   );
   g_task_set_task_data(
-      task, new Request{m_state, folder, m_state->command, m_state->available, std::move(completed)},
+      task, new Request{m_state, folder, m_state->command, m_state->available, m_state->token, std::move(completed)},
       [](gpointer data) { delete static_cast<Request*>(data); }
   );
   g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
@@ -86,6 +89,13 @@ void luciole::TerminalLauncher::open(const Location& folder, std::function<void(
       g_task_return_new_error(
           task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Open Terminal Here requires a native folder."
       );
+      return;
+    }
+    Fd mount;
+    try {
+      mount = openSystemMount(request.folder, request.token);
+    } catch (const FileErrorException& failure) {
+      g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "%s", failure.what());
       return;
     }
     GError* error = nullptr;

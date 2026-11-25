@@ -4,6 +4,12 @@
 #include "fs/gio_interop.h"
 #include "fs/location_mount.h"
 #include "fs/system_mounts.h"
+#include "operations/archive_service.h"
+#include "operations/create_service.h"
+#include "operations/empty_trash_service.h"
+#include "operations/permission_service.h"
+#include "operations/transfer_service.h"
+#include "platform/terminal_launcher.h"
 #include "test_check.h"
 
 #include <algorithm>
@@ -15,6 +21,7 @@
 #include <optional>
 #include <print>
 #include <source_location>
+#include <sys/stat.h>
 
 namespace {
   using namespace std::chrono_literals;
@@ -54,6 +61,10 @@ namespace {
     TEST_CHECK(luciole::sameMountSource("nas:/", "nas://"));
     TEST_CHECK(luciole::sameMountSource("//nas/share/", "//nas/share"));
     TEST_CHECK(!luciole::sameMountSource("nas:/", "nas:/export"));
+    TEST_CHECK(luciole::bindMount("/Desktop", "rw,relatime"));
+    TEST_CHECK(luciole::bindMount("/@home/kasey/Desktop", "rw,subvol=/@home"));
+    TEST_CHECK(!luciole::bindMount("/@games", "rw,subvolid=257,subvol=/@games"));
+    TEST_CHECK(!luciole::bindMount("/", "rw,relatime"));
     const std::vector<MountConfiguration> trailingList{trailing};
     const std::vector<MountConfiguration> native{
         {.path = "/media/test/NFS share", .source = "nas:/export", .type = "nfs4", .options = "rw", .automount = true}
@@ -246,6 +257,315 @@ namespace {
     std::filesystem::remove_all(root);
   }
 
+  void testInactiveAutomountRefusesFileJobsAndTerminal() {
+    const luciole::GString directory(g_dir_make_tmp("luciole-automount-jobs-XXXXXX", nullptr));
+    TEST_CHECK(directory != nullptr);
+    const std::filesystem::path root(directory.get());
+    const auto mount = root / "share";
+    const auto local = root / "local.txt";
+    std::filesystem::create_directory(mount);
+    std::ofstream(local) << "source";
+    TEST_CHECK(!luciole::openSystemMount(luciole::Location::fromPath(local.native()), {}).valid());
+    TEST_CHECK(luciole::openSystemMounts(std::vector{luciole::Location::fromPath(local.native())}, {}).empty());
+    luciole::publishNativeMounts(
+        {{.path = mount.native(),
+          .source = "unreachable.invalid:/export",
+          .type = "nfs",
+          .options = "",
+          .automount = true}}
+    );
+    const auto target = luciole::Location::fromPath(mount.native());
+    luciole::TransferService transfer;
+    TEST_CHECK(transfer.start({{luciole::Location::fromPath(local.native())}, target, luciole::TransferAction::Copy}));
+    pumpUntil([&] { return !transfer.busy(); });
+    TEST_CHECK(
+        transfer.results().size() == 1
+        && transfer.results().front().outcome == luciole::TransferOutcome::Failed
+        && transfer.results().front().error->kind == luciole::FileErrorKind::NotMounted
+    );
+    TEST_CHECK(!std::filesystem::exists(mount / "local.txt"));
+
+    luciole::CreateService creator;
+    TEST_CHECK(creator.prepare(target, luciole::CreateKind::Folder));
+    pumpUntil([&] { return !creator.busy(); });
+    TEST_CHECK(
+        creator.snapshot().status == luciole::CreateStatus::Error
+        && creator.snapshot().error->kind == luciole::FileErrorKind::NotMounted
+    );
+
+    luciole::TerminalLauncher terminal;
+    terminal.setCommand("/usr/bin/true");
+    TEST_CHECK(terminal.available());
+    std::optional<std::string> terminalError;
+    terminal.open(target, [&](std::string message) { terminalError = std::move(message); });
+    pumpUntil([&] { return terminalError.has_value(); });
+    TEST_CHECK(*terminalError == "The system automount at " + mount.native() + " is unavailable.");
+
+    // Permanent deletion refuses a parent folder containing a configured automount without touching child files.
+    const auto underlying = mount / "underlying.txt";
+    std::ofstream(underlying) << "keep";
+    const auto config = luciole::configuredSystemMounts();
+    TEST_CHECK(luciole::automountInside(luciole::Location::fromPath(root.native()), config).has_value());
+    const auto rootLink = root.parent_path() / (root.filename().native() + "-link");
+    std::filesystem::create_directory_symlink(root, rootLink);
+    TEST_CHECK(!luciole::automountInside(luciole::Location::fromPath(rootLink.native()), config).has_value());
+    {
+      luciole::DirectorySession parentSession;
+      parentSession.open(luciole::Location::fromPath(root.parent_path().native()));
+      pumpUntil([&] { return parentSession.snapshot().status == luciole::DirectoryStatus::Ready; });
+      const auto rootEntry =
+          std::ranges::find(parentSession.snapshot().entries, root.filename().native(), [](const auto& e) {
+            return e.name;
+          });
+      TEST_CHECK(rootEntry != parentSession.snapshot().entries.end());
+      luciole::EmptyTrashService prepared;
+      TEST_CHECK(prepared.prepareDeletion({*rootEntry}));
+      pumpUntil([&] { return !prepared.busy(); });
+      TEST_CHECK(
+          prepared.snapshot().status == luciole::EmptyTrashStatus::Ready
+          && prepared.snapshot().size == 0
+          && prepared.snapshot().sizeIncomplete
+      );
+      luciole::EmptyTrashService deleter;
+      TEST_CHECK(deleter.deleteSelection({*rootEntry}));
+      pumpUntil([&] { return deleter.snapshot().status == luciole::EmptyTrashStatus::Finished; });
+      TEST_CHECK(
+          deleter.snapshot().results.size() == 1
+          && deleter.snapshot().results.front().outcome == luciole::EmptyTrashOutcome::Failed
+          && deleter.snapshot().results.front().error->kind == luciole::FileErrorKind::NotMounted
+      );
+      TEST_CHECK(std::filesystem::exists(underlying));
+    }
+    std::filesystem::remove(rootLink);
+
+    // Bulk permission inspection keeps per-item results when one entry sits on a stopped automount.
+    {
+      luciole::DirectorySession rootSession;
+      rootSession.open(luciole::Location::fromPath(root.native()));
+      pumpUntil([&] { return rootSession.snapshot().status == luciole::DirectoryStatus::Ready; });
+      std::vector<luciole::DirectoryEntry> pair;
+      for (const auto& entry : rootSession.snapshot().entries) {
+        if (entry.name == "local.txt" || entry.name == "share") {
+          pair.push_back(entry);
+        }
+      }
+      TEST_CHECK(pair.size() == 2);
+      luciole::PermissionService permissions;
+      TEST_CHECK(permissions.prepare(pair));
+      pumpUntil([&] { return !permissions.busy(); });
+      TEST_CHECK(permissions.snapshot().phase == luciole::PermissionPhase::Ready);
+      TEST_CHECK(permissions.snapshot().results && permissions.snapshot().results->size() == 2);
+      const auto byName = [&](std::string_view name) {
+        return std::ranges::find_if(*permissions.snapshot().results, [&](const auto& row) {
+          return row.location.basename() == name;
+        });
+      };
+      TEST_CHECK(byName("local.txt")->outcome == luciole::PermissionOutcome::Ready);
+      TEST_CHECK(byName("share")->outcome == luciole::PermissionOutcome::Failed);
+      TEST_CHECK(byName("share")->error && byName("share")->error->kind == luciole::FileErrorKind::NotMounted);
+    }
+
+    // Retrying a partial transfer preserves completed outcomes and retryability when a pending source's mount stops.
+    {
+      const auto dest = root / "dest";
+      std::filesystem::create_directory(dest);
+      // A FIFO fails transfer even when tests run as root in CI containers.
+      const auto retryFile = mount / "retry.fifo";
+      TEST_CHECK(::mkfifo(retryFile.c_str(), 0600) == 0);
+      luciole::publishNativeMounts({});
+      luciole::TransferService partial;
+      TEST_CHECK(partial.start(
+          {{luciole::Location::fromPath(local.native()), luciole::Location::fromPath(retryFile.native())},
+           luciole::Location::fromPath(dest.native()),
+           luciole::TransferAction::Copy}
+      ));
+      pumpUntil([&] { return !partial.busy(); });
+      TEST_CHECK(partial.results().size() == 2);
+      TEST_CHECK(partial.results()[0].outcome == luciole::TransferOutcome::Copied);
+      TEST_CHECK(partial.results()[1].outcome == luciole::TransferOutcome::Failed);
+      TEST_CHECK(partial.retryable() > 0);
+
+      luciole::publishNativeMounts(
+          {{.path = mount.native(),
+            .source = "unreachable.invalid:/export",
+            .type = "nfs",
+            .options = "",
+            .automount = true}}
+      );
+      TEST_CHECK(partial.retryFailed());
+      pumpUntil([&] { return !partial.busy(); });
+      TEST_CHECK(partial.results().size() == 2);
+      TEST_CHECK(partial.results()[0].outcome == luciole::TransferOutcome::Copied);
+      TEST_CHECK(
+          partial.results()[1].outcome == luciole::TransferOutcome::Failed
+          && partial.results()[1].error->kind == luciole::FileErrorKind::NotMounted
+      );
+      TEST_CHECK(partial.retryable() > 0);
+    }
+
+    // Archive compression preserves a local symlink to a stopped automount, and refuses a parent containing one.
+    {
+      const auto shareLink = root / "share-link";
+      std::filesystem::create_directory_symlink(mount, shareLink);
+      const auto linkTar = root / "link.tar";
+      luciole::ArchiveService linkArchive;
+      TEST_CHECK(linkArchive.compress(
+          {luciole::Location::fromPath(shareLink.native())}, luciole::Location::fromPath(linkTar.native()),
+          luciole::ArchiveFormat::Tar
+      ));
+      pumpUntil([&] { return !linkArchive.busy(); });
+      TEST_CHECK(!linkArchive.error() && std::filesystem::exists(linkTar));
+
+      const auto parentTar = root.parent_path() / (root.filename().native() + "-parent.tar");
+      luciole::ArchiveService parentArchive;
+      TEST_CHECK(parentArchive.compress(
+          {luciole::Location::fromPath(root.native())}, luciole::Location::fromPath(parentTar.native()),
+          luciole::ArchiveFormat::Tar
+      ));
+      pumpUntil([&] { return !parentArchive.busy(); });
+      TEST_CHECK(
+          parentArchive.error()
+          && parentArchive.error()->kind == luciole::FileErrorKind::NotMounted
+          && !std::filesystem::exists(parentTar)
+      );
+      std::filesystem::remove(linkTar);
+      std::filesystem::remove(shareLink);
+    }
+
+    // Recursive transfers refuse a parent source or destination child sitting on a stopped automount.
+    {
+      const auto outDir = root.parent_path() / (root.filename().native() + "-copy-out");
+      std::filesystem::create_directory(outDir);
+      luciole::TransferService copyParent;
+      TEST_CHECK(copyParent.start(
+          {{luciole::Location::fromPath(root.native())},
+           luciole::Location::fromPath(outDir.native()),
+           luciole::TransferAction::Copy}
+      ));
+      pumpUntil([&] { return !copyParent.busy(); });
+      TEST_CHECK(
+          copyParent.results().size() == 1
+          && copyParent.results().front().outcome == luciole::TransferOutcome::Failed
+          && copyParent.results().front().error->kind == luciole::FileErrorKind::NotMounted
+          && !std::filesystem::exists(outDir / root.filename())
+      );
+
+      const auto incomingShare = outDir / "share";
+      std::filesystem::create_directory(incomingShare);
+      std::ofstream(incomingShare / "incoming.txt") << "new";
+      luciole::TransferService copyOntoMount;
+      TEST_CHECK(copyOntoMount.start(
+          {{luciole::Location::fromPath(incomingShare.native())},
+           luciole::Location::fromPath(root.native()),
+           luciole::TransferAction::Copy}
+      ));
+      pumpUntil([&] { return !copyOntoMount.busy(); });
+      TEST_CHECK(
+          copyOntoMount.results().size() == 1
+          && copyOntoMount.results().front().outcome == luciole::TransferOutcome::Failed
+          && copyOntoMount.results().front().error->kind == luciole::FileErrorKind::NotMounted
+          && !std::filesystem::exists(mount / "incoming.txt")
+      );
+      std::filesystem::remove_all(outDir);
+    }
+
+    // Recursive permission edits skip a stopped automount subtree and leave its underlying files untouched.
+    {
+      TEST_CHECK(::chmod(local.c_str(), 0600) == 0);
+      TEST_CHECK(::chmod(underlying.c_str(), 0600) == 0);
+      luciole::DirectorySession parentSession;
+      parentSession.open(luciole::Location::fromPath(root.parent_path().native()));
+      pumpUntil([&] { return parentSession.snapshot().status == luciole::DirectoryStatus::Ready; });
+      const auto rootEntry =
+          std::ranges::find(parentSession.snapshot().entries, root.filename().native(), [](const auto& e) {
+            return e.name;
+          });
+      TEST_CHECK(rootEntry != parentSession.snapshot().entries.end());
+      luciole::PermissionService recursive;
+      TEST_CHECK(recursive.prepare(*rootEntry));
+      pumpUntil([&] { return !recursive.busy(); });
+      TEST_CHECK(recursive.applyRecursive(
+          {.files = {.mode = 0644, .owner = {}, .group = {}, .mask = 0777}, .directoryMode = {}, .directoryMask = 0}
+      ));
+      pumpUntil([&] { return !recursive.busy(); });
+      struct stat localStat{};
+      struct stat underlyingStat{};
+      TEST_CHECK(::lstat(local.c_str(), &localStat) == 0 && (localStat.st_mode & 0777) == 0644);
+      TEST_CHECK(::lstat(underlying.c_str(), &underlyingStat) == 0 && (underlyingStat.st_mode & 0777) == 0600);
+      TEST_CHECK(recursive.snapshot().results != nullptr);
+      const auto mountRow =
+          std::ranges::find_if(*recursive.snapshot().results, [&](const auto& row) { return row.location == target; });
+      TEST_CHECK(
+          mountRow != recursive.snapshot().results->end() && mountRow->outcome == luciole::PermissionOutcome::Skipped
+      );
+    }
+
+    // Retrying a partially completed folder merge keeps Partial on the parent when the mount stops.
+    {
+      const auto mergeSrc = mount / "tree";
+      const auto mergeDst = root / "merge-dest";
+      std::filesystem::create_directories(mergeSrc);
+      std::filesystem::create_directories(mergeDst / "tree");
+      std::ofstream(mergeSrc / "a-done.txt") << "copied";
+      TEST_CHECK(::mkfifo((mergeSrc / "z-fail.fifo").c_str(), 0600) == 0);
+      luciole::publishNativeMounts({});
+      luciole::TransferService merge;
+      TEST_CHECK(merge.start(
+          {{luciole::Location::fromPath(mergeSrc.native())},
+           luciole::Location::fromPath(mergeDst.native()),
+           luciole::TransferAction::Copy,
+           true}
+      ));
+      std::uint64_t handled = 0;
+      pumpUntil([&] {
+        if (const auto conflict = merge.conflict(); conflict && conflict->id != handled) {
+          handled = conflict->id;
+          TEST_CHECK(merge.resolve(conflict->id, luciole::TransferConflictChoice::Merge));
+        }
+        return !merge.busy();
+      });
+      TEST_CHECK(
+          merge.results().size() == 1
+          && merge.results().front().outcome == luciole::TransferOutcome::Partial
+          && merge.retryable() == 1
+          && std::filesystem::exists(mergeDst / "tree" / "a-done.txt")
+      );
+      luciole::publishNativeMounts(
+          {{.path = mount.native(),
+            .source = "unreachable.invalid:/export",
+            .type = "nfs",
+            .options = "",
+            .automount = true}}
+      );
+      TEST_CHECK(merge.retryFailed());
+      pumpUntil([&] { return !merge.busy(); });
+      TEST_CHECK(
+          merge.results().size() == 1
+          && merge.results().front().outcome == luciole::TransferOutcome::Partial
+          && merge.results().front().error
+          && merge.results().front().error->kind == luciole::FileErrorKind::NotMounted
+          && merge.retryable() == 1
+      );
+      const auto& children = merge.results().front().children;
+      const auto childByName = [&](std::string_view name) {
+        return std::ranges::find_if(children, [&](const auto& row) { return row.source.basename() == name; });
+      };
+      TEST_CHECK(
+          childByName("a-done.txt") != children.end()
+          && childByName("a-done.txt")->outcome == luciole::TransferOutcome::Copied
+      );
+      TEST_CHECK(
+          childByName("z-fail.fifo") != children.end()
+          && childByName("z-fail.fifo")->outcome == luciole::TransferOutcome::Failed
+          && childByName("z-fail.fifo")->error
+          && childByName("z-fail.fifo")->error->kind == luciole::FileErrorKind::NotMounted
+      );
+    }
+
+    luciole::publishNativeMounts({});
+    std::filesystem::remove_all(root);
+  }
+
   void integration(std::string_view mode, const std::string& path) {
     const bool manual = mode.starts_with("--manual");
     const auto target = luciole::Location::fromPath(path);
@@ -266,6 +586,16 @@ namespace {
           },
           15s
       );
+    }
+    if (mode == "--terminal-stopped") {
+      luciole::TerminalLauncher terminal;
+      terminal.setCommand("/usr/bin/true");
+      TEST_CHECK(terminal.available());
+      std::optional<std::string> error;
+      terminal.open(target, [&](std::string message) { error = std::move(message); });
+      pumpUntil([&] { return error.has_value(); }, 15s);
+      TEST_CHECK(*error == "The system automount at " + path + " is unavailable.");
+      return;
     }
     if (mode == "--inspect-idle") {
       TEST_CHECK(!drives.find(key)->root);
@@ -348,6 +678,7 @@ int main(int argc, char* argv[]) {
     const std::string_view mode(argv[1]);
     TEST_CHECK(
         mode == "--browse"
+        || mode == "--terminal-stopped"
         || mode == "--inspect-idle"
         || mode == "--browse-error"
         || mode == "--wait-inactive"
@@ -363,5 +694,6 @@ int main(int argc, char* argv[]) {
   testInactiveAutomountDoesNotBrowseUnderlyingDirectory();
   testParentListingDoesNotReadAutomountDirectoryFile();
   testFstabMountReportsHelperError();
+  testInactiveAutomountRefusesFileJobsAndTerminal();
   std::println("system mount tests passed");
 }

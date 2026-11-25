@@ -1,6 +1,7 @@
 #include "operations/archive_service.h"
 
 #include "fs/background_job.h"
+#include "fs/system_mounts.h"
 #include "operations/archive_icons.h"
 #include "operations/archive_work.h"
 
@@ -218,6 +219,12 @@ struct luciole::ArchiveService::State : std::enable_shared_from_this<State> {
     // progress outlives the work: the done callback holds the state until after the work returns.
     runJob<archive_work::Prepared>(
         [limits = limits, progress = &progress, token = cancel, task] {
+          const auto sourceMounts = openSystemMounts(task.sources, token, false);
+          const auto nestedSourceMounts =
+              task.operation == Operation::Compress ? openSystemMountsInside(task.sources, token) : std::vector<Fd>{};
+          const auto destinationParent =
+              task.operation != Operation::Open && task.destination ? task.destination->parent() : std::nullopt;
+          const auto destinationMount = destinationParent ? openSystemMount(*destinationParent, token, true) : Fd{};
           if (task.operation == Operation::Inspect) {
             auto prepared = archive_work::inspect(task.sources.front(), limits, token, *progress, *task.passwords);
             assignArchiveIcons(*prepared.catalog);

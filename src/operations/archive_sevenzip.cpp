@@ -5,6 +5,7 @@
 
 #include <charconv>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <ranges>
 #include <sys/mman.h>
@@ -184,7 +185,10 @@ luciole::archive_work::sevenZipCatalog(Input& input, Work& work, const Passwords
   if (work.limits.maxMetadataBytes < 32 || work.limits.maxEntries == 0) {
     throwFileError(FileErrorKind::Unsupported, "The 7z catalog exceeds its metadata limit.");
   }
-  const auto outputLimit = work.limits.maxMetadataBytes + work.limits.maxEntries * recordBytes;
+  const auto maximum = std::numeric_limits<std::uint64_t>::max();
+  const auto outputLimit = work.limits.maxEntries > (maximum - work.limits.maxMetadataBytes) / recordBytes
+      ? maximum
+      : work.limits.maxMetadataBytes + work.limits.maxEntries * recordBytes;
   const std::vector<std::string> arguments{"l", "-slt", "-ba", "-t7z", "-bsp0", "-bse1", "/proc/self/fd/3"};
   for (const auto password : attempts(passwords)) {
     work.check();

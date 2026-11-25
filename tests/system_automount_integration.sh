@@ -84,6 +84,7 @@ wait "$native_check_pid"
 systemctl stop "$generated_auto" "$generated_mount"
 printf 'underlying local directory\n' > "$generated/underlying-file"
 browse --browse-error "$generated"
+browse --terminal-stopped "$generated"
 # Drop NFS packets on loopback so the mount times out even in a VM with no external route.
 nft add table inet "$firewall"
 nft "add chain inet $firewall output { type filter hook output priority 0; policy accept; }"

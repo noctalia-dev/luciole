@@ -302,6 +302,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   FileIconPool icons;
   struct Scan {
     CancelToken preparation;
+    Fd mount;
     GioPtr<GCancellable> cancellable{g_cancellable_new()};
     GioPtr<GFileEnumerator> enumerator;
     std::vector<DirectoryEntry> entries;
@@ -864,10 +865,10 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     scan->local = scan->local && localPath;
     icons.setLocalFolder(localPath.get());
     if (scan->local) {
-      runJob<bool>(
+      runJob<Fd>(
           scan->preparation,
-          [location = *snapshot.location, token = scan->preparation] { return prepareSystemMount(location, token); },
-          [weak = weak_from_this(), pending = scan, path = std::string(localPath.get())](JobResult<bool> result) {
+          [location = *snapshot.location, token = scan->preparation] { return openSystemMount(location, token); },
+          [weak = weak_from_this(), pending = scan, path = std::string(localPath.get())](JobResult<Fd> result) {
             const auto state = weak.lock();
             if (!state || state->scan != pending || pending->preparation.cancelled()) {
               return;
@@ -876,7 +877,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
               state->complete(result.error());
               return;
             }
-            if (*result) {
+            pending->mount = std::move(*result);
+            if (pending->mount.valid()) {
               if (state->monitor) {
                 g_file_monitor_cancel(state->monitor.get());
                 state->monitor.reset();
@@ -1625,6 +1627,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     scan->enumerating = false;
     closeEnumerator(scan->enumerator.get());
     scan->enumerator.reset();
+    scan->mount = {};
     if (!resolveId) {
       // The published entries carry the scan's names and IDs; only other names stay in the change table.
       identities.index(snapshot.entries);

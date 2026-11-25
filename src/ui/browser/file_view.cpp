@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
+#include <string>
 #include <utility>
 
 namespace {
@@ -188,13 +190,55 @@ namespace {
       m_parent->setMaxWidth(nameWidth);
       m_background->arrange(renderer, {0, 0, width(), height()});
       m_row->arrange(renderer, {0, 0, width(), height()});
+      updateContentSpan(renderer, nameWidth);
     }
 
   public:
     void setThumbnailVisible(bool visible) { m_icon->setThumbnailVisible(visible); }
     void releaseFile(Renderer& renderer) { m_icon->releaseFile(renderer); }
+    bool contentContains(float x) const { return x >= m_contentStart && x <= m_contentEnd; }
 
   private:
+    void updateContentSpan(Renderer& renderer, float nameWidth) {
+      if (m_name->text() != m_measuredName
+          || m_parent->text() != m_measuredParent
+          || nameWidth != m_measuredColumnWidth) {
+        const auto textWidth = [&renderer, nameWidth](const Label& label) {
+          if (label.text().empty()) {
+            return 0.0F;
+          }
+          return std::min(
+              nameWidth,
+              renderer
+                  .measureText(
+                      label.text(), label.fontSize(), label.font(), nameWidth, 1, TextAlign::Start, label.ellipsize()
+                  )
+                  .width
+          );
+        };
+        m_nameTextWidth = textWidth(*m_name);
+        m_parentTextWidth = textWidth(*m_parent);
+        m_measuredName = m_name->text();
+        m_measuredParent = m_parent->text();
+        m_measuredColumnWidth = nameWidth;
+      }
+      constexpr float kContentSlack = 4.0F;
+      const float textWidth = std::max(m_nameTextWidth, m_parent->visible() ? m_parentTextWidth : 0.0F);
+      const float columnX = m_row->x() + m_nameColumn->x();
+      // Labels draw start-aligned text from their right edge in RTL.
+      const float textLeft = Style::rtl() ? columnX + m_nameColumn->width() - textWidth : columnX;
+      const float iconLeft = m_row->x() + m_icon->x();
+      float start = std::min(iconLeft, textLeft);
+      float end = std::max(iconLeft + m_icon->width(), textLeft + textWidth);
+      if (m_treePrefix->visible() && m_expander->visible()) {
+        const float expanderLeft = m_row->x() + m_treePrefix->x() + m_expander->x();
+        start = std::min(start, expanderLeft);
+        end = std::max(end, expanderLeft + m_expander->width());
+      }
+      m_contentStart = start - kContentSlack;
+      m_contentEnd = end + kContentSlack;
+    }
+
     Box* m_background = nullptr;
     Flex* m_row = nullptr;
     Flex* m_treePrefix = nullptr;
@@ -211,6 +255,14 @@ namespace {
     luciole::DetailsColumns m_columns;
     luciole::DetailsColumnOrder m_columnOrder = luciole::kDefaultDetailsColumnOrder;
     luciole::DetailsColumnOrder m_appliedColumnOrder = luciole::kDefaultDetailsColumnOrder;
+    // Row-local x span of the expander, icon and drawn name text; the rest of the row acts as empty space.
+    float m_contentStart = 0.0F;
+    float m_contentEnd = std::numeric_limits<float>::max();
+    std::string m_measuredName;
+    std::string m_measuredParent;
+    float m_measuredColumnWidth = -1.0F;
+    float m_nameTextWidth = 0.0F;
+    float m_parentTextWidth = 0.0F;
   };
 
   // Adapted from Noctalia's FileEntryTile without its picker or thumbnail service.
@@ -671,8 +723,22 @@ bool luciole::FileViewAdapter::areaSelectionCurrent() const {
   return m_areaSelection && model.snapshot().generation == m_areaGeneration && model.rows() == m_areaRows;
 }
 
-bool luciole::FileViewAdapter::itemHitTest(std::size_t, float x, float y, float width, float height) const {
+bool luciole::FileViewAdapter::itemHitTest(std::size_t index, float x, float y, float width, float height) const {
+  const auto& model = m_browser.model();
+  if (index >= model.rows().size()) {
+    return true;
+  }
+  const auto id = model.rows()[index];
+  // A selected item is draggable wherever its selection color is drawn.
+  if (m_columnActive && model.selection().selected.contains(id)) {
+    return true;
+  }
   if (m_mode != ViewMode::Grid) {
+    for (const auto& [tile, state] : m_tiles) {
+      if (state.entry == id) {
+        return static_cast<const FileRow*>(tile)->contentContains(x);
+      }
+    }
     return true;
   }
   const auto metrics = gridMetrics(m_gridIconSize, m_presentation, false);

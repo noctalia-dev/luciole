@@ -192,6 +192,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::AlwaysShowTabBar, "Always Show Tab Bar");
   addBool(P::AlwaysShowStatusBar, "Always Show Status Bar");
   addBool(P::CompactMenus, "Compact Context Menus");
+  addBool(P::ContextMenuIcons, "Icons in Context Menus");
   addBool(P::ShowCloseButtons, "Show Close Buttons");
   addBool(P::ReduceAnimations, "Reduce Animations");
   card("Sidebar");

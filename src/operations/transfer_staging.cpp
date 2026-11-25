@@ -9,10 +9,8 @@
 #include <fcntl.h>
 #include <format>
 #include <glib.h>
-#include <linux/fs.h>
 #include <optional>
 #include <set>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -209,11 +207,7 @@ namespace luciole::transfer {
               work.check();
               requireUnchanged(source.metadata, info(source.parent.get(), source.name));
               requireUnchanged(*replace, info(destination, target));
-              if (::syscall(
-                      SYS_renameat2, source.parent.get(), source.name.c_str(), destination, target.c_str(),
-                      RENAME_EXCHANGE
-                  )
-                  != 0) {
+              if (renameExchange(source.parent.get(), source.name.c_str(), destination, target.c_str()) != 0) {
                 if (errno != EXDEV) {
                   fail("Could not exchange moved item");
                 }
@@ -246,10 +240,7 @@ namespace luciole::transfer {
           if (work.recordMove) {
             historyItem = Fd(::openat(source.parent.get(), source.name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
           }
-          if (::syscall(
-                  SYS_renameat2, source.parent.get(), source.name.c_str(), destination, target.c_str(), RENAME_NOREPLACE
-              )
-              == 0) {
+          if (renameNoReplace(source.parent.get(), source.name.c_str(), destination, target.c_str()) == 0) {
             work.note(info(destination, target));
             result.outcome = Moved;
             result.destination = binding.location.child(target);
@@ -323,7 +314,6 @@ namespace luciole::transfer {
               // like cp and GIO.
               synchronize(stage.fd());
             }
-            const auto flags = replace ? RENAME_EXCHANGE : RENAME_NOREPLACE;
             auto copyProof = action != TransferAction::Move && work.prepareCopy
                 ? work.prepareCopy(
                       source.index, binding.location.child(target), destination, stage.fd(), replace.has_value()
@@ -336,7 +326,9 @@ namespace luciole::transfer {
                 : nullptr;
             work.check();
             checkReplacementSource(source, action, replace);
-            if (::syscall(SYS_renameat2, stage.fd(), "item", destination, target.c_str(), flags) != 0) {
+            const auto placed = replace ? renameExchange(stage.fd(), "item", destination, target.c_str())
+                                        : renameNoReplace(stage.fd(), "item", destination, target.c_str());
+            if (placed != 0) {
               if (errno == EEXIST || (replace && errno == ENOENT)) {
                 replace.reset();
                 if (!chooseTarget(

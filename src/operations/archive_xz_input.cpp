@@ -1,13 +1,13 @@
 #include "operations/archive_xz_input.h"
 
 #include <cstdio>
+#include <limits>
 
 namespace {
-  constexpr std::uint64_t DecoderMemoryLimit = 128U * 1024U * 1024U;
   [[noreturn]] void decodeError(lzma_ret status) {
     using namespace luciole;
     if (status == LZMA_MEMLIMIT_ERROR) {
-      throwFileError(FileErrorKind::Unsupported, "XZ archive exceeds the 128 MiB decoder memory limit.");
+      throwFileError(FileErrorKind::Unsupported, "XZ archive exceeds the decoder memory limit.");
     }
     if (status == LZMA_OPTIONS_ERROR || status == LZMA_UNSUPPORTED_CHECK) {
       throwFileError(FileErrorKind::Unsupported, "XZ archive uses unsupported compression or integrity checks.");
@@ -31,8 +31,9 @@ bool luciole::archive_work::XzInput::recognizes(Input& input) {
 }
 luciole::archive_work::XzInput::XzInput(Input& input, Work& work)
     : m_input(input), m_work(work), m_budget(decodedContainerBudget(work.limits)) {
-  const auto status =
-      lzma_stream_decoder(&m_stream, DecoderMemoryLimit, LZMA_CONCATENATED | LZMA_TELL_UNSUPPORTED_CHECK);
+  const auto status = lzma_stream_decoder(
+      &m_stream, std::numeric_limits<std::uint64_t>::max(), LZMA_CONCATENATED | LZMA_TELL_UNSUPPORTED_CHECK
+  );
   if (status != LZMA_OK) {
     lzma_end(&m_stream);
     decodeError(status);

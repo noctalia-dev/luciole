@@ -765,75 +765,80 @@ void PropertiesController::show(
         )
     );
   }
+  m_metadataView = body.metadata;
+  m_folderTotals = body.folderTotals;
+  m_basicFields = std::move(body.fields);
+  m_metadataWidth = generalCardWidth(width);
+  m_multiple = multiple;
+  if (m_metadataView) {
+    m_metadataView->sync(m_basicFields, m_metadataWidth);
+  }
   m_page.showDialog(std::move(root), DialogWidth::Medium);
-  if (m_page.popupSurface()) {
-    m_page.activePopup().bind(ActivePopup::Kind::Properties, [this] { close(); });
-    m_identityIcon = identity;
-    m_identityLocation = std::move(identityLocation);
-    // Entries without an icon, such as Places rows, get it from GIO.
-    if (!multiple && !targets.front().icon) {
-      m_iconQuery = luciole::CancelToken{};
-      luciole::queryFileIcon(targets.front().location(), m_iconQuery, [this, identity](auto reply) {
-        if (reply && identity == m_identityIcon) {
-          identity->bind(*reply, colorSpecFromRole(ColorRole::OnSurface));
-          m_page.popupSurface()->requestLayout();
-        }
-      });
-    }
-    if (m_driveRoot) {
-      queryDriveFilesystem(*m_driveRoot);
-    }
-    // Start on the tabs rather than the header's close button.
-    if (editable) {
-      m_page.popupDispatcher().setFocus(m_page.popupDispatcher().firstTabFocusUnder(tabs));
-    }
-    m_metadataView = body.metadata;
-    m_folderTotals = body.folderTotals;
-    m_basicFields = std::move(body.fields);
-    m_metadataWidth = generalCardWidth(width);
-    m_multiple = multiple;
-    if (m_metadataView) {
-      if (multiple) {
-        m_selectionMetadata.show(targets);
-      } else {
-        m_metadata.show(targets.front(), m_page.settings().thumbnails);
-      }
-      m_metadataDirty = true;
-    }
-    if (!editable) {
-      return;
-    }
-    m_permissionEditor = body.editor;
-    m_permissionBasic = body.basic;
-    m_permissionAdvanced = body.advanced;
-    m_permissionAdvancedOpen = body.advancedOpen;
-    m_permissionAdvancedBack = body.advancedBack;
-    m_aclEditor = body.acl;
-    m_bulkAclEditor = body.bulkAcl;
-    m_aclActive = false;
-    m_permissionResults = results;
-    m_permissionReport = reportButton;
-    m_permissionDetails = detailsButton;
-    m_permissionCancel = cancelButton;
-    m_permissionStatus = progress;
-    m_permissionTabs = tabs;
-    m_permissionSave = save;
-    m_permissionScroll = scroll;
-    m_page.popupDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
-      if (m_permissionScroll) {
-        m_permissionScroll->requestScrollIntoView(focused);
+  if (!m_page.popupSurface()) {
+    close();
+    return;
+  }
+  m_page.activePopup().bind(ActivePopup::Kind::Properties, [this] { close(); });
+  m_identityIcon = identity;
+  m_identityLocation = std::move(identityLocation);
+  // Entries without an icon, such as Places rows, get it from GIO.
+  if (!multiple && !targets.front().icon) {
+    m_iconQuery = luciole::CancelToken{};
+    luciole::queryFileIcon(targets.front().location(), m_iconQuery, [this, identity](auto reply) {
+      if (reply && identity == m_identityIcon) {
+        identity->bind(*reply, colorSpecFromRole(ColorRole::OnSurface));
         m_page.popupSurface()->requestLayout();
       }
     });
-    m_job = m_page.jobs().create<luciole::PermissionService>(JobScope::Page);
-    auto& permissions = m_job->service<luciole::PermissionService>();
-    if (captureCurrentLocation) {
-      (void)permissions.prepare(targets.front().location());
-    } else if (multiple) {
-      (void)permissions.prepare(targets);
+  }
+  if (m_driveRoot) {
+    queryDriveFilesystem(*m_driveRoot);
+  }
+  // Start on the tabs rather than the header's close button.
+  if (editable) {
+    m_page.popupDispatcher().setFocus(m_page.popupDispatcher().firstTabFocusUnder(tabs));
+  }
+  if (m_metadataView) {
+    if (multiple) {
+      m_selectionMetadata.show(targets);
     } else {
-      (void)permissions.prepare(targets.front());
+      m_metadata.show(targets.front(), m_page.settings().thumbnails);
     }
+    m_metadataDirty = true;
+  }
+  if (!editable) {
+    return;
+  }
+  m_permissionEditor = body.editor;
+  m_permissionBasic = body.basic;
+  m_permissionAdvanced = body.advanced;
+  m_permissionAdvancedOpen = body.advancedOpen;
+  m_permissionAdvancedBack = body.advancedBack;
+  m_aclEditor = body.acl;
+  m_bulkAclEditor = body.bulkAcl;
+  m_aclActive = false;
+  m_permissionResults = results;
+  m_permissionReport = reportButton;
+  m_permissionDetails = detailsButton;
+  m_permissionCancel = cancelButton;
+  m_permissionStatus = progress;
+  m_permissionTabs = tabs;
+  m_permissionSave = save;
+  m_permissionScroll = scroll;
+  m_page.popupDispatcher().setFocusChangeCallback([this](InputArea*, InputArea* focused) {
+    if (m_permissionScroll) {
+      m_permissionScroll->requestScrollIntoView(focused);
+      m_page.popupSurface()->requestLayout();
+    }
+  });
+  m_job = m_page.jobs().create<luciole::PermissionService>(JobScope::Page);
+  auto& permissions = m_job->service<luciole::PermissionService>();
+  if (captureCurrentLocation) {
+    (void)permissions.prepare(targets.front().location());
+  } else if (multiple) {
+    (void)permissions.prepare(targets);
+  } else {
+    (void)permissions.prepare(targets.front());
   }
 }
 

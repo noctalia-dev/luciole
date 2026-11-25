@@ -1,6 +1,7 @@
 #include "operations/permission_walk.h"
 
 #include "fs/filename.h"
+#include "fs/system_mounts.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -50,7 +51,8 @@ namespace {
         const luciole::PermissionBatch& roots, luciole::PermissionBatch& plan, const luciole::CancelToken& token,
         std::atomic<std::size_t>& found
     )
-        : m_roots(roots), m_plan(plan), m_token(token), m_found(found) {
+        : m_roots(roots), m_plan(plan), m_token(token), m_found(found), m_mounts(luciole::configuredSystemMounts()),
+          m_hasAutomounts(std::ranges::any_of(m_mounts, &luciole::MountConfiguration::automount)) {
       for (std::size_t i = 0; i < roots.results->size(); ++i) {
         m_selected.emplace((*roots.results)[i].location.uri(), i);
       }
@@ -73,7 +75,7 @@ namespace {
         }
         const auto& target = m_roots.targets[i];
         if (target) {
-          walk(target, mountId(target->fd.get()), 0);
+          walk(target, mountId(target->fd.get()), automountPath(target->entry.location()), 0);
         } else if (m_seen.insert((*m_roots.results)[i].location.uri()).second) {
           append((*m_roots.results)[i], {});
         }
@@ -81,6 +83,14 @@ namespace {
     }
 
   private:
+    std::string automountPath(const luciole::Location& location) const {
+      if (!m_hasAutomounts) {
+        return {};
+      }
+      const auto config = luciole::resolveAutomountFor(location, m_mounts, false);
+      return config ? config->path : std::string{};
+    }
+
     void append(const luciole::PermissionResult& row, std::shared_ptr<PermissionTarget> target) {
       if (m_plan.results->size() >= maxItems) {
         limit(luciole::FileErrorKind::Unsupported, "The recursive job exceeds 16384 items. Select smaller folders.");
@@ -95,7 +105,10 @@ namespace {
       append(row, std::move(target));
     }
 
-    void walk(std::shared_ptr<PermissionTarget> target, std::uint64_t rootMount, std::size_t depth) {
+    void walk(
+        std::shared_ptr<PermissionTarget> target, std::uint64_t rootMount, const std::string& rootAutomount,
+        std::size_t depth
+    ) {
       const auto location = target->entry.location();
       if (m_token.cancelled() || !m_seen.insert(location.uri()).second) {
         return;
@@ -127,6 +140,12 @@ namespace {
           skip(row, std::move(target), "Mounted subtree skipped.");
           return;
         }
+        if (depth > 0 && m_hasAutomounts && S_ISDIR(target->baseline.st_mode)) {
+          if (const auto childMount = automountPath(location); !childMount.empty() && childMount != rootAutomount) {
+            skip(row, std::move(target), "Configured automount subtree skipped.");
+            return;
+          }
+        }
         if (S_ISDIR(target->baseline.st_mode)) {
           if (depth >= maxDepth) {
             limit(
@@ -138,7 +157,7 @@ namespace {
             skip(row, std::move(target), "Folder already visited; subtree skipped.");
             return;
           }
-          walkChildren(target, rootMount, depth);
+          walkChildren(target, rootMount, rootAutomount, depth);
         }
         // Postorder keeps parent access intact while processing descendants.
         append(row, std::move(target));
@@ -151,7 +170,10 @@ namespace {
       }
     }
 
-    void walkChildren(const std::shared_ptr<PermissionTarget>& target, std::uint64_t rootMount, std::size_t depth) {
+    void walkChildren(
+        const std::shared_ptr<PermissionTarget>& target, std::uint64_t rootMount, const std::string& rootAutomount,
+        std::size_t depth
+    ) {
       const int descriptor = ::openat(target->fd.get(), ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
       if (descriptor < 0) {
         if (errno == EMFILE || errno == ENFILE) {
@@ -192,7 +214,7 @@ namespace {
           if (captured) {
             captured->ancestors = target->ancestors;
             captured->ancestors.push_back(target);
-            walk(captured, mountId(captured->fd.get()), depth + 1);
+            walk(captured, mountId(captured->fd.get()), automountPath(captured->entry.location()), depth + 1);
           } else if (m_seen.insert(uri).second) {
             append((*m_roots.results)[found->second], {});
           }
@@ -219,7 +241,10 @@ namespace {
         }
         auto ancestors = target->ancestors;
         ancestors.push_back(target);
-        walk(std::make_shared<PermissionTarget>(std::move(entry), fd, std::move(ancestors)), rootMount, depth + 1);
+        walk(
+            std::make_shared<PermissionTarget>(std::move(entry), fd, std::move(ancestors)), rootMount, rootAutomount,
+            depth + 1
+        );
       }
     }
 
@@ -227,6 +252,8 @@ namespace {
     luciole::PermissionBatch& m_plan;
     const luciole::CancelToken& m_token;
     std::atomic<std::size_t>& m_found;
+    std::vector<luciole::MountConfiguration> m_mounts;
+    bool m_hasAutomounts = false;
     std::map<std::string, std::size_t> m_selected;
     std::set<std::string> m_seen;
     std::set<std::pair<dev_t, ino_t>> m_directories;

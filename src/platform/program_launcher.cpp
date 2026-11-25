@@ -3,6 +3,7 @@
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
+#include "fs/system_mounts.h"
 #include "platform/launch_context.h"
 #include "platform/terminal_command.h"
 
@@ -141,6 +142,7 @@ namespace {
 
 luciole::PreparedProgram luciole::prepareProgram(const Location& location, const CancelToken& token) {
   check(token);
+  const auto mount = openSystemMount(location, token);
   const auto stamp = pathStamp(location);
   if (!S_ISREG(stamp.st_mode) && !S_ISLNK(stamp.st_mode)) {
     throwFileError(FileErrorKind::Unsupported, "Only regular programs and scripts can be run.");
@@ -182,6 +184,7 @@ luciole::prepareApplication(const Location& location, const CancelToken& token) 
   if (!location.isNative() || location.isTrash() || location.basename().value_or("").ends_with(".desktop")) {
     return std::nullopt;
   }
+  const auto mount = openSystemMount(location, token);
   const auto file = gioFile(location);
   GError* raw = nullptr;
   const GioPtr<GFileInfo> info(g_file_query_info(
@@ -226,6 +229,9 @@ void luciole::launchProgram(
   if (!program.data || arguments.size() > 4096) {
     throwFileError(FileErrorKind::InvalidArgument, "Invalid program or too many selected files.");
   }
+  std::vector<Location> guardLocations{program.data->location, workingDirectory};
+  guardLocations.insert(guardLocations.end(), arguments.begin(), arguments.end());
+  const auto mounts = openSystemMounts(guardLocations, token);
   validate(*program.data, token);
   if (program.data->application) {
     if (terminal) {

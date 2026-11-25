@@ -50,16 +50,16 @@ namespace luciole::archive_work {
       if (cancel.cancelled()) {
         throwFileError(FileErrorKind::Cancelled, "Archive operation cancelled.");
       }
-      if (Clock::now() > deadline) {
+      if (deadline != Clock::time_point::max() && Clock::now() > deadline) {
         throwFileError(FileErrorKind::Other, "Archive operation exceeded its time limit.");
       }
     }
     void item() {
       check();
-      if (++count > limits.maxEntries) {
+      if (count >= limits.maxEntries) {
         throwFileError(FileErrorKind::Unsupported, "Archive has too many entries.");
       }
-      progress.items.store(count);
+      progress.items.store(++count);
     }
     void account(std::uint64_t bytes) {
       if (bytes > limits.maxExpandedBytes - expanded) {
@@ -89,6 +89,7 @@ namespace luciole::archive_work {
   [[noreturn]] void systemError(const char* operation);
   Fd opened(int fd);
   struct stat statAt(int fd, const std::string& name);
+  void requireSpace(int folder, std::uint64_t bytes);
   std::string stamp(const struct stat& info);
   std::uint64_t decodedContainerBudget(const ArchiveLimits& limits);
   Work workFor(ArchiveLimits limits, const CancelToken& cancel, Progress& progress);

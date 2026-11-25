@@ -109,6 +109,8 @@ public:
   virtual const luciole::BrowserSettings& settings() const = 0;
   // Applies changed settings to the page; `force` reapplies fields that did not change.
   virtual void applySettings(const luciole::BrowserSettings& settings, bool force) = 0;
+  // Switches the page's browser and every Miller column between recursive search and current-folder filtering.
+  virtual void setSearchRecursive(bool recursive) = 0;
   // True while the page is the focused pane of its window.
   virtual bool active() const = 0;
   // True while Settings or the archive browser covers the page.
@@ -205,4 +207,14 @@ inline LayoutRect sceneRect(const Node& node) {
   float x = 0, y = 0;
   Node::absolutePosition(&node, x, y);
   return {x, y, node.width(), node.height()};
+}
+
+// Clears leading glyphs when context-menu icons are disabled; call before setEntries().
+inline void applyContextMenuIconPreference(std::vector<ContextMenuControlEntry>& entries, bool iconsEnabled) {
+  if (iconsEnabled) {
+    return;
+  }
+  for (auto& entry : entries) {
+    entry.glyph.clear();
+  }
 }

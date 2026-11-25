@@ -13,11 +13,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <fcntl.h>
-#include <linux/fs.h>
 #include <mutex>
 #include <optional>
 #include <print>
-#include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -160,6 +158,7 @@ struct luciole::CopyStorage {
       transfer::CopyWork work({}, bytes);
       work.history = revisions;
       transfer::removeSource(stage->fd(), tree, work);
+      item = Fd(); // On NFS this pin would keep the removed item as `.nfsXXXX` and block clear().
       if (stage->clear()) {
         return;
       }
@@ -339,7 +338,7 @@ luciole::CopyEffect::retainedFrom(int from, const std::string& name, int retenti
     stage->adopt(checkedFd(::fcntl(item(), F_DUPFD_CLOEXEC, 0)));
     (void)currentParent(m_destination, parent());
     verify(from, name, *expected, {}, *revisions());
-    if (::syscall(SYS_renameat2, from, name.c_str(), stage->fd(), "item", RENAME_NOREPLACE) != 0) {
+    if (luciole::renameNoReplace(from, name.c_str(), stage->fd(), "item") != 0) {
       throwErrno(errno);
     }
     storage.stage = std::move(stage);
@@ -363,10 +362,7 @@ luciole::CopyEffect::restoreTo(const Location& destination, int target, bool& ch
   }
   (void)currentParent(destination, target);
   auto nextParent = checkedFd(::fcntl(target, F_DUPFD_CLOEXEC, 0));
-  if (::syscall(
-          SYS_renameat2, m_storage->stage->fd(), "item", target, destination.basename()->c_str(), RENAME_NOREPLACE
-      )
-      != 0) {
+  if (luciole::renameNoReplace(m_storage->stage->fd(), "item", target, destination.basename()->c_str()) != 0) {
     throwErrno(errno);
   }
   changed = true;
@@ -395,8 +391,7 @@ luciole::CopyEffect::storeTo(const Location& folder, int target, bool& changed, 
   auto stage = std::make_unique<CreationStage>(retentionParent >= 0 ? retentionParent : nextParent.get(), false);
   stage->adopt(checkedFd(::fcntl(item(), F_DUPFD_CLOEXEC, 0)));
   validate({});
-  if (::syscall(SYS_renameat2, parent(), m_destination.basename()->c_str(), stage->fd(), "item", RENAME_NOREPLACE)
-      != 0) {
+  if (luciole::renameNoReplace(parent(), m_destination.basename()->c_str(), stage->fd(), "item") != 0) {
     throwErrno(errno);
   }
   changed = true;
@@ -786,9 +781,8 @@ luciole::CopyReplayResult luciole::CopyReceipt::reverseImpl(
         stage->adopt(checkedFd(::fcntl(storage.item.get(), F_DUPFD_CLOEXEC, 0)));
         effect->validate(token, parents);
         check(token);
-        if (::syscall(
-                SYS_renameat2, storage.parent.get(), effect->m_destination.basename()->c_str(), stage->fd(), "item",
-                RENAME_NOREPLACE
+        if (luciole::renameNoReplace(
+                storage.parent.get(), effect->m_destination.basename()->c_str(), stage->fd(), "item"
             )
             != 0) {
           throwErrno(errno);

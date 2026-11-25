@@ -30,7 +30,7 @@ namespace luciole {
     bool onBackgroundPointerPress() override;
     bool onAreaSelection(const std::vector<std::size_t>& indices) override;
     bool areaSelectionCurrent() const override;
-    bool itemHitTest(std::size_t, float x, float y, float width, float height) const override;
+    bool itemHitTest(std::size_t index, float x, float y, float width, float height) const override;
     void onActivate(std::size_t index) override;
     void onSecondaryActivate(std::size_t index, float x, float y) override;
     void onBackgroundSecondaryActivate(float x, float y) override;

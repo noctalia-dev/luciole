@@ -231,6 +231,11 @@ struct luciole::DirectoryEntries::Storage {
         entry.type = item.type;
         entry.hidden = item.hidden;
         entry.symlink = item.symlink;
+        if (item.symlink) {
+          entry.icon = localLinkIcon();
+        } else if (item.type == FileType::Directory) {
+          entry.icon = localFolderIcon();
+        }
         entry.setLinksToDirectory(item.linksToDirectory);
         entry.metadataPending = true;
         entry.queriedDetails = 0;

@@ -148,6 +148,7 @@ namespace luciole {
   struct ActionDefinition {
     BrowserAction action;
     std::string_view label;
+    std::string_view glyph;
     std::optional<KeybindCommand> keybind = std::nullopt;
     ActionScope scope = ActionScope::Global;
     bool destructive = false;

@@ -8,7 +8,7 @@ The mouse's Back and Forward side buttons navigate folder history, like the tool
 
 By default, typing while browsing starts a recursive filename search rooted in the current folder. Settings → General → When Typing also offers Filter Current Folder and Select Names. Filtering immediately narrows the live folder listing by a literal, case-insensitive name substring, without looking inside subfolders. For example, `temp` matches `Template1.csv`, `Template2.csv` and `Templates` in the current folder, but not files inside `Templates`. Hidden-file and backup-file visibility still apply.
 
-The field next to the location bar shows Search files… for recursive search, or Filter files… in current-folder mode. Clicking it or pressing Ctrl+F uses the same scope. Clear the query or press Escape to return to the folder listing. Select Names changes typing to name selection while keeping explicit searches recursive. Content search and an indexing service are not part of the current search.
+The field next to the location bar shows Search files… for recursive search, or Filter files… in current-folder mode. Clicking it or pressing Ctrl+F uses the same scope. The icon at the start of the field switches the scope for the current pane: click it, or press Ctrl+F again while the field has focus. New tabs start from the When Typing setting. Clear the query or press Escape to return to the folder listing. Select Names changes typing to name selection while keeping explicit searches recursive. Content search and an indexing service are not part of the current search.
 
 | Action | Shortcut |
 | --- | --- |
@@ -78,7 +78,7 @@ Network protocols require their installed GVfs backends and a session D-Bus conn
 
 ### Network share automounts
 
-Open an NFS or SMB share from the sidebar or enter its local mount path. Systemd mounts it using your fstab entry or native automount unit, even without `user` in fstab. The share stays in the sidebar while idle. If the automount is stopped or the NAS is unreachable, Luciole shows an error.
+Open an NFS or SMB share from the sidebar or enter its local mount path. Systemd mounts it using your fstab entry or native automount unit, even without `user` in fstab. The share stays in the sidebar while idle. If the automount is stopped or the NAS is unreachable, Luciole shows an error; file operations, program launches, and terminal actions on the share fail the same way instead of using the local folder beneath it. Permanent deletion refuses a folder that contains a share's mount point, and recursive permission changes skip the share.
 
 Use **Refresh** to see folder changes.
 
@@ -104,7 +104,7 @@ Folder sizes do not show “Reading…”; they stay blank until their backgroun
 
 The status bar, a small tab docked to the bottom of the file pane, reports actions, search and selection. Action messages clear after five seconds or at the next action. Settings → Appearance → Always Show Status Bar keeps it visible when idle with the item count and, when available, free space.
 
-Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
+Click an entry to select it, Ctrl+click to toggle it and Shift+click to select a range. Clicking empty space clears selection. Drag an area over entries to select several. An unselected entry is its icon and name: in every view, the rest of its row or tile counts as empty space, so a drag can start beside a short name or over the detail columns. A selected entry can be dragged from anywhere in its highlight. Ctrl+A selects all visible results, Ctrl+Shift+I inverts selection and Ctrl+S selects by pattern. Escape clears the selection when browsing. Opening uses double-click by default; Settings → General offers single-click opening.
 
 Opening a local file uses the default application for its file type; supported local archives open in Luciole's archive browser instead (see [archives](file-operations.md#archives)). Use Open With to choose another application or change that file type's default. Suggested applications include registered file handlers whose desktop entries use `NoDisplay=true`, such as imv and swayimg. For a mixed selection, suggested applications must handle every selected file type. Show Other Applications retains launcher visibility rules for unrelated applications.
 
@@ -130,7 +130,7 @@ A separator can also carry a heading, shown under its line in the same style as 
 
 Use a bookmark's context menu and choose **Change Icon…** to select a Tabler icon. This icon is stored in Luciole's private state and does not change the shared GTK bookmark or its appearance in other applications. Choose **Reset to Default** to restore the place's standard icon.
 
-Drives starts with File System (`/`), followed by the volumes and mounts GIO reports: removable media, extra partitions and network mounts, but not other system mounts such as `/home` or `/boot`. Mounted drives come before unmounted ones. In the Places list, each mounted drive shows a bar of its used space under its row; the bar turns red at 90% used. Unmounted drives and filesystems that do not report a size have no bar. Hovering a mounted drive shows its mountpoint and free space. Right-click a mounted drive for Open, its removal action (Unmount, Eject or Safely Remove) when available, and Properties.
+Drives starts with File System (`/`), followed by the volumes and mounts GIO reports: removable media, extra partitions and network mounts, but not other system mounts such as `/home` or `/boot`, nor bind mounts, which show a folder that already exists elsewhere. Mounted drives come before unmounted ones. In the Places list, each mounted drive shows a bar of its used space under its row; the bar turns red at 90% used. Unmounted drives and filesystems that do not report a size have no bar. Hovering a mounted drive shows its mountpoint and free space. Right-click a mounted drive for Open, its removal action (Unmount, Eject or Safely Remove) when available, and Properties.
 
 To open a LUKS-encrypted drive, click its row under Drives. When the provider needs a passphrase, Luciole opens Unlock Drive. Enter the passphrase and choose Unlock; the mounted folder opens after the provider succeeds. If unlocking fails, Luciole shows the provider's error; click the drive again to retry. Cancel, Escape or dismissing the dialog stops the request. Navigating elsewhere or closing the pane also cancels it. Your current folder stays visible until mounting succeeds.
 

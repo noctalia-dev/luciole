@@ -257,6 +257,13 @@ namespace {
     auto data = snapshot({});
     data.entries = luciole::DirectoryEntries(std::move(catalogue));
     const auto listed = data.entries;
+    TEST_CHECK(listed[0].icon == luciole::localFolderIcon());
+    TEST_CHECK(listed[1].icon == luciole::localLinkIcon() && listed[2].icon == luciole::localLinkIcon());
+    for (const auto index : {0U, 1U, 2U}) {
+      const auto& pending = listed[index];
+      TEST_CHECK(pending.metadataPending && !listed.known(index) && pending.queriedDetails == 0);
+      TEST_CHECK(!pending.size && !pending.identity() && !pending.access.read && !pending.access.write);
+    }
     DirectoryModel model;
     model.applySnapshot(data);
     rows(model, {1, 4, 2, 3});
@@ -265,16 +272,23 @@ namespace {
     data.entries = listed.withDirectoryLinks({0, 2});
     TEST_CHECK(data.entries.sameCatalogue(listed) && !data.entries.sameDirectoryLinks(listed));
     TEST_CHECK(!data.entries.brief(0).linksToDirectory && data.entries.brief(2).linksToDirectory);
+    TEST_CHECK(data.entries[2].icon == luciole::localFolderIcon() && data.entries[2].metadataPending);
+    TEST_CHECK(listed[2].icon == luciole::localLinkIcon() && !listed[2].linksToDirectory);
     model.applySnapshot(data);
     rows(model, {1, 3, 4, 2});
     // Detailed facts never follow links, so they keep the catalogue's target kind.
     auto fact = entry(3, "c-link", luciole::FileType::Symlink);
     fact.symlink = true;
+    fact.icon = std::make_shared<const luciole::FileIconSource>(
+        luciole::FileIconSource{.names = {"fixture-custom-folder"}, .filePath = {}, .desktopFile = {}}
+    );
     const auto linked = data.entries;
     data.generation = 3;
     data.entries = linked.withFacts({{2, fact}});
     TEST_CHECK(data.entries.known(2)->linksToDirectory && data.entries.sameDirectoryLinks(linked));
+    TEST_CHECK(data.entries.known(2)->icon == fact.icon && !data.entries.known(2)->metadataPending);
     TEST_CHECK(data.entries.withoutFacts().brief(2).linksToDirectory);
+    TEST_CHECK(data.entries.withoutFacts()[2].icon == luciole::localFolderIcon());
     model.applySnapshot(data);
     rows(model, {1, 3, 4, 2});
     TEST_CHECK(!data.entries.withDirectoryLinks({}).known(2)->linksToDirectory);

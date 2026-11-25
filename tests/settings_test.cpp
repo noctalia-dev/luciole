@@ -884,6 +884,31 @@ namespace {
     }
   }
 
+  void testContextMenuIcons() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && config.settings().browser.contextMenuIcons);
+    fixture.write("config.toml", "[browser]\ncontext_menu_icons = false\nshow_hidden = true\n");
+    TEST_CHECK(config.reload() && !config.settings().browser.contextMenuIcons && config.settings().browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::ContextMenuIcons, true}}) == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(loaded && loaded->browser.contextMenuIcons && loaded->browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::ContextMenuIcons, std::nullopt}})
+            == State::Durable
+        && !config.settings().browser.contextMenuIcons
+        && !read(fixture.paths().overrides).contains("context_menu_icons")
+    );
+    for (const auto* value : {"0", "'false'", "1.0"}) {
+      fixture.write("config.toml", std::string("[browser]\ncontext_menu_icons = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
   void testAlwaysShowStatusBar() {
     using Preference = luciole::BrowserPreference;
     using State = luciole::AtomicWriteState;
@@ -1575,6 +1600,7 @@ int main() {
     testNetworkVisibility();
     testAlwaysShowTabBar();
     testShowCloseButtons();
+    testContextMenuIcons();
     testAlwaysShowStatusBar();
     testPreviewVisibility();
     testDetailsColumnVisibility();

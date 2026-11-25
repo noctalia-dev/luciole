@@ -327,6 +327,7 @@ namespace {
       describe(P::AlwaysShowTabBar, "always_show_tab_bar", [](S& s) -> auto& { return s.alwaysShowTabBar; }),
       describe(P::AlwaysShowStatusBar, "always_show_status_bar", [](S& s) -> auto& { return s.alwaysShowStatusBar; }),
       describe(P::CompactMenus, "compact_menus", [](S& s) -> auto& { return s.compactMenus; }),
+      describe(P::ContextMenuIcons, "context_menu_icons", [](S& s) -> auto& { return s.contextMenuIcons; }),
       describe(P::ShowCloseButtons, "show_close_buttons", [](S& s) -> auto& { return s.showCloseButtons; }),
       describe(P::ReduceAnimations, "reduce_animations", [](S& s) -> auto& { return s.reduceAnimations; }),
       describe(P::UseSSD, "use_ssd", [](S& s) -> auto& { return s.useSSD; }),

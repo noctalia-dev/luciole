@@ -14,7 +14,7 @@ activation_server = custom_target('launch-activation-server-header',
 
 test_table = [
   {'name': 'adaptive-sidebar', 'deps': [model_dep]},
-  {'name': 'system-mounts', 'deps': [fs_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'system-mounts', 'deps': [operations_dep, platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'ws-discovery', 'deps': [fs_dep], 'env': gio_env, 'wrapper': files('ws_discovery_test.py')},
   {'name': 'input-lifetime', 'deps': [noctalia_ui_dep]},
   {'name': 'window-move-gesture', 'deps': [model_dep]},
@@ -64,6 +64,7 @@ test_table = [
   {'name': 'selection-details', 'deps': [browser_dep, event_loop_dep], 'timeout': 60, 'env': gio_env},
   {'name': 'settings', 'deps': [config_dep, browser_dep], 'env': ['G_DEBUG=fatal-warnings']},
   {'name': 'atomic-file', 'deps': [fs_dep]},
+  {'name': 'posix-rename', 'deps': [fs_dep]},
   {'name': 'xdg-dirs', 'deps': [fs_dep]},
   {'name': 'shared-helpers', 'deps': [operations_dep], 'env': gio_env},
   {'name': 'state-store', 'deps': [config_dep], 'env': gio_env},
@@ -73,6 +74,14 @@ test_table = [
   {'name': 'file-chooser-portal', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'palette-file', 'deps': [ui_dep]},
 ]
+
+# Suites that publish through renameat2 flags run again as if on NFS or a FUSE filesystem that rejects them.
+rename_flags_unsupported = shared_module('rename-flags-unsupported',
+  'rename_flags_unsupported.c',
+  dependencies: dependency('dl'),
+)
+without_rename_flags = ['posix-rename', 'atomic-file', 'create-service', 'rename-service', 'batch-rename-service',
+  'provider-move-history', 'provider-transfer', 'transfer-service']
 
 foreach entry : test_table
   name = entry['name']
@@ -89,6 +98,13 @@ foreach entry : test_table
     test(name, python, args: [entry['wrapper'], exe], timeout: entry.get('timeout', 30), env: entry.get('env', []))
   else
     test(name, exe, timeout: entry.get('timeout', 30), env: entry.get('env', []))
+  endif
+  if name in without_rename_flags
+    test(name + '-without-rename-flags', exe,
+      timeout: entry.get('timeout', 30),
+      env: entry.get('env', []) + ['LD_PRELOAD=' + rename_flags_unsupported.full_path()],
+      depends: rename_flags_unsupported,
+    )
   endif
 endforeach
 

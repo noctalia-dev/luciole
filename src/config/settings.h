@@ -34,6 +34,7 @@ namespace luciole {
     bool alwaysShowTabBar = true;
     bool alwaysShowStatusBar = false;
     bool compactMenus = true;
+    bool contextMenuIcons = true;
     bool showCloseButtons = true;
     bool reduceAnimations = false;
     bool useSSD = true;
@@ -99,6 +100,7 @@ namespace luciole {
     AlwaysShowTabBar,
     AlwaysShowStatusBar,
     CompactMenus,
+    ContextMenuIcons,
     ShowCloseButtons,
     ReduceAnimations,
     UseSSD,
@@ -201,6 +203,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> AlwaysShowTabBar{Id::AlwaysShowTabBar};
     static constexpr PreferenceKey<bool> AlwaysShowStatusBar{Id::AlwaysShowStatusBar};
     static constexpr PreferenceKey<bool> CompactMenus{Id::CompactMenus};
+    static constexpr PreferenceKey<bool> ContextMenuIcons{Id::ContextMenuIcons};
     static constexpr PreferenceKey<bool> ShowCloseButtons{Id::ShowCloseButtons};
     static constexpr PreferenceKey<bool> ReduceAnimations{Id::ReduceAnimations};
     static constexpr PreferenceKey<bool> UseSSD{Id::UseSSD};

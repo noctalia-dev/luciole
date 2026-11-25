@@ -90,11 +90,16 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
        .minWidth = 220.0F,
        .maxWidth = 220.0F,
        .height = Style::controlHeight,
-       .configure = [](Flex& area) { area.setPadding(0.0F, 0.0F, 0.0F, Style::spaceSm); }},
-      ui::glyph(
-          {.glyph = "search",
+       .configure = [](Flex& area) { area.setPadding(0.0F, 0.0F, 0.0F, Style::spaceXs); }},
+      ui::button(
+          {.out = &m_scopeButton,
+           .glyph = "search",
            .glyphSize = Style::baseGlyphSize,
-           .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
+           .controlHeight = Style::controlHeightSm,
+           .variant = ButtonVariant::Ghost,
+           .paddingH = Style::spaceXs,
+           .onClick = [this] { toggleSearchScope(); },
+           .configure = [](Button& button) { button.inputArea()->setFocusable(false); }}
       ),
       ui::input(
           {.out = &m_filterInput,
@@ -335,6 +340,11 @@ bool LocationBarController::syncLocation(const std::optional<luciole::Location>&
 void LocationBarController::sync() {
   m_location->setInvalid(m_locationInvalid);
   const bool recursive = m_page.browser().searchRecursive();
+  m_scopeButton->setGlyph(recursive ? "search" : "filter");
+  m_scopeButton->setTooltip(
+      recursive ? "Searching subfolders: click to filter the current folder only"
+                : "Filtering the current folder: click to search subfolders"
+  );
   m_filterInput->setPlaceholder(recursive ? "Search files…" : "Filter files…");
   m_filterInput->inputArea()->setTooltip(
       recursive ? "Search names in this folder and all subfolders" : "Filter names in the current folder only"
@@ -580,7 +590,7 @@ void LocationBarController::openBreadcrumbOverflow() {
   for (std::size_t index = 0; index < m_firstBreadcrumb; ++index) {
     const auto& part = m_breadcrumbParts[index];
     targets.push_back(part.location);
-    entries.push_back({.id = static_cast<int>(index), .label = part.button->label()->text()});
+    entries.push_back({.id = static_cast<int>(index), .label = part.button->label()->text(), .glyph = "folder"});
   }
   m_menus.showContextMenu(
       std::move(entries),
@@ -756,6 +766,11 @@ void LocationBarController::changeNameFilter(const std::string& text) {
   }
   m_page.resetFileView();
   m_page.browser().editSearchQuery(text);
+}
+void LocationBarController::toggleSearchScope() {
+  m_page.resetFileView();
+  m_page.setSearchRecursive(!m_page.browser().searchRecursive());
+  m_page.requestSync();
 }
 
 void LocationBarController::closeFilter() {

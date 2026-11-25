@@ -58,6 +58,8 @@ public:
   // Opens `target` from a breadcrumb and focuses the file list.
   void openBreadcrumb(const luciole::Location& target) { breadcrumbClick(target); }
   void openFilter(bool selectAll = true, bool preserveTextInput = false);
+  // Switches the search field between searching subfolders and filtering the current folder.
+  void toggleSearchScope();
   void clearCompletions();
   // Completes the edited location for a Tab press with `modifiers` that the window handles.
   bool completeOnTab(std::uint32_t modifiers);
@@ -122,6 +124,7 @@ private:
   MenuController& m_menus;
   Input* m_location = nullptr;
   Input* m_filterInput = nullptr;
+  Button* m_scopeButton = nullptr;
   Flex* m_searchArea = nullptr;
   Flex* m_locationArea = nullptr;
   ScrollView* m_breadcrumbScroll = nullptr;

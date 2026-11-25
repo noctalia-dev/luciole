@@ -1,14 +1,13 @@
 #include "operations/copied_move_receipt.h"
 
+#include "fs/posix_fd.h"
 #include "operations/history_mount.h"
 #include "operations/history_revisions.h"
 #include "operations/transfer_staging.h"
 
 #include <algorithm>
 #include <fcntl.h>
-#include <linux/fs.h>
 #include <set>
-#include <sys/syscall.h>
 #include <unistd.h>
 
 namespace {
@@ -322,11 +321,7 @@ void luciole::CopiedMoveReceipt::restoreSources(
     parentAt(origin.location, origin.parent->get());
     vacant(origin.location, origin.parent->get());
     check(token);
-    if (::syscall(
-            SYS_renameat2, stage.fd(), "item", origin.parent->get(), origin.location.basename()->c_str(),
-            RENAME_NOREPLACE
-        )
-        != 0) {
+    if (renameNoReplace(stage.fd(), "item", origin.parent->get(), origin.location.basename()->c_str()) != 0) {
       throwErrno(errno);
     }
     applied = true;

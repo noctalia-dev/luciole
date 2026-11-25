@@ -15,10 +15,8 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
-#include <linux/fs.h>
 #include <optional>
 #include <sys/resource.h>
-#include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -758,9 +756,8 @@ luciole::MoveReplayResult luciole::MoveReceipt::reverseImpl(
       if (!previous || !effect->m_reversed) {
         checkCancelled(token);
       }
-      if (::syscall(
-              SYS_renameat2, from.get(), effect->m_destination.basename()->c_str(), to.get(),
-              effect->m_source.basename()->c_str(), RENAME_NOREPLACE
+      if (luciole::renameNoReplace(
+              from.get(), effect->m_destination.basename()->c_str(), to.get(), effect->m_source.basename()->c_str()
           )
           != 0) {
         throwErrno(errno);

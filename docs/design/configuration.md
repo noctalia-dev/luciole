@@ -24,13 +24,17 @@ Plain single-line Middle text uses the shared renderer's compact layout. Pango s
 
 ## Typing and query scope
 
-`browser.typing_mode` accepts `search` (default), `filter` and `typeahead`. The Settings General page uses the existing Select control for all three. Search and filter typing, including input-method commits, use the same toolbar field; current-folder mode updates its placeholder and tooltip. Explicit field entry and Ctrl+F use that same scope. Typeahead retains recursive explicit search. Preference changes update every existing pane and Miller controller.
+`browser.typing_mode` accepts `search` (default), `filter` and `typeahead`. The Settings General page uses the existing Select control for all three. Search and filter typing, including input-method commits, use the same toolbar field; current-folder mode updates its placeholder and tooltip. Explicit field entry and Ctrl+F use that same scope. Typeahead retains recursive explicit search. Preference changes update every existing pane and Miller controller. The field's leading glyph button, or the Search shortcut while the field has focus, flips the scope of one pane through `PageContext::setSearchRecursive` without saving it; new panes start from the preference.
 
 [BrowserController](../../src/browser/browser_controller.cpp) owns the scope. Recursive queries keep their 175 ms debounce and worker traversal. Local edits project the current DirectorySession listing through DirectoryModel’s folded literal name filter, without starting traversal or re-reading the folder on each keystroke. Session monitor updates remain visible under the filter; refresh, navigation history and duplication retain the scope. Filtering temporarily projects only the root listing when expandable list folders are enabled. Mode changes cancel pending recursive work before publishing the appropriate source. Miller child and ancestor controllers inherit the source scope.
 
 ## Drop action
 
 `browser.drop_action` accepts `menu` (default), `copy` and `move`. Settings → General → When Dropping Files uses the typed preference and Select control. [DragDropController](../../src/app/page/drag_drop_controller.cpp) resolves the same value for internal drags, external drop targets and the drag cursor. Ctrl, Shift and Alt keep priority over the preference, and Trash, items from Trash and non-native folders keep their existing fixed behavior. `menu` sets `DragAction::Ask`, so [TransferController](../../src/app/page/transfer_controller.cpp) shows a drop action context menu anchored at the drop point through [MenuController](../../src/app/page/menu_controller.cpp), offering Copy Here, Move Here, Create Link Here, Extract Here and Move into New Folder… with one shared cancellation path.
+
+## Context menu icons
+
+`browser.context_menu_icons` defaults to `true` and appears under Settings → Appearance. Action glyph names live beside each action in [ActionRegistry](../../src/browser/action_registry.cpp), and sort actions reuse `sortFieldGlyph()` from [DirectoryOptions](../../src/model/directory_options.h) so the Sort and Columns menus agree; one-off menus set the same `ContextMenuControlEntry::glyph` field. [MenuController](../../src/app/page/menu_controller.cpp) and [SubmenuController](../../src/app/page/submenu_controller.cpp) apply the preference with `applyContextMenuIconPreference()` before publishing entries. Disabling it removes the reserved leading column without changing entry ids, checkmarks, shortcuts or submenu behavior.
 
 ## Atomic writes
 

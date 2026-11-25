@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
+#include "fs/system_mounts.h"
 #include "operations/conflict_gate.h"
 #include "operations/trash_item.h"
 
@@ -130,6 +131,7 @@ struct luciole::RestoreService::State {
     const auto original = folder ? folder->child(*name) : *trash.original;
     auto destination = original;
     const auto parent = parentOf(original);
+    const auto mount = folder ? Fd{} : openSystemMount(parent, token);
     const auto parentInfo = queryTrashItem(parent, token, true);
     if (!parentInfo.id || parentInfo.type != FileType::Directory) {
       throwFileError(FileErrorKind::Unavailable, "The destination folder is unavailable.");
@@ -298,8 +300,10 @@ bool luciole::RestoreService::startSelection(
           );
         }
         std::optional<FileIdentity> parentIdentity;
+        Fd destinationMount;
         if (destination) {
           try {
+            destinationMount = openSystemMount(*destination, token);
             const auto parent = queryTrashItem(*destination, token, true);
             if (!parent.id || parent.type != FileType::Directory) {
               throwFileError(FileErrorKind::Unavailable, "The destination folder is unavailable.");

@@ -286,6 +286,7 @@ private:
   void showLinkTarget(const luciole::Location& link);
 
   void applySettings(const luciole::BrowserSettings& settings, bool force) override;
+  void setSearchRecursive(bool recursive) override;
 
   void
   showDialog(std::unique_ptr<Flex> root, DialogWidth width, PopupDismiss dismiss = PopupDismiss::Explicit) override;
@@ -393,9 +394,6 @@ private:
   luciole::BrowserSettings m_savedSettings;
   // The open dialog's tier; unset while a menu or nothing is shown.
   std::optional<DialogWidth> m_dialogTier;
-  // The dialog's top edge in window coordinates and the window height it was placed for.
-  std::optional<float> m_dialogTop;
-  float m_dialogWindowHeight = 0.0F;
   RectNode* m_dialogShadow = nullptr;
   std::optional<std::pair<int, int>> m_dialogPosition;
   bool m_dialogResizePending = false;

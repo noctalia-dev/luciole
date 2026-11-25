@@ -4,6 +4,7 @@
 #include "fs/filename.h"
 #include "fs/gio_interop.h"
 #include "fs/posix_fd.h"
+#include "fs/system_mounts.h"
 #include "operations/create_receipt.h"
 #include "operations/creation_stage.h"
 
@@ -239,7 +240,8 @@ bool luciole::CreateService::prepareLink(const DirectoryEntry& source) {
       .error = {},
       .receipt = {}
   };
-  State::launch(m_state, [source](const CancelToken&) {
+  State::launch(m_state, [source](const CancelToken& token) {
+    const auto mount = openSystemMount(source.location(), token, false);
     return Reply{
         .target = {},
         .destination = std::nullopt,
@@ -270,6 +272,8 @@ bool luciole::CreateService::createLink(const Location& parent, std::string name
         if (!path) {
           throwFileError(FileErrorKind::Unsupported, "Choose a native destination folder.");
         }
+        const auto destinationMount = openSystemMount(parent, token, true);
+        const auto sourceMount = openSystemMount(Location::fromPath(source->path), token, false);
         Target destination(*path);
         destination.requireCurrent();
         source->requireCurrent();
@@ -323,20 +327,24 @@ bool luciole::CreateService::prepareTarget(
       .error = {},
       .receipt = {}
   };
-  State::launch(m_state, [parent, source = std::move(source), image = std::move(image)](const CancelToken&) mutable {
-    const auto path = parent.nativePath();
-    if (!path) {
-      throwFileError(FileErrorKind::Unsupported, "Creating remote files or folders is not supported yet.");
-    }
-    auto target = std::make_shared<Target>(*path);
-    if (source) {
-      target->source = std::make_unique<TemplateSource>(std::move(*source));
-    }
-    target->image = std::move(image);
-    return Reply{
-        .target = std::move(target), .destination = std::nullopt, .error = {}, .linkSource = {}, .receipt = {}
-    };
-  });
+  State::launch(
+      m_state, [parent, source = std::move(source), image = std::move(image)](const CancelToken& token) mutable {
+        const auto path = parent.nativePath();
+        if (!path) {
+          throwFileError(FileErrorKind::Unsupported, "Creating remote files or folders is not supported yet.");
+        }
+        const auto mount = openSystemMount(parent, token, true);
+        const auto templateMount = source ? openSystemMount(source->location, token, false) : Fd{};
+        auto target = std::make_shared<Target>(*path);
+        if (source) {
+          target->source = std::make_unique<TemplateSource>(std::move(*source));
+        }
+        target->image = std::move(image);
+        return Reply{
+            .target = std::move(target), .destination = std::nullopt, .error = {}, .linkSource = {}, .receipt = {}
+        };
+      }
+  );
   return true;
 }
 bool luciole::CreateService::create(std::string name) {
@@ -354,6 +362,9 @@ bool luciole::CreateService::create(std::string name) {
   State::launch(
       m_state,
       [target = m_state->target, kind = m_state->snapshot.kind, name = std::move(name)](const CancelToken& token) {
+        const auto mount = openSystemMount(Location::fromPath(target->path), token, true);
+        const auto templateMount =
+            target->source ? openSystemMount(target->source->source.location, token, false) : Fd{};
         target->requireCurrent();
         const auto limit = ::fpathconf(target->directory.get(), _PC_NAME_MAX);
         if (limit >= 0 && name.size() > static_cast<std::size_t>(limit)) {
