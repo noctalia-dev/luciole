@@ -89,7 +89,6 @@ sudo wget -O /etc/apt/sources.list.d/noctalia-stonking.sources \
 
 ### Install Luciole
 
-
 ```sh
 sudo apt update
 sudo apt install luciole
