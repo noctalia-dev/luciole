@@ -1,6 +1,7 @@
 # Each test builds tests/<name>_test.cpp (dashes become underscores) with the
 # shared library identity setup and links only the modules it exercises.
 gio_env = ['G_DEBUG=fatal-warnings', 'GIO_USE_VFS=local']
+assets_env = ['LUCIOLE_ASSETS_DIR=' + (meson.project_source_root() / 'lib/assets')]
 python = import('python').find_installation('python3')
 # The launcher suite starts its own private bus, never the desktop session bus.
 find_program('dbus-daemon')
@@ -23,7 +24,7 @@ test_table = [
   {'name': 'operation-activity', 'deps': [app_jobs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'drive-removal', 'deps': [app_jobs_dep, event_loop_dep], 'env': gio_env},
   {'name': 'device-mount', 'deps': [browser_dep], 'env': gio_env},
-  {'name': 'drive-glyph', 'deps': [ui_dep], 'env': ['LUCIOLE_ASSETS_DIR=' + (meson.project_source_root() / 'lib/assets')]},
+  {'name': 'drive-glyph', 'deps': [ui_dep], 'env': assets_env},
   {'name': 'archive-service', 'deps': [operations_dep, event_loop_dep], 'timeout': 90, 'env': gio_env},
   {'name': 'thumbnail', 'deps': [thumbnails_dep, imaging_dep, event_loop_dep, dependency('libwebp')],
     'timeout': 90, 'env': gio_env},
@@ -112,5 +113,5 @@ endforeach
 test('headless-cli', python,
   args: [files('cli_test.py'), app, meson.project_version()],
   timeout: 30,
-  env: ['LUCIOLE_ASSETS_DIR=' + (meson.project_source_root() / 'lib/assets')],
+  env: assets_env,
 )
