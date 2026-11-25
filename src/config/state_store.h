@@ -9,6 +9,9 @@
 
 namespace luciole {
   std::optional<std::string> bookmarkLabelProblem(std::string_view label);
+  // The same rules for a Places separator heading, worded for headings, and it must show something: text made only
+  // of spaces, Unicode ones included, is refused rather than drawn as an empty heading.
+  std::optional<std::string> separatorHeadingProblem(std::string_view heading);
   std::optional<std::string> storedUriProblem(const std::string& uri);
 
   struct Bookmark {

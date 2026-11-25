@@ -363,7 +363,7 @@ void luciole::PlacesSidebar::addDriveRow(const Drive& drive) {
   );
   m_scroll->content()->addChild(std::move(button));
 }
-Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
+luciole::PlacesSidebar::SeparatorRow luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   // A short ghost button around the line, so it highlights on hover, can be right-clicked and dragged. A heading
   // goes under the line in the caption style of "Places" and "Drives", and lines up with them, without the row
   // padding.
@@ -379,19 +379,22 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
   raw->setDirection(heading.empty() ? FlexDirection::Horizontal : FlexDirection::Vertical);
   raw->setAlign(heading.empty() ? FlexAlign::Center : FlexAlign::Stretch);
   raw->setTooltip("Drag to move, or right-click for options");
+  Node* line = nullptr;
   if (heading.empty()) {
-    raw->addChild(ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F}));
+    auto rule = ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F});
+    line = rule.get();
+    raw->addChild(std::move(rule));
   } else {
     // Spaced like the line and caption above Drives: the line padded by spaceXs on both sides, the Places list's
     // spaceXs gap, then the caption at its own height. The button takes its height from them.
     raw->setJustify(FlexJustify::Start);
     raw->setGap(Style::spaceXs);
-    raw->addChild(
-        ui::column(
-            {.align = FlexAlign::Stretch, .paddingV = Style::spaceXs},
-            ui::separator({.orientation = SeparatorOrientation::HorizontalRule})
-        )
+    auto rule = ui::column(
+        {.align = FlexAlign::Stretch, .paddingV = Style::spaceXs},
+        ui::separator({.orientation = SeparatorOrientation::HorizontalRule})
     );
+    line = rule.get();
+    raw->addChild(std::move(rule));
     // The button colors the heading per state, as it does a place name: the caption color at rest, like Places
     // and Drives, and the row text color over the hover and pressed fills, which the caption color would not
     // stand out on.
@@ -446,7 +449,7 @@ Button* luciole::PlacesSidebar::addSeparatorRow(std::size_t before) {
     showSeparatorIndicator(std::nullopt);
   });
   m_scroll->content()->addChild(std::move(button));
-  return raw;
+  return {.button = raw, .line = line};
 }
 std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y) const {
   // The first row whose upper half is below the pointer; past the last row there is nothing to separate.
@@ -561,7 +564,12 @@ void luciole::PlacesSidebar::addRow(
   });
   raw->inputArea()->setOnFocusLoss([raw] { raw->setKeyboardFocusHint(false); });
   m_rows.push_back(
-      {.bookmark = bookmark, .pinIndex = index, .button = raw, .separator = {}, .separatorButton = nullptr}
+      {.bookmark = bookmark,
+       .pinIndex = index,
+       .button = raw,
+       .separator = {},
+       .separatorButton = nullptr,
+       .separatorLine = nullptr}
   );
   m_scroll->content()->addChild(std::move(button));
 }
@@ -671,7 +679,7 @@ void luciole::PlacesSidebar::rebuild() {
       continue;
     }
     const auto separator = gaps.separatorAbove(i);
-    auto* line = separator ? addSeparatorRow(*separator) : nullptr;
+    const auto line = separator ? addSeparatorRow(*separator) : SeparatorRow{};
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
       return place.bookmark.location == pins[i].location;
     });
@@ -684,7 +692,8 @@ void luciole::PlacesSidebar::rebuild() {
         i
     );
     m_rows.back().separator = separator;
-    m_rows.back().separatorButton = line;
+    m_rows.back().separatorButton = line.button;
+    m_rows.back().separatorLine = line.line;
   }
   if (m_showDrives && !m_drives.drives().empty()) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
@@ -761,18 +770,19 @@ std::optional<luciole::PinSlot> luciole::PlacesSidebar::dropSlot(float x, float 
       || localY >= height()) {
     return std::nullopt;
   }
-  // A gap with a separator line has two slots, split at the line's middle: above it, in front of the row it is saved
-  // in front of, and below it, in front of the row under it.
-  const auto above = [y](const Button* button) {
-    float buttonX = 0, buttonY = 0;
-    Node::absolutePosition(button, buttonX, buttonY);
-    return y < buttonY + button->height() * 0.5F;
+  // A gap with a separator line has two slots, split at the line's middle, not the middle of its button, which also
+  // holds the heading: above it, in front of the row it is saved in front of, and below it, in front of the row under
+  // it.
+  const auto above = [y](const Node* node) {
+    float nodeX = 0, nodeY = 0;
+    Node::absolutePosition(node, nodeX, nodeY);
+    return y < nodeY + node->height() * 0.5F;
   };
   for (const auto& row : m_rows) {
     if (!row.pinIndex) {
       continue;
     }
-    if (row.separatorButton != nullptr && above(row.separatorButton)) {
+    if (row.separatorLine != nullptr && above(row.separatorLine)) {
       return PinSlot{.before = *row.separator};
     }
     if (above(row.button)) {

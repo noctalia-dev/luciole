@@ -626,6 +626,7 @@ namespace {
     // A heading belongs to one separator; a bad one or a missing separator is refused.
     TEST_CHECK(service.separatorLabel(first).empty() && !service.setSeparatorLabel(first + 1, "Nowhere"));
     TEST_CHECK(!service.setSeparatorLabel(first, "Bad\nline"));
+    TEST_CHECK(!service.setSeparatorLabel(first, "   ") && !service.setSeparatorLabel(first, "\u00a0\u3000"));
     TEST_CHECK(service.setSeparatorLabel(first, "Projects"));
     pump.ready(service);
     TEST_CHECK(service.separatorLabel(first) == "Projects" && service.separatorLabel(second).empty());

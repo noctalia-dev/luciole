@@ -530,7 +530,7 @@ std::string luciole::PinService::separatorLabel(std::size_t before) const {
 }
 bool luciole::PinService::setSeparatorLabel(std::size_t before, std::string text) {
   const auto found = std::ranges::find(m_state->separators, before);
-  if (found == m_state->separators.end() || (!text.empty() && bookmarkLabelProblem(text))) {
+  if (found == m_state->separators.end() || (!text.empty() && separatorHeadingProblem(text))) {
     return false;
   }
   auto labels = m_state->separatorLabels;

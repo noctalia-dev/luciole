@@ -214,15 +214,7 @@ void RenameController::openSeparatorHeading(std::size_t before) {
   auto editor = std::make_unique<NameDialog>(
       m_page.dialogWidth(DialogWidth::Small), current.empty() ? "Add Heading" : "Rename Heading", "heading", current,
       "Shown under the separator line. Only Luciole shows it.",
-      [](const std::string& label) -> std::optional<std::string> {
-        if (const auto error = luciole::bookmarkLabelProblem(label)) {
-          return error;
-        }
-        if (label.find_first_not_of(' ') == std::string::npos) {
-          return "Enter a heading.";
-        }
-        return std::nullopt;
-      },
+      [](const std::string& label) { return luciole::separatorHeadingProblem(label); },
       [this, anchor](std::string label) {
         const auto& pins = m_pins.bookmarks();
         const auto found = std::ranges::find(pins, anchor, &luciole::Bookmark::location);

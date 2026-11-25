@@ -259,7 +259,7 @@ namespace {
             decoder.issue(value, name, "expected a row number as the key");
           } else if (label == nullptr) {
             decoder.issue(value, name, "expected a heading string");
-          } else if (const auto problem = luciole::bookmarkLabelProblem(label->get())) {
+          } else if (const auto problem = luciole::separatorHeadingProblem(label->get())) {
             decoder.issue(value, name, *problem);
           } else if (
               const auto found = std::ranges::find(state.placeSeparators, row); found != state.placeSeparators.end()
@@ -361,20 +361,40 @@ namespace {
 
 std::optional<std::string> luciole::storedUriProblem(const std::string& uri) { return uriProblem(uri); }
 
+namespace {
+  // `empty` is the message for empty text, `name` what the text is called in the others, e.g. "Labels".
+  std::optional<std::string> textProblem(std::string_view text, std::string_view empty, std::string_view name) {
+    if (text.empty()) {
+      return std::string(empty);
+    }
+    if (text.size() > 256) {
+      return std::format("{} can contain at most 256 UTF-8 bytes.", name);
+    }
+    if (!g_utf8_validate(text.data(), static_cast<gssize>(text.size()), nullptr)) {
+      return std::format("{} must be valid UTF-8 text.", name);
+    }
+    if (std::ranges::any_of(text, [](unsigned char c) { return c < 32 || c == 127; })) {
+      return std::format("{} cannot contain control characters.", name);
+    }
+    return std::nullopt;
+  }
+} // namespace
+
 std::optional<std::string> luciole::bookmarkLabelProblem(std::string_view label) {
-  if (label.empty()) {
-    return "Enter a label.";
+  return textProblem(label, "Enter a label.", "Labels");
+}
+
+std::optional<std::string> luciole::separatorHeadingProblem(std::string_view heading) {
+  if (auto problem = textProblem(heading, "Enter a heading.", "Headings")) {
+    return problem;
   }
-  if (label.size() > 256) {
-    return "Labels can contain at most 256 UTF-8 bytes.";
+  // Valid UTF-8 by now.
+  for (const char* at = heading.data(); at < heading.data() + heading.size(); at = g_utf8_next_char(at)) {
+    if (!g_unichar_isspace(g_utf8_get_char(at))) {
+      return std::nullopt;
+    }
   }
-  if (!g_utf8_validate(label.data(), static_cast<gssize>(label.size()), nullptr)) {
-    return "Labels must be valid UTF-8 text.";
-  }
-  if (std::ranges::any_of(label, [](unsigned char c) { return c < 32 || c == 127; })) {
-    return "Labels cannot contain control characters.";
-  }
-  return std::nullopt;
+  return "Enter a heading.";
 }
 
 luciole::StateStore::StateStore(std::filesystem::path path) : m_path(std::move(path)) {}
