@@ -22,6 +22,7 @@ struct luciole::FolderTotalsService::State : std::enable_shared_from_this<State>
   std::function<void()> changed;
   NetworkFilesystemCheck check;
   bool sameDeviceOnly = false;
+  FolderTotalsType type = FolderTotalsType::TotalSize;
   GSource* timer = nullptr;
   std::uint64_t serial = 0;
   bool alive = true, running = false;
@@ -95,7 +96,7 @@ bool luciole::FolderTotalsService::start(std::span<const DirectoryEntry> entries
   runJob<FolderTotalsSnapshot>(
       state->cancel,
       [roots = std::move(roots), token = state->cancel, progress = state->progress, limited = state->snapshot.limited,
-       check = state->check, sameDevice = state->sameDeviceOnly] mutable {
+       check = state->check, sameDevice = state->sameDeviceOnly, type = state->type] mutable {
         if (check && std::ranges::any_of(roots, [&check](const auto& root) {
               const auto native = root.location().nativePath();
               return native && check(*native);
@@ -117,7 +118,7 @@ bool luciole::FolderTotalsService::start(std::span<const DirectoryEntry> entries
               progress->value = value;
               progress->value.limited |= limited;
             },
-            FolderTotalsLimits{.sameDevice = sameDevice}
+            FolderTotalsLimits{.sameDevice = sameDevice}, type
         );
       },
       [state, serial = state->serial](auto reply) {
@@ -165,3 +166,4 @@ void luciole::FolderTotalsService::setNetworkFilesystemCheck(NetworkFilesystemCh
   m_state->check = std::move(check);
 }
 void luciole::FolderTotalsService::setSameDeviceOnly(bool enabled) { m_state->sameDeviceOnly = enabled; }
+void luciole::FolderTotalsService::setType(FolderTotalsType type) { m_state->type = type; }

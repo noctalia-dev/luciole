@@ -85,6 +85,7 @@ luciole::BrowserController::BrowserController(
     m_folderSizeSlots[index].service.setChangedCallback([this, index] { folderSizeSlotChanged(index); });
     m_folderSizeSlots[index].service.setNetworkFilesystemCheck(networkCheck);
     m_folderSizeSlots[index].service.setSameDeviceOnly(true);
+    m_folderSizeSlots[index].service.setType(m_folderSizeColumnType);
   }
   updateMetadataPolicy();
 }
@@ -796,6 +797,23 @@ void luciole::BrowserController::setExpandableFolders(bool enabled) {
     publish(m_session.snapshot());
   }
 }
+
+void luciole::BrowserController::setFolderSizeColumnType(FolderTotalsType type) {
+  if (type == m_folderSizeColumnType) {
+    return;
+  }
+  m_folderSizeColumnType = type;
+  for (auto& slot : m_folderSizeSlots) {
+    slot.service.clear();
+    slot.id = 0;
+    slot.running = false;
+    slot.service.setType(m_folderSizeColumnType);
+  }
+  m_folderSizeQueue.clear();
+  m_folderSizeCache.clear();
+  notify();
+}
+
 bool luciole::BrowserController::toggleFolder(EntryId id) { return m_tree && m_query.empty() && m_tree->toggle(id); }
 luciole::TreeRowInfo luciole::BrowserController::treeRow(EntryId id) const {
   return m_tree && m_query.empty() ? m_tree->row(id) : TreeRowInfo{};

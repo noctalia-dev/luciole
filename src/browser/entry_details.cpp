@@ -72,6 +72,15 @@ std::string luciole::entryFolderSizeText(const FolderTotalsSnapshot& totals) {
   if (totals.phase != FolderTotalsPhase::Complete) {
     return {};
   }
+  if (totals.type == FolderTotalsType::ChildCount) {
+    if (totals.unavailable > 0) {
+      return {};
+    }
+
+    return std::format(
+        "{}{} items", totals.partial() ? "≥ " : "", totals.files + totals.folders + totals.links + totals.other
+    );
+  }
   const GString size(g_format_size_full(totals.bytes, G_FORMAT_SIZE_IEC_UNITS));
   if (!size) {
     return {};

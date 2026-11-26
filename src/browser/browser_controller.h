@@ -100,6 +100,7 @@ namespace luciole {
     // Returns true when the callback was deferred. Retired browsing contexts discard it.
     bool whenMetadataReady(std::vector<EntryId> ids, std::function<void()> callback, std::uint8_t details = 0);
     void setExpandableFolders(bool enabled);
+    void setFolderSizeColumnType(FolderTotalsType type);
     void releaseLocation(const Location& root);
     bool expandableFolders() const { return m_tree != nullptr; }
     bool toggleFolder(EntryId id);
@@ -201,6 +202,7 @@ namespace luciole {
     std::vector<Visit> m_history;
     BrowseViewport m_defaults;
     SortOptions m_defaultSort;
+    FolderTotalsType m_folderSizeColumnType = luciole::FolderTotalsType::ChildCount;
     const FolderViewService* m_folderViews = nullptr;
     BrowseViewport m_viewport;
     std::optional<BrowseViewport> m_restoredViewport;

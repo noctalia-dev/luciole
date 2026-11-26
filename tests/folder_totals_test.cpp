@@ -242,6 +242,35 @@ namespace {
         && service.snapshot().folders == plain.folders
     );
   }
+
+  auto childCount(std::vector<luciole::DirectoryEntry> roots, luciole::FolderTotalsLimits limits = {}) {
+    return luciole::walkFolderTotals(
+        std::move(roots), {}, [](const auto&) {}, limits, luciole::FolderTotalsType::ChildCount
+    );
+  }
+
+  void basicChildCount(const fs::path& root) {
+    fs::create_directory(root / "child_count_empty");
+    const auto empty = childCount({entry(root / "child_count_empty")});
+    TEST_CHECK(!empty.partial() && empty.bytes == 0 && empty.files == 0 && empty.folders == 0);
+    const auto tree = root / "child_count_tree";
+    fs::create_directories(tree / "nested");
+    std::ofstream(tree / "café-<literal>-文.txt") << "abc";
+    fs::create_hard_link(tree / "café-<literal>-文.txt", tree / "hard-link");
+    std::ofstream(tree / ".hidden") << "12345";
+    const int fd = ::open((tree / "sparse").c_str(), O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+    TEST_CHECK(fd >= 0 && ::ftruncate(fd, 1048576) == 0 && ::close(fd) == 0);
+    fs::create_directory(root / "outside");
+    std::ofstream(root / "outside" / "excluded") << std::string(20000, 'x');
+    fs::create_symlink("../outside", tree / "external");
+    fs::create_symlink("missing", tree / "broken");
+    fs::create_symlink(".", tree / "cycle");
+    TEST_CHECK(::mkfifo((tree / "pipe").c_str(), 0600) == 0);
+    const auto result = childCount({entry(tree)});
+    TEST_CHECK(
+        !result.partial() && result.bytes == 0 && result.files + result.folders + result.links + result.other == 9
+    );
+  }
 } // namespace
 
 int main() {
@@ -254,6 +283,7 @@ int main() {
   lifecycle(root);
   serviceNetworkRefusal(root);
   sameDeviceContainment(root);
+  basicChildCount(root);
   fs::remove_all(root);
   std::println("folder totals checks passed");
 }

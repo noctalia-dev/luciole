@@ -5,12 +5,14 @@
 #include <span>
 
 namespace luciole {
+  enum class FolderTotalsType : std::uint8_t { TotalSize, ChildCount };
   enum class FolderTotalsPhase : std::uint8_t { Idle, Running, Complete, Cancelled, Unsupported };
   struct FolderTotalsSnapshot {
     FolderTotalsPhase phase = FolderTotalsPhase::Idle;
     std::uint64_t bytes = 0, files = 0, folders = 0, links = 0, other = 0;
     std::uint64_t unavailable = 0, unsupported = 0, changed = 0;
     bool limited = false, overflow = false, cancelRequested = false;
+    FolderTotalsType type = FolderTotalsType::TotalSize;
     std::string error;
     bool operator==(const FolderTotalsSnapshot&) const = default;
     bool partial() const {
@@ -33,6 +35,7 @@ namespace luciole {
     void clear();
     bool busy() const;
     const FolderTotalsSnapshot& snapshot() const;
+    void setType(FolderTotalsType type);
     void setChangedCallback(std::function<void()> changed);
     void setNetworkFilesystemCheck(NetworkFilesystemCheck check);
     void setSameDeviceOnly(bool enabled);

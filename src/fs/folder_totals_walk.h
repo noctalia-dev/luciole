@@ -12,6 +12,7 @@ namespace luciole {
   // Worker entry point. Progress is a bounded value, never a retained per-item result list.
   FolderTotalsSnapshot walkFolderTotals(
       std::vector<DirectoryEntry> roots, const CancelToken& token,
-      const std::function<void(const FolderTotalsSnapshot&)>& progress, FolderTotalsLimits limits = {}
+      const std::function<void(const FolderTotalsSnapshot&)>& progress, FolderTotalsLimits limits = {},
+      FolderTotalsType type = FolderTotalsType::TotalSize
   );
 } // namespace luciole

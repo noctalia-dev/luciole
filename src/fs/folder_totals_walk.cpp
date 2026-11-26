@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <string>
 #include <unistd.h>
 
 namespace {
@@ -29,13 +30,15 @@ namespace {
   public:
     Walker(
         std::vector<luciole::DirectoryEntry> roots, const luciole::CancelToken& token,
-        const std::function<void(const luciole::FolderTotalsSnapshot&)>& progress, luciole::FolderTotalsLimits limits
+        const std::function<void(const luciole::FolderTotalsSnapshot&)>& progress, luciole::FolderTotalsLimits limits,
+        luciole::FolderTotalsType type
     )
         : m_roots(std::move(roots)), m_token(token), m_progress(progress), m_limits(limits) {
       std::ranges::stable_sort(m_roots, {}, [](const auto& entry) { return entry.location().uri().size(); });
       for (const auto& root : m_roots) {
         m_selected.emplace(root.location().uri(), &root);
       }
+      m_result.type = type;
       m_result.phase = luciole::FolderTotalsPhase::Running;
     }
     luciole::FolderTotalsSnapshot run() {
@@ -53,6 +56,12 @@ namespace {
             ++m_result.unsupported;
             continue;
           }
+
+          if (m_result.type == luciole::FolderTotalsType::ChildCount) {
+            dirChildCount(*location.nativePath());
+            continue;
+          }
+
           const auto fd = luciole::checkedFd(::open(location.nativePath()->c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC));
           const auto value = luciole::statFd(fd.get());
           m_scopeDevice = value.st_dev;
@@ -223,6 +232,41 @@ namespace {
         ++m_result.changed;
       }
     }
+
+    void dirChildCount(const std::string& path) {
+      const int descriptor = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (descriptor < 0) {
+        luciole::throwErrno(errno);
+      }
+      const std::unique_ptr<DIR, CloseDirectory> directory(::fdopendir(descriptor));
+      if (!directory) {
+        const int code = errno;
+        ::close(descriptor);
+        luciole::throwErrno(code);
+      }
+      while (true) {
+        errno = 0;
+        const auto* item = ::readdir(directory.get());
+        if (!item) {
+          if (errno) {
+            failed(luciole::errnoError(errno));
+          }
+          break;
+        }
+        if (strcmp(item->d_name, ".") == 0 || strcmp(item->d_name, "..") == 0) {
+          continue;
+        }
+        ++m_result.files;
+        ++m_items;
+        if (m_items % 1000 == 0) {
+          m_progress(m_result);
+          if (stopped()) {
+            return;
+          }
+        }
+      }
+    }
+
     std::vector<luciole::DirectoryEntry> m_roots;
     const luciole::CancelToken& m_token;
     const std::function<void(const luciole::FolderTotalsSnapshot&)>& m_progress;
@@ -239,7 +283,7 @@ namespace {
 
 luciole::FolderTotalsSnapshot luciole::walkFolderTotals(
     std::vector<DirectoryEntry> roots, const CancelToken& token,
-    const std::function<void(const FolderTotalsSnapshot&)>& progress, FolderTotalsLimits limits
+    const std::function<void(const FolderTotalsSnapshot&)>& progress, FolderTotalsLimits limits, FolderTotalsType type
 ) {
-  return Walker(std::move(roots), token, progress, limits).run();
+  return Walker(std::move(roots), token, progress, limits, type).run();
 }

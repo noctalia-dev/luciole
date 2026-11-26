@@ -136,6 +136,7 @@ BrowserPage::BrowserPage(
     return viewport;
   });
   m_browser.setExpandableFolders(settings.expandableFolders && settings.viewMode == luciole::ViewMode::List);
+  m_browser.setFolderSizeColumnType(settings.folderSizeColumnType);
   m_terminal.setCommand(settings.terminalCommand);
   m_launcher.setTerminalCommand(settings.terminalCommand);
   m_sidebar.load(settings);
@@ -2288,6 +2289,7 @@ void BrowserPage::syncBrowser() {
   m_browser.setExpandableFolders(
       m_savedSettings.expandableFolders && m_viewMode == luciole::ViewMode::List && !m_miller.enabled()
   );
+  m_browser.setFolderSizeColumnType(m_savedSettings.folderSizeColumnType);
   const auto& model = browser().model();
   const auto& snapshot = model.snapshot();
   if (m_locationBar.syncLocation(snapshot.location)) {

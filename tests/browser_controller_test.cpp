@@ -987,6 +987,7 @@ namespace {
     std::ofstream(fixture.path / "sized" / "two") << "abcde";
     Pump pump;
     BrowserController browser({}, false);
+    browser.setFolderSizeColumnType(luciole::FolderTotalsType::TotalSize);
     browser.open(Location::fromPath(fixture.path.native()));
     pump.ready(browser);
     const auto emptyId = id(browser, "empty");
@@ -1046,6 +1047,7 @@ namespace {
       ++probeCalls;
       return true;
     });
+    browser.setFolderSizeColumnType(luciole::FolderTotalsType::TotalSize);
     browser.open(Location::fromPath(fixture.path.native()));
     pump.ready(browser);
     const auto refusalId = id(browser, "remote-ish");

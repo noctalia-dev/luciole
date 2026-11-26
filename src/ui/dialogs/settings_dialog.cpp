@@ -252,6 +252,11 @@ SettingsDialog::SettingsDialog(
   section("List Columns", "list-details");
   card("List");
   addBool(P::ExpandableFolders, "Expandable Folders");
+  const Choices<luciole::FolderTotalsType> folderSizeColumnTypeFields{
+      {"Child Count", luciole::FolderTotalsType::ChildCount},
+      {"Total Size", luciole::FolderTotalsType::TotalSize},
+  };
+  addChoice(P::FolderSizeColumnType, "Size Column For Folder Shows", folderSizeColumnTypeFields);
   auto orderLabel = ui::label({.fontSize = Style::fontSizeCaption, .maxWidth = 180.0F});
   auto* orderText = orderLabel.get();
   addRow<luciole::DetailsColumnOrder>(

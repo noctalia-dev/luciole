@@ -110,6 +110,7 @@ All keys below belong in `[browser]`. Dimensions are logical pixels unless state
 | `show_drives` | `true` | Show drive rows |
 | `show_network` | `true` | Show Network in the sidebar, retaining its saved position when hidden |
 | `expandable_folders` | `false` | Expand folders within List view |
+| `folder_size_column_type` | `"child_count"` | `"child_count"`, `"total_size"`; choose between showing immediate child count or total size for folders in the list view |
 | `show_preview` | `true` | Show the side preview when space permits |
 | `chooser_show_preview` | `false` | Show the side preview in file picker windows; toggling the preview there changes only this key |
 | `chooser_start_folder` | `"home"` | `"home"`, `"last"`; where a file picker opens when the application suggests no folder. `"last"` reopens the folder of the last accepted pick; a folder the application suggests always wins |
