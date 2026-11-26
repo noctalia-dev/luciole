@@ -333,6 +333,7 @@ namespace {
       describe(P::ShowCloseButtons, "show_close_buttons", [](S& s) -> auto& { return s.showCloseButtons; }),
       describe(P::ReduceAnimations, "reduce_animations", [](S& s) -> auto& { return s.reduceAnimations; }),
       describe(P::UseSSD, "use_ssd", [](S& s) -> auto& { return s.useSSD; }),
+      describe(P::ShowFolderInTitle, "show_folder_in_title", [](S& s) -> auto& { return s.showFolderInTitle; }),
       describe(P::ColorScheme, "color_scheme", [](S& s) -> auto& { return s.colorScheme; }, {kColorSchemes}),
       describe(
           P::BackgroundOpacity, "background_opacity", [](S& s) -> auto& { return s.backgroundOpacity; },

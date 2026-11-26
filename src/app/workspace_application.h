@@ -50,6 +50,8 @@ class WorkspaceApplication {
     luciole::TabId revealedTab = 0;
     std::uint32_t revealedTabWidth = 0;
     std::vector<std::pair<luciole::TabId, std::string>> labels;
+    // The title last sent to the compositor; browser windows start as "Luciole".
+    std::string title = "Luciole";
     std::vector<luciole::TabId> mounted;
     luciole::TabId chromeOwner = 0;
     std::optional<luciole::TabId> pressedTab;
@@ -162,6 +164,9 @@ private:
   void tabMenu(Host& host, luciole::TabId tab, float x, float y);
   static Button::ButtonPalette closeTabPalette(ColorRole foreground);
   void rebuildStrip(Host& host, const luciole::TabWindow& window);
+  // With browser.show_folder_in_title, names the window after its active pane's tab label; otherwise "Luciole".
+  // FileChooser windows keep the title their request asked for.
+  void syncWindowTitle(Host& host);
   void syncTooltip(Host& host);
   // The window dispatcher's focus moved: the pages hear it and the pane that holds it becomes the active one.
   void focusChanged(Host& host, InputArea* focused);

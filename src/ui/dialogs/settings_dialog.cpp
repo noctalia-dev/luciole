@@ -189,6 +189,7 @@ SettingsDialog::SettingsDialog(
   if (compositorSupportsSSD) {
     addBool(P::UseSSD, "Use System Title Bar And Borders");
   }
+  addBool(P::ShowFolderInTitle, "Show Folder in Window Title", "Taskbars and window lists show the folder name");
   addBool(P::AlwaysShowTabBar, "Always Show Tab Bar");
   addBool(P::AlwaysShowStatusBar, "Always Show Status Bar");
   addBool(P::CompactMenus, "Compact Context Menus");

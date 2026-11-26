@@ -909,6 +909,31 @@ namespace {
     }
   }
 
+  void testShowFolderInTitle() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && !config.settings().browser.showFolderInTitle);
+    fixture.write("config.toml", "[browser]\nshow_folder_in_title = true\nshow_hidden = true\n");
+    TEST_CHECK(config.reload() && config.settings().browser.showFolderInTitle && config.settings().browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::ShowFolderInTitle, false}}) == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(loaded && !loaded->browser.showFolderInTitle && loaded->browser.showHidden);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::ShowFolderInTitle, std::nullopt}})
+            == State::Durable
+        && config.settings().browser.showFolderInTitle
+        && !read(fixture.paths().overrides).contains("show_folder_in_title")
+    );
+    for (const auto* value : {"1", "'true'", "1.0"}) {
+      fixture.write("config.toml", std::string("[browser]\nshow_folder_in_title = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
   void testAlwaysShowStatusBar() {
     using Preference = luciole::BrowserPreference;
     using State = luciole::AtomicWriteState;
@@ -1725,6 +1750,7 @@ int main() {
     testAlwaysShowTabBar();
     testShowCloseButtons();
     testContextMenuIcons();
+    testShowFolderInTitle();
     testAlwaysShowStatusBar();
     testPreviewVisibility();
     testDetailsColumnVisibility();

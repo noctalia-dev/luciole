@@ -32,6 +32,7 @@
 #include "ui/controls/tooltip_presenter.h"
 #include "ui/palette.h"
 #include "ui/style.h"
+#include "util/string_utils.h"
 #include "wayland/popup_surface.h"
 #include "wayland/text_input_service.h"
 #include "wayland/toplevel_surface.h"
@@ -104,6 +105,7 @@ WorkspaceApplication::WorkspaceApplication(
     for (auto& [id, host] : m_hosts) {
       (void)id;
       host->surface.setUseSSD(m_defaults.useSSD);
+      syncWindowTitle(*host);
     }
   });
   m_clipboard.setChangedCallback([this] {
@@ -1992,6 +1994,25 @@ void WorkspaceApplication::rebuildStrip(Host& host, const luciole::TabWindow& wi
   host.root->addChild(std::move(strip));
 }
 
+void WorkspaceApplication::syncWindowTitle(Host& host) {
+  const auto window = m_model.windows().find(host.id);
+  if (host.chooser || host.closed || !host.surface.isRunning() || window == m_model.windows().end()) {
+    return;
+  }
+  std::string title = "Luciole";
+  if (m_defaults.showFolderInTitle) {
+    // The tab label of the active pane, so the strip and the title never disagree.
+    const auto page = m_pages.find(window->second.active);
+    if (page != m_pages.end() && page->second->location()) {
+      title = StringUtils::windowTitleSingleLine(page->second->title() + " - Luciole");
+    }
+  }
+  if (title != host.title) {
+    host.title = std::move(title);
+    host.surface.setTitle(host.title);
+  }
+}
+
 void WorkspaceApplication::syncTooltip(Host& host) {
   if (!host.tooltip) {
     return;
@@ -2149,6 +2170,7 @@ void WorkspaceApplication::prepare(Host& host) {
     host.chromeOwner = window.active;
   }
   rebuildStrip(host, window);
+  syncWindowTitle(host);
   const float stripHeight = host.stripVisible ? kTabStripHeight : 0.0F;
   host.splitButton->setSelected(window.secondary.has_value());
   std::vector<luciole::TabId> visible{window.primary};

@@ -36,6 +36,10 @@ Plain single-line Middle text uses the shared renderer's compact layout. Pango s
 
 `browser.context_menu_icons` defaults to `true` and appears under Settings → Appearance. Action glyph names live beside each action in [ActionRegistry](../../src/browser/action_registry.cpp), and sort actions reuse `sortFieldGlyph()` from [DirectoryOptions](../../src/model/directory_options.h) so the Sort and Columns menus agree; one-off menus set the same `ContextMenuControlEntry::glyph` field. [MenuController](../../src/app/page/menu_controller.cpp) and [SubmenuController](../../src/app/page/submenu_controller.cpp) apply the preference with `applyContextMenuIconPreference()` before publishing entries. Disabling it removes the reserved leading column without changing entry ids, checkmarks, shortcuts or submenu behavior.
 
+## Folder in window title
+
+`browser.show_folder_in_title` defaults to `false` and appears under Settings → Appearance → Window. [WorkspaceApplication](../../src/app/workspace_application.cpp) calls `syncWindowTitle()` from `prepare()`, right after `rebuildStrip()`, so the title is checked on the same frames that refresh tab labels: navigation, tab switch or close, pane focus in split view, and renames or removals that change a page's location. The title is the active pane's `BrowserPage::title()` (the tab label, so Trash, Network and Home read as they do in the strip) plus ` - Luciole`, passed through `StringUtils::windowTitleSingleLine()`; a page without a location, and every window while the setting is off, reads `Luciole`. `Host::title` keeps the last title sent, so `xdg_toplevel_set_title` only goes out when the text changes. The preferences callback also syncs every window, so toggling the setting applies at once. FileChooser windows return early and keep `FileChooserSession::windowTitle()`.
+
 ## Atomic writes
 
 [atomic_file.cpp](../../src/fs/atomic_file.cpp) implements anchored local transactions. Cooperating writers use a persistent advisory lock. Preserve that lock across ordinary cleanup; unlinking it can split writer coordination. New private directories use 0700 and data/temporary/lock files use 0600.

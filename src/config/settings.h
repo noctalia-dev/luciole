@@ -38,6 +38,7 @@ namespace luciole {
     bool showCloseButtons = true;
     bool reduceAnimations = false;
     bool useSSD = true;
+    bool showFolderInTitle = false; // Browser windows title themselves after the shown folder.
     ColorScheme colorScheme = ColorScheme::Auto;
     double backgroundOpacity = 1.0; // 0 (clear) to 1 (opaque) for the window background.
     double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
@@ -104,6 +105,7 @@ namespace luciole {
     ShowCloseButtons,
     ReduceAnimations,
     UseSSD,
+    ShowFolderInTitle,
     ColorScheme,
     BackgroundOpacity,
     CornerRadiusScale,
@@ -207,6 +209,7 @@ namespace luciole {
     static constexpr PreferenceKey<bool> ShowCloseButtons{Id::ShowCloseButtons};
     static constexpr PreferenceKey<bool> ReduceAnimations{Id::ReduceAnimations};
     static constexpr PreferenceKey<bool> UseSSD{Id::UseSSD};
+    static constexpr PreferenceKey<bool> ShowFolderInTitle{Id::ShowFolderInTitle};
     static constexpr PreferenceKey<luciole::ColorScheme> ColorScheme{Id::ColorScheme};
     static constexpr PreferenceKey<double> BackgroundOpacity{Id::BackgroundOpacity};
     static constexpr PreferenceKey<double> CornerRadiusScale{Id::CornerRadiusScale};
