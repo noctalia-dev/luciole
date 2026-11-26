@@ -46,7 +46,7 @@ std::vector<luciole::Breadcrumb> luciole::locationBreadcrumbs(const Location& lo
 }
 
 std::string luciole::locationTitle(const Location& location) {
-  if (location != Location::network() && location.parent()) {
+  if (location.parent()) {
     if (auto name = location.displayName()) {
       return *name;
     }
