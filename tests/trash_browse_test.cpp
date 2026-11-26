@@ -78,6 +78,7 @@ namespace {
         && crumbs.back().location == nested
     );
     TEST_CHECK(luciole::locationEditText(nested) == nested.uri());
+    TEST_CHECK(luciole::locationTitle(root) == "Trash" && luciole::locationTitle(nested) == "c#.txt");
   }
   void unavailableProvider() {
     Pump pump;

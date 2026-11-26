@@ -977,6 +977,13 @@ namespace {
         && remoteCrumbs.front().label == "example.org"
         && luciole::locationEditText(remote) == remote.uri()
     );
+    TEST_CHECK(luciole::locationTitle(Location::fromPath("/")) == "File System");
+    TEST_CHECK(luciole::locationTitle(path) == "café" && luciole::locationTitle(Location::network()) == "Network");
+    TEST_CHECK(luciole::locationTitle(Location::fromUri("sftp://user:secret@example.org/")) == "example.org");
+    TEST_CHECK(luciole::locationTitle(remote) == "leaf");
+    if (homePath != "/") {
+      TEST_CHECK(luciole::locationTitle(home) == homePath.filename().native());
+    }
   }
 
   void testFolderSizes() {

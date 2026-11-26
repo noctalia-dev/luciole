@@ -432,7 +432,7 @@ std::string BrowserPage::title() const {
   if (!location()) {
     return "Luciole";
   }
-  return location() == luciole::Location::network() ? "Network" : location()->displayName().value_or("Luciole");
+  return luciole::locationTitle(*location());
 }
 
 void BrowserPage::preferencesChanged(const std::string& error) {

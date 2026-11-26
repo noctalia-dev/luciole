@@ -45,6 +45,15 @@ std::vector<luciole::Breadcrumb> luciole::locationBreadcrumbs(const Location& lo
   return result;
 }
 
+std::string luciole::locationTitle(const Location& location) {
+  if (location != Location::network() && location.parent()) {
+    if (auto name = location.displayName()) {
+      return *name;
+    }
+  }
+  return locationBreadcrumbs(location).back().label;
+}
+
 std::string luciole::locationEditText(const Location& location) {
   // Virtual discovery folders have no native path; asking GVfs can start discovery just to build a tooltip.
   if (location.isNetworkDiscovery()) {
