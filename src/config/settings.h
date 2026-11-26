@@ -38,7 +38,7 @@ namespace luciole {
     bool showCloseButtons = true;
     bool reduceAnimations = false;
     bool useSSD = true;
-    bool showFolderInTitle = false; // Browser windows title themselves after the shown folder.
+    bool showFolderInTitle = true; // Browser windows title themselves after the shown folder.
     ColorScheme colorScheme = ColorScheme::Auto;
     double backgroundOpacity = 1.0; // 0 (clear) to 1 (opaque) for the window background.
     double cornerRadiusScale = 1.0; // 0 (square) to 2; 1 is the default rounding.
