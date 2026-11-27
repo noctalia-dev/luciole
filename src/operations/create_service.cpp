@@ -7,7 +7,10 @@
 #include "fs/system_mounts.h"
 #include "operations/create_receipt.h"
 #include "operations/creation_stage.h"
+#include "operations/provider_item.h"
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
@@ -45,11 +48,14 @@ namespace {
   struct Target {
     std::string path;
     luciole::Fd directory;
+    std::optional<luciole::ProviderItem> provider;
     std::unique_ptr<TemplateSource> source;
     std::optional<std::string> image;
     explicit Target(std::string path)
         : path(std::move(path)),
           directory(luciole::checkedFd(::open(this->path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC))) {}
+    Target(const luciole::Location& location, const luciole::CancelToken& token)
+        : provider(std::in_place, location, token, true) {}
     void requireCurrent() const {
       const auto current = luciole::checkedFd(::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
       if (!luciole::sameIdentity(luciole::statFd(current.get()), luciole::statFd(directory.get()))) {
@@ -330,12 +336,12 @@ bool luciole::CreateService::prepareTarget(
   State::launch(
       m_state, [parent, source = std::move(source), image = std::move(image)](const CancelToken& token) mutable {
         const auto path = parent.nativePath();
-        if (!path) {
-          throwFileError(FileErrorKind::Unsupported, "Creating remote files or folders is not supported yet.");
+        if (!path && !parent.isAdmin()) {
+          throwFileError(FileErrorKind::Unsupported, "Choose a local or administrator folder.");
         }
         const auto mount = openSystemMount(parent, token, true);
         const auto templateMount = source ? openSystemMount(source->location, token, false) : Fd{};
-        auto target = std::make_shared<Target>(*path);
+        auto target = parent.isAdmin() ? std::make_shared<Target>(parent, token) : std::make_shared<Target>(*path);
         if (source) {
           target->source = std::make_unique<TemplateSource>(std::move(*source));
         }
@@ -362,6 +368,49 @@ bool luciole::CreateService::create(std::string name) {
   State::launch(
       m_state,
       [target = m_state->target, kind = m_state->snapshot.kind, name = std::move(name)](const CancelToken& token) {
+        if (target->provider) {
+          if (target->source) {
+            target->source->requireCurrent();
+          }
+          auto destination = createProviderItem(
+              *target->provider, name, kind == CreateKind::Folder, token, [&](GOutputStream* stream) {
+                const auto write = [&](const char* bytes, std::size_t size) {
+                  GError* raw = nullptr;
+                  if (!g_output_stream_write_all(stream, bytes, size, nullptr, gioCancellable(token), &raw)) {
+                    const GErrorPtr error(raw);
+                    throw FileErrorException(fileError(*error));
+                  }
+                };
+                if (kind == CreateKind::Image) {
+                  write(target->image->data(), target->image->size());
+                } else if (kind == CreateKind::Document) {
+                  auto& source = *target->source;
+                  source.requireCurrent();
+                  std::array<char, 65536> buffer{};
+                  std::uint64_t offset = 0;
+                  while (offset < source.source.revision.size) {
+                    const auto count = ::pread(
+                        source.file.get(), buffer.data(),
+                        std::min<std::uint64_t>(buffer.size(), source.source.revision.size - offset),
+                        static_cast<off_t>(offset)
+                    );
+                    if (count < 0) {
+                      throwErrno(errno);
+                    }
+                    if (count == 0) {
+                      throwFileError(FileErrorKind::Changed, "The template changed.");
+                    }
+                    write(buffer.data(), static_cast<std::size_t>(count));
+                    offset += static_cast<std::uint64_t>(count);
+                  }
+                  source.requireCurrent();
+                }
+              }
+          );
+          return Reply{
+              .target = {}, .destination = std::move(destination), .error = {}, .linkSource = {}, .receipt = {}
+          };
+        }
         const auto mount = openSystemMount(Location::fromPath(target->path), token, true);
         const auto templateMount =
             target->source ? openSystemMount(target->source->source.location, token, false) : Fd{};

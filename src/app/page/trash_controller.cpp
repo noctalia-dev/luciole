@@ -91,7 +91,8 @@ void TrashController::deleteItems(const std::vector<luciole::DirectoryEntry>& ta
   if (targets.empty()) {
     return;
   }
-  if (m_page.settings().confirmPermanentDeletion) {
+  if (m_page.settings().confirmPermanentDeletion
+      || std::ranges::any_of(targets, [](const auto& entry) { return entry.location().isAdmin(); })) {
     openEmptyTrash(targets);
     return;
   }

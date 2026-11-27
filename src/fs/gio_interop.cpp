@@ -78,6 +78,11 @@ luciole::FileError luciole::directoryOpenError(const Location& location, FileErr
       return error;
     }
   }
+  if (location.isAdmin()) {
+    error.message = "Administrator access is unavailable. Install or enable the GVfs admin backend, Polkit and "
+                    "a desktop authentication agent, then restart Luciole.";
+    return error;
+  }
   error.message = std::format(
       "Desktop support for {}:// is unavailable. Install or enable its GIO/GVfs backend and session services, then "
       "restart Luciole.",

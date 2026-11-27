@@ -119,6 +119,9 @@ std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luc
     );
   }
   add(Action::Terminal);
+  if (request.folder && (request.folder->isAdmin() || request.folder->administratorLocation())) {
+    add(request.folder->isAdmin() ? Action::LeaveAdmin : Action::OpenCurrentAdmin);
+  }
   addSeparator(entries);
   add(Action::CreateFolder);
   add(Action::NewDocument);
@@ -157,6 +160,9 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   const bool trash = request.targets.front().location.isTrash();
 
   add(Action::Open);
+  if (singleFolder && !single->symlink && singleLocation->administratorLocation()) {
+    add(Action::OpenAdmin);
+  }
   add(Action::OpenWith);
   if (single
       && singleLocation->isNative()
@@ -256,7 +262,10 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
     add(Action::Compress);
     addSeparator(entries);
   }
-  for (const auto action : luciole::itemMenuDeletionActions(trash, m_page.settings().showPermanentDeletion)) {
+  const auto deletion = request.targets.front().location.isAdmin()
+      ? std::vector<Action>{Action::DeletePermanently}
+      : luciole::itemMenuDeletionActions(trash, m_page.settings().showPermanentDeletion);
+  for (const auto action : deletion) {
     add(action);
   }
   addSeparator(entries);
@@ -287,6 +296,12 @@ void MenuController::openFileMenu(std::optional<luciole::EntryId> id, float x, f
     }
   }
   auto entries = id ? itemMenuEntries(request) : folderMenuEntries(request);
+  const bool administratorShortcut = std::ranges::any_of(entries, [](const auto& entry) {
+    return entry.shortcut
+        && (entry.id == luciole::ActionRegistry::menuId(Action::OpenAdmin)
+            || entry.id == luciole::ActionRegistry::menuId(Action::OpenCurrentAdmin)
+            || entry.id == luciole::ActionRegistry::menuId(Action::LeaveAdmin));
+  });
   std::vector<std::pair<std::size_t, int>> submenus;
   for (std::size_t row = 0; row < entries.size(); ++row) {
     if (entries[row].hasSubmenu) {
@@ -312,7 +327,7 @@ void MenuController::openFileMenu(std::optional<luciole::EntryId> id, float x, f
           m_page.dispatchAction(*browserAction, request);
         }
       },
-      {x, y, 1, 1}
+      {x, y, 1, 1}, false, administratorShortcut ? 352.0F : 264.0F
   );
   if (!m_menu) {
     return;

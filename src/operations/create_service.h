@@ -24,7 +24,7 @@ namespace luciole {
     bool removed = false, retireHistory = false;
   };
 
-  // One native file or folder creation. Preparation pins the destination while editing.
+  // One native or administrator file/folder creation. Preparation captures the destination while editing.
   class CreateService {
   public:
     CreateService();

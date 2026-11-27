@@ -108,6 +108,9 @@ private:
     float x, y;
   };
 
+  void syncAdministrator();
+  Button* m_adminButton = nullptr;
+
   void requestCompletions(const std::string& text);
   void acceptCompletion(std::size_t index, bool navigate);
   bool completionKey(std::uint32_t key, std::uint32_t modifiers);

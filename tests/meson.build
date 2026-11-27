@@ -14,6 +14,7 @@ activation_server = custom_target('launch-activation-server-header',
 )
 
 test_table = [
+  {'name': 'admin-access', 'deps': [operations_dep, browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'adaptive-sidebar', 'deps': [model_dep]},
   {'name': 'system-mounts', 'deps': [operations_dep, platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'ws-discovery', 'deps': [fs_dep], 'env': gio_env, 'wrapper': files('ws_discovery_test.py')},

@@ -102,6 +102,7 @@ In addition to linked-library runtime packages, ship or recommend the following 
 | Image loaders | Glycin loaders for a Glycin-enabled GdkPixbuf, otherwise GdkPixbuf loader modules for the formats to support. |
 | Session D-Bus and GVfs | Required for the shipped Trash interface; see below. |
 | GVfs protocol backends | Install the backends for the network protocols the package supports. |
+| GVfs admin backend and Polkit | Optional administrator access; include `gvfsd-admin`, `admin.mount`, the provider's Polkit policies, `pkexec`, the Polkit system service and a desktop authentication agent. |
 | GVfs UDisks volume monitor and UDisks2 | Device discovery, mounting and supported encrypted-volume unlocking; expose the volume monitor's session activation and the UDisks2 system service. |
 | GVfs DNS-SD backend and Avahi | Optional DNS-SD discovery; requires the backend, its schemas/mount data and a working Avahi service. |
 | `glib-networking` | Supply GIO TLS support for secure WebDAV. |
@@ -118,6 +119,8 @@ Missing optional helpers do not prevent ordinary local browsing. File Roller, Ar
 Declare GVfs as a runtime dependency, not just a network-access recommendation. Include its GIO module, `gvfsd`, `gvfsd-trash`, mount data and session D-Bus activation files. Distributions split these among packages differently; installing client libraries alone is insufficient. Add the SFTP, SMB and WebDAV backends needed by the package.
 
 A usable session bus and daemon activation are required; a GNOME desktop session is not. Luciole uses GIO directly and does not require `gvfs-fuse`. Do not force `GIO_USE_VFS=local` in a packaged launcher: that test-only setting disables provider access.
+
+Administrator access uses GVfs's `admin:///` provider. Keep its normal distribution authorization policy and privileged-helper setup. Luciole installs no setuid binary, Polkit policy or authentication agent, and its window continues running under the user's account. The existing Nix GVfs package supplies the backend; enabling the system services and authentication agent remains a system configuration choice.
 
 Device mounting and LUKS unlocking additionally use `gvfs-udisks2-volume-monitor` and the UDisks2 system service over the system bus. Provide the monitor's GIO module/metadata and session D-Bus activation files. UDisks owns the encryption backend and filesystem helpers; include their normal device-mapper udev rules so unlocked mappings can be identified. Luciole does not invoke cryptsetup or require its development library. System authorization remains subject to UDisks/Polkit policy and an available desktop authentication agent when needed. An optional system secret service can retain provider credentials for the session. The NixOS module keeps service activation manual.
 

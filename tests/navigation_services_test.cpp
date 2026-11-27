@@ -279,6 +279,12 @@ namespace {
       result = std::move(suggestions);
       done = true;
     };
+    for (const auto* partial : {"admin:/", "admin://", "admin://host/", "sftp://%/"}) {
+      done = false;
+      completion.complete(partial, base, false, receive);
+      TEST_CHECK(done && !result.error.empty() && result.items.empty());
+    }
+    done = false;
     completion.complete("A", base, false, receive);
     pump.until([&] { return done; });
     TEST_CHECK(result.error.empty() && result.items.size() == 3);

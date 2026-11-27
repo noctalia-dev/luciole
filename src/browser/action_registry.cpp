@@ -82,7 +82,7 @@ namespace {
     return {};
   }
   State createItem(const C& c, const R& r) {
-    if (!native(r) || !c.query.empty() || !ready(c)) {
+    if ((!native(r) && !(r.folder && r.folder->isAdmin())) || !c.query.empty() || !ready(c)) {
       return unavailable("Open an available native folder first.");
     }
     if (c.model.snapshot().metadata.access.write == false) {
@@ -118,7 +118,9 @@ namespace {
         return unavailable("Batch rename requires identified items from one native folder.");
       }
     }
-    if (!all(c, r, [](const DirectoryEntry& entry) { return entry.location().nativePath().has_value(); })) {
+    if (!all(c, r, [&](const DirectoryEntry& entry) {
+          return entry.location().nativePath().has_value() || (rename && single(r) && entry.location().isAdmin());
+        })) {
       return unavailable("This operation currently supports native files only.");
     }
     if (!rename && (!ready(c) || r.targets.size() > 4096)) {
@@ -557,7 +559,9 @@ namespace {
                          c, r,
                          [](const DirectoryEntry& entry) {
                            const auto location = entry.location();
-                           return location.isNative() && location.parent().has_value() && entry.access.remove != false;
+                           return (location.isNative() || location.isAdmin())
+                               && location.parent().has_value()
+                               && entry.access.remove != false;
                          }
                      ),
                  "Select deletable native items outside Trash."
@@ -710,6 +714,48 @@ namespace {
        .glyph = "terminal-2",
        .scope = S::Targets,
        .rule = targetTerminal},
+      {.action = A::OpenAdmin,
+       .label = "Open as Administrator",
+       .glyph = "shield-lock",
+       .keybind = K::AdministratorAccess,
+       .scope = S::Targets,
+       .rule =
+           [](const C& c, const R& r) {
+             return require(
+                 single(r)
+                     && !c.operationsBusy
+                     && all(
+                         c, r,
+                         [](const DirectoryEntry& entry) {
+                           return entry.type == FileType::Directory
+                               && !entry.symlink
+                               && entry.location().administratorLocation().has_value();
+                         }
+                     ),
+                 "Select one local folder and wait for file operations to finish."
+             );
+           }},
+      {.action = A::OpenCurrentAdmin,
+       .label = "Open as Administrator",
+       .glyph = "shield-lock",
+       .keybind = K::AdministratorAccess,
+       .scope = S::Location,
+       .rule =
+           [](const C& c, const R& r) {
+             return require(
+                 r.folder && r.folder->administratorLocation() && !c.operationsBusy,
+                 "Open a local folder and wait for file operations to finish."
+             );
+           }},
+      {.action = A::LeaveAdmin,
+       .label = "Return to Normal Access",
+       .glyph = "shield-off",
+       .keybind = K::AdministratorAccess,
+       .scope = S::Location,
+       .rule =
+           [](const C&, const R& r) {
+             return require(r.folder && r.folder->isAdmin(), "This folder is already open with normal access.");
+           }},
       {.action = A::KeyboardShortcuts,
        .label = "Keyboard Shortcuts",
        .glyph = "keyboard",
@@ -838,6 +884,9 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::Redo:
   case A::Operations:
   case A::TargetTerminal:
+  case A::OpenAdmin:
+  case A::OpenCurrentAdmin:
+  case A::LeaveAdmin:
     return false;
   }
   return false;

@@ -42,7 +42,14 @@ luciole::Location luciole::Location::fromUri(const std::string& uri) {
   if (!scheme || !g_uri_is_valid(uri.c_str(), G_URI_FLAGS_ENCODED, nullptr)) {
     throw std::invalid_argument("expected an absolute URI");
   }
-  const auto file = gioFile(Location(uri));
+  const bool admin = g_ascii_strcasecmp(scheme.get(), "admin") == 0;
+  const auto address = admin ? "admin:" + uri.substr(uri.find(':') + 1) : uri;
+  if (admin && !Location(address).isAdmin()) {
+    throw std::invalid_argument(
+        "Administrator locations require admin:/// with no host, credentials, query or fragment."
+    );
+  }
+  const auto file = gioFile(Location(address));
   const GString canonical(g_file_get_uri(file.get()));
   return Location(canonical.get());
 }
@@ -63,7 +70,7 @@ luciole::Location luciole::Location::fromCanonicalNativeUri(std::string uri) {
 }
 
 std::optional<std::string> luciole::Location::nativePath() const {
-  if (isTrash()) {
+  if (isTrash() || m_uri.starts_with("admin:")) {
     return std::nullopt;
   }
   const GString path(g_file_get_path(gioFile(*this).get()));
@@ -86,6 +93,27 @@ bool luciole::Location::isDeviceRoot() const {
 }
 bool luciole::Location::isTrash() const { return trashUri(m_uri); }
 bool luciole::Location::isNative() const { return g_file_is_native(gioFile(*this).get()) != FALSE; }
+
+bool luciole::Location::isAdmin() const {
+  if (!m_uri.starts_with("admin:///")) {
+    return false;
+  }
+  const std::unique_ptr<GUri, decltype(&g_uri_unref)> uri(
+      g_uri_parse(m_uri.c_str(), G_URI_FLAGS_ENCODED, nullptr), g_uri_unref
+  );
+  return uri
+      && !g_uri_get_userinfo(uri.get())
+      && g_uri_get_port(uri.get()) == -1
+      && !g_uri_get_query(uri.get())
+      && !g_uri_get_fragment(uri.get());
+}
+std::optional<luciole::Location> luciole::Location::administratorLocation() const {
+  return m_uri.starts_with("file:///") && isNative() ? std::optional(Location("admin:" + m_uri.substr(5)))
+                                                     : std::nullopt;
+}
+std::optional<luciole::Location> luciole::Location::unprivilegedLocation() const {
+  return isAdmin() ? std::optional(Location::fromUri("file:" + m_uri.substr(6))) : std::nullopt;
+}
 
 std::optional<luciole::Location> luciole::Location::parent() const {
   const GioPtr<GFile> parent(g_file_get_parent(gioFile(*this).get()));

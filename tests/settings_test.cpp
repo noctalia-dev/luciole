@@ -1704,14 +1704,16 @@ namespace {
   }
   void testFolderAndClipboardKeybinds() {
     using K = luciole::KeybindCommand;
-    const std::array commands{K::CopyTargetPath, K::CopyTargetUri, K::OpenInOtherPane, K::OpenInNewWindow};
-    const std::array defaults{"Ctrl+Alt+C", "Ctrl+Alt+U", "Ctrl+Alt+Return", "Shift+Return"};
-    const std::array replacements{"Ctrl+Alt+P", "Ctrl+Alt+I", "Ctrl+Alt+O", "Ctrl+Alt+Y"};
+    const std::array commands{
+        K::CopyTargetPath, K::CopyTargetUri, K::OpenInOtherPane, K::OpenInNewWindow, K::AdministratorAccess
+    };
+    const std::array defaults{"Ctrl+Alt+C", "Ctrl+Alt+U", "Ctrl+Alt+Return", "Shift+Return", "Alt+Shift+Return"};
+    const std::array replacements{"Ctrl+Alt+P", "Ctrl+Alt+I", "Ctrl+Alt+O", "Ctrl+Alt+Y", "Ctrl+Alt+M"};
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
     TEST_CHECK(service.reload());
     auto edited = service.settings().browser.keybinds;
-    TEST_CHECK(luciole::keybindCommands(luciole::KeybindScope::FileBrowser).size() == 45);
+    TEST_CHECK(luciole::keybindCommands(luciole::KeybindScope::FileBrowser).size() == 46);
     for (std::size_t i = 0; i < commands.size(); ++i) {
       TEST_CHECK(edited.chords(commands[i])[0] == luciole::parseKeybindChord(defaults[i]));
       TEST_CHECK(luciole::keybindCommandFromKey(luciole::keybindCommandKey(commands[i])) == commands[i]);
@@ -1753,7 +1755,8 @@ namespace {
     constexpr auto table = "[browser.keybinds]\n";
     const std::array defaults{
         std::pair{K::CopyTargetPath, "Ctrl+Alt+C"}, std::pair{K::CopyTargetUri, "Ctrl+Alt+U"},
-        std::pair{K::OpenInOtherPane, "Ctrl+Alt+Return"}, std::pair{K::OpenInNewWindow, "Shift+Return"}
+        std::pair{K::OpenInOtherPane, "Ctrl+Alt+Return"}, std::pair{K::OpenInNewWindow, "Shift+Return"},
+        std::pair{K::AdministratorAccess, "Alt+Shift+Return"}
     };
     for (const auto& [command, spec] : defaults) {
       const auto custom = std::format("{}search = [\"{}\"]\n", table, spec);

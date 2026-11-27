@@ -25,7 +25,7 @@ namespace luciole {
     PathCompletion(const PathCompletion&) = delete;
     PathCompletion& operator=(const PathCompletion&) = delete;
     void complete(
-        const std::string& text, const Location& base, bool showHidden, std::function<void(PathSuggestions)> completed
+        const std::string& text, const Location& base, bool showHidden, std::function<void(PathSuggestions)> callback
     );
     void children(const Location& parent, bool showHidden, std::function<void(PathSuggestions)> completed);
     void cancel();

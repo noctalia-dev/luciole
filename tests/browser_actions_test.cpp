@@ -556,6 +556,82 @@ namespace {
     ++context.context;
     TEST_CHECK(!R::state(A::OpenWith, context, request).enabled);
   }
+  void testAdministratorShortcut() {
+    using K = luciole::KeybindCommand;
+    for (const auto action : {A::OpenAdmin, A::OpenCurrentAdmin, A::LeaveAdmin}) {
+      TEST_CHECK(luciole::shortcutMatches(action, XKB_KEY_Return, KeyMod::Alt | KeyMod::Shift));
+      TEST_CHECK(!luciole::shortcutMatches(action, XKB_KEY_Return, 0));
+      TEST_CHECK(luciole::actionShortcutLabel(action) == "Alt+Shift+Enter");
+    }
+    auto rebound = luciole::KeybindConfig{};
+    luciole::setKeybindChord(rebound, K::AdministratorAccess, 0, luciole::parseKeybindChord("F6"));
+    luciole::setActiveKeybinds(rebound);
+    for (const auto action : {A::OpenAdmin, A::OpenCurrentAdmin, A::LeaveAdmin}) {
+      TEST_CHECK(luciole::shortcutMatches(action, XKB_KEY_F6, 0));
+      TEST_CHECK(!luciole::shortcutMatches(action, XKB_KEY_Return, KeyMod::Alt | KeyMod::Shift));
+      TEST_CHECK(luciole::actionShortcutLabel(action) == "F6");
+    }
+    luciole::setKeybindChord(rebound, K::AdministratorAccess, 0, std::nullopt);
+    luciole::setActiveKeybinds(rebound);
+    TEST_CHECK(luciole::actionShortcutLabel(A::OpenAdmin).empty());
+    luciole::setActiveKeybinds(luciole::KeybindConfig{});
+  }
+
+  void testAdministratorActions() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    model.applySnapshot(data);
+    model.select(6);
+    luciole::ActionContext c{
+        .model = model, .context = 19, .query = {}, .pinned = {}, .clipboardAvailable = true, .clipboardHasFiles = true
+    };
+    auto request = R::capture(c);
+    TEST_CHECK(R::state(A::OpenAdmin, c, request).enabled);
+    TEST_CHECK(R::state(A::OpenCurrentAdmin, c, request).enabled);
+    TEST_CHECK(!R::state(A::LeaveAdmin, c, request).enabled);
+    c.chooser = true;
+    TEST_CHECK(!R::state(A::OpenAdmin, c, request).enabled);
+    c.chooser = false;
+    c.operationsBusy = true;
+    TEST_CHECK(!R::state(A::OpenAdmin, c, request).enabled);
+    c.operationsBusy = false;
+    model.select(1);
+    TEST_CHECK(!R::state(A::OpenAdmin, c, R::capture(c)).enabled);
+    model.select(6);
+    test::editEntries(data, [](auto& entries) { entries.back().symlink = true; });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::OpenAdmin, c, R::capture(c)).enabled);
+    data.location = luciole::Location::fromUri("admin:///usr/share");
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].place = data.location->child("alpha.txt");
+      entries[0].access.read = true;
+      entries[0].access.write = true;
+      entries[0].access.remove = true;
+      entries[0].access.rename = true;
+    });
+    ++data.generation;
+    model.applySnapshot(data);
+    model.select(1);
+    request = R::capture(c);
+    for (const auto action :
+         {A::CreateFolder, A::CreateFile, A::Rename, A::DeletePermanently, A::CopyFiles, A::CutFiles, A::PasteFiles,
+          A::LeaveAdmin}) {
+      TEST_CHECK(R::state(action, c, request).enabled);
+    }
+    TEST_CHECK(!R::state(A::OpenCurrentAdmin, c, request).enabled);
+    TEST_CHECK(!R::state(A::Trash, c, request).enabled);
+    c.operationsBusy = true;
+    TEST_CHECK(R::state(A::LeaveAdmin, c, request).enabled);
+    TEST_CHECK(!R::state(A::CreateFolder, c, request).enabled);
+    c.operationsBusy = false;
+    data.location = luciole::Location::fromUri("sftp://host/path");
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::OpenCurrentAdmin, c, R::capture(c)).enabled);
+    TEST_CHECK(!R::state(A::LeaveAdmin, c, R::capture(c)).enabled);
+  }
+
   void testArchiveActions() {
     luciole::DirectoryModel model;
     auto data = snapshot();
@@ -1110,6 +1186,8 @@ namespace {
 int main() {
   try {
     testActionTable();
+    testAdministratorActions();
+    testAdministratorShortcut();
     testShortcuts();
     testClipboardShortcutBindings();
     testPointerActivation();

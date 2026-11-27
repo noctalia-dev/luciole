@@ -989,7 +989,9 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         work.allowMerge = allowMerge;
         auto revisions = std::make_shared<HistoryRevisions>();
         work.history = revisions;
-        auto operationHistory = owner->operationHistory && !retry
+        const bool administrator = job->request.destination.isAdmin()
+            || std::ranges::any_of(job->request.sources, [](const auto& source) { return source.isAdmin(); });
+        auto operationHistory = owner->operationHistory && !retry && !administrator
             ? std::make_unique<OperationHistory>(job->request.action, token, revisions)
             : nullptr;
         work.operationHistory = operationHistory.get();
@@ -1002,7 +1004,8 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         };
         // Keep displaced data alive until every source has finished, even if optional history is disqualified.
         std::vector<PreparedCopy> preparedCopies;
-        const auto budget = !retry ? transferHistoryBudget(job->request.action == TransferAction::Move ? 14 : 7) : 0;
+        const auto budget =
+            !retry && !administrator ? transferHistoryBudget(job->request.action == TransferAction::Move ? 14 : 7) : 0;
         std::size_t remaining = 16384;
         MoveCapture moveHistory(
             job->request.action == TransferAction::Move ? budget : 0, token, revisions, job->request.destination,
@@ -1086,7 +1089,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
                     const auto answer = owner->gate.ask(std::move(conflict), token, [owner] { State::notify(owner); });
                     return answer ? answer->choice : TransferConflictChoice::Cancel;
                   },
-                  &work, !retry && !job->request.destination.isNative() && !operationHistory
+                  &work, !retry && !administrator && !job->request.destination.isNative() && !operationHistory
               )
             : retry ? retryJob(*job, work, owner->completed)
                     : runFirst(*job, work, owner->completed);

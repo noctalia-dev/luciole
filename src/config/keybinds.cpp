@@ -210,6 +210,12 @@ namespace {
        "Open in New Window",
        {"Shift+Return"},
        true},
+      {KeybindCommand::AdministratorAccess,
+       KeybindScope::FileBrowser,
+       "administrator_access",
+       "Administrator Access",
+       {"Alt+Shift+Return"},
+       true},
       {KeybindCommand::ToggleSelection,
        KeybindScope::FileBrowser,
        "toggle_selection",
@@ -305,7 +311,7 @@ namespace {
   );
 
   constexpr std::size_t kControlKeybindCount = 12;
-  constexpr std::size_t kFileBrowserKeybindCount = 45;
+  constexpr std::size_t kFileBrowserKeybindCount = 46;
   constexpr std::size_t kTabsAndWindowsKeybindCount = 22;
   static_assert(kControlKeybindCount + kFileBrowserKeybindCount + kTabsAndWindowsKeybindCount == kKeybindSpecs.size());
 } // namespace

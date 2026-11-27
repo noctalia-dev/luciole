@@ -43,7 +43,7 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
   breadcrumbScroll->content()->addChild(
       ui::row({.out = &m_breadcrumbs, .align = FlexAlign::Center, .gap = 0.0F, .height = Style::controlHeight})
   );
-  auto locationArea = ui::column(
+  auto locationArea = ui::row(
       {.out = &m_locationArea,
        .align = FlexAlign::Stretch,
        .fill = colorSpecFromRole(ColorRole::SurfaceContainerHigh),
@@ -51,6 +51,17 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
        .minWidth = 80.0F,
        .height = Style::controlHeight,
        .flexGrow = 1.0F},
+      ui::button(
+          {.out = &m_adminButton,
+           .text = "Administrator",
+           .glyph = "shield-lock",
+           .controlHeight = Style::controlHeightSm,
+           .variant = ButtonVariant::Secondary,
+           .tooltip = "Administrator access · Return to normal access",
+           .visible = false,
+           .participatesInLayout = false,
+           .onClick = [this] { m_page.dispatchAction(luciole::BrowserAction::LeaveAdmin); }}
+      ),
       std::move(breadcrumbScroll),
       ui::input(
           {.out = &m_location,
@@ -339,6 +350,9 @@ bool LocationBarController::syncLocation(const std::optional<luciole::Location>&
 }
 
 void LocationBarController::sync() {
+  const auto& location = m_page.browser().model().snapshot().location;
+  const bool admin = location && location->isAdmin();
+  syncAdministrator();
   m_location->setInvalid(m_locationInvalid);
   const bool recursive = m_page.browser().searchRecursive();
   m_scopeButton->setGlyph(recursive ? "search" : "filter");
@@ -362,6 +376,8 @@ void LocationBarController::sync() {
   }
   if (m_locationInvalid) {
     m_locationArea->setBorder(colorSpecFromRole(ColorRole::Error), Style::borderWidth);
+  } else if (admin) {
+    m_locationArea->setBorder(colorSpecFromRole(ColorRole::Secondary), Style::borderWidth);
   } else {
     m_locationArea->clearBorder();
   }
@@ -376,7 +392,17 @@ bool LocationBarController::onFrame() {
   return false;
 }
 
+void LocationBarController::syncAdministrator() {
+  const auto& location = m_page.browser().model().snapshot().location;
+  const bool compact = m_page.surface().width() < 760;
+  const bool shown = location && location->isAdmin() && !(compact && m_editingLocation);
+  m_adminButton->setText(compact ? "" : "Administrator");
+  m_adminButton->setVisible(shown);
+  m_adminButton->setParticipatesInLayout(shown);
+}
+
 void LocationBarController::prepareLayout() {
+  syncAdministrator();
   const float searchWidth = std::clamp(static_cast<float>(m_page.surface().width()) * 0.22F, 148.0F, 220.0F);
   m_searchArea->setMinWidth(searchWidth);
   m_searchArea->setMaxWidth(searchWidth);

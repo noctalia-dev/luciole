@@ -95,6 +95,9 @@ namespace luciole {
     Redo,
     Operations,
     TargetTerminal,
+    OpenAdmin,
+    OpenCurrentAdmin,
+    LeaveAdmin,
     KeyboardShortcuts
   };
   // KeyboardShortcuts stays the last enumerator.

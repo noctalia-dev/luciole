@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <exception>
 #include <stdexcept>
+#include <utility>
 
 struct luciole::PathCompletion::State {
   CancelToken token;
@@ -24,8 +25,10 @@ void luciole::PathCompletion::cancel() {
   m_state->token = CancelToken{};
 }
 void luciole::PathCompletion::complete(
-    const std::string& text, const Location& base, bool showHidden, std::function<void(PathSuggestions)> completed
+    const std::string& text, const Location& base, bool showHidden, std::function<void(PathSuggestions)> callback
 ) {
+  // Keep an owned completion available if validating or starting the request throws.
+  const auto completed = std::move(callback);
   try {
     if (text.empty()) {
       cancel();
@@ -33,7 +36,8 @@ void luciole::PathCompletion::complete(
       return;
     }
     if (text.ends_with('/') || text == "~") {
-      enumerate(resolveLocationText(text, base), {}, showHidden, std::move(completed));
+      const auto parent = resolveLocationText(text, base);
+      enumerate(parent, {}, showHidden, completed);
       return;
     }
     const auto slash = text.find_last_of('/');
@@ -46,7 +50,7 @@ void luciole::PathCompletion::complete(
       }
       prefix = decoded.get();
     }
-    enumerate(parent, prefix, showHidden || prefix.starts_with('.'), std::move(completed));
+    enumerate(parent, prefix, showHidden || prefix.starts_with('.'), completed);
   } catch (const std::exception& error) {
     cancel();
     completed({.items = {}, .error = error.what()});

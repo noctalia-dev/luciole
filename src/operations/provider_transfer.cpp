@@ -34,10 +34,11 @@ namespace {
       throwFileError(FileErrorKind::Cancelled, "Transfer cancelled.");
     }
   }
-  Info info(const Location& location, const CancelToken& token, bool missing = false) {
+  Info info(const Location& location, const CancelToken& token, bool missing = false, bool follow = false) {
     GError* error = nullptr;
     Info result(g_file_query_info(
-        gioFile(location).get(), kAttributes, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, gioCancellable(token), &error
+        gioFile(location).get(), kAttributes, follow ? G_FILE_QUERY_INFO_NONE : G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+        gioCancellable(token), &error
     ));
     if (!result) {
       if (missing && error && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
@@ -89,6 +90,35 @@ namespace {
   }
   bool folder(GFileInfo* value) {
     return g_file_info_get_file_type(value) == G_FILE_TYPE_DIRECTORY && !readIsSymlink(value);
+  }
+  // The local and administrator URI namespaces share one filesystem. Resolve ancestor identities on the
+  // worker too, so parent symlinks cannot bypass source-containment checks.
+  bool localLocation(const Location& location) { return location.isAdmin() || location.uri().starts_with("file:"); }
+  bool adminContains(const Location& ancestor, const Location& descendant, const CancelToken& token) {
+    if (!localLocation(ancestor) || !localLocation(descendant)) {
+      return false;
+    }
+    const auto elevated = [](const Location& location) {
+      return location.isAdmin() ? location : location.administratorLocation().value_or(location);
+    };
+    const auto ancestorInfo = info(elevated(ancestor), token);
+    const auto identity = readFileIdentity(ancestorInfo.get());
+    if (!identity) {
+      throwFileError(FileErrorKind::Unsupported, "The administrator provider cannot identify this folder.");
+    }
+    for (auto current = std::optional(elevated(descendant)); current; current = current->parent()) {
+      GError* error = nullptr;
+      const Info actual(g_file_query_info(
+          gioFile(*current).get(), "id::file,id::filesystem", G_FILE_QUERY_INFO_NONE, gioCancellable(token), &error
+      ));
+      if (!actual) {
+        fail(error);
+      }
+      if (readFileIdentity(actual.get()) == identity) {
+        return true;
+      }
+    }
+    return false;
   }
   void unchanged(GFileInfo* expected, GFileInfo* actual, bool content = true) {
     if (!actual
@@ -445,7 +475,7 @@ struct luciole::ProviderTransfer::State {
       copy(tree, node.parent.child(stage.name()).child("item"), work.token, work.bytes);
       validate(tree, work.token);
       const auto validateDestination = [&] {
-        unchanged(parentInfo, info(node.parent, work.token).get(), false);
+        unchanged(parentInfo, info(node.parent, work.token, false, node.parent.isAdmin()).get(), false);
         const auto current = checkedFd(::open(node.parent.nativePath()->c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
         if (!sameIdentity(parentStamp, statFd(current.get()))) {
           throwFileError(FileErrorKind::Changed, "The destination folder changed during the download.");
@@ -686,7 +716,7 @@ struct luciole::ProviderTransfer::State {
     check(token);
     unchanged(node.captured.get(), info(node.source, token).get(), action != TransferAction::Link);
     unchanged(existing.get(), info(target, token).get());
-    unchanged(parent, info(node.parent, token).get(), false);
+    unchanged(parent, info(node.parent, token, false, node.parent.isAdmin()).get(), false);
     if (choice == TransferConflictChoice::Cancel) {
       throwFileError(FileErrorKind::Cancelled, "Transfer cancelled.");
     }
@@ -749,8 +779,9 @@ struct luciole::ProviderTransfer::State {
       } else {
         node.captured = std::move(source);
       }
-      auto parent = info(node.parent, token);
-      if (!folder(parent.get())) {
+      auto parent = info(node.parent, token, false, node.parent.isAdmin());
+      if (g_file_info_get_file_type(parent.get()) != G_FILE_TYPE_DIRECTORY
+          || (readIsSymlink(parent.get()) && !node.parent.isAdmin())) {
         throwFileError(FileErrorKind::NotDirectory, "The destination is not a folder.");
       }
       if (g_file_info_has_attribute(parent.get(), G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE)
@@ -760,6 +791,10 @@ struct luciole::ProviderTransfer::State {
       if (action != TransferAction::Link
           && (transferLocationsEqual(node.source, node.parent)
               || (folder(node.captured.get()) && transferLocationInside(node.parent, node.source)))) {
+        throwFileError(FileErrorKind::WouldRecurse, "A folder cannot be placed inside itself.");
+      }
+      const bool administrator = node.source.isAdmin() || node.parent.isAdmin();
+      if (administrator && folder(node.captured.get()) && adminContains(node.source, node.parent, token)) {
         throwFileError(FileErrorKind::WouldRecurse, "A folder cannot be placed inside itself.");
       }
       auto name = exactTarget && depth == 0 ? exactTarget->basename() : node.source.basename();
@@ -777,6 +812,16 @@ struct luciole::ProviderTransfer::State {
         return;
       }
       auto existing = info(target, token, true);
+      if (administrator
+          && existing
+          && readFileIdentity(existing.get())
+          && readFileIdentity(existing.get()) == readFileIdentity(node.captured.get())) {
+        if (action == TransferAction::Move) {
+          node.result.outcome = TransferOutcome::Skipped;
+          return;
+        }
+        keepBoth = true;
+      }
       std::uint64_t number = 0;
       while (keepBoth && existing) {
         if (++number > 10000) {
@@ -785,6 +830,13 @@ struct luciole::ProviderTransfer::State {
         const auto stem = filenameStemLength(*name, folder(node.captured.get()));
         target = node.parent.child(name->substr(0, stem) + std::format(" ({})", number) + name->substr(stem));
         existing = info(target, token, true);
+      }
+      if (administrator && existing && folder(existing.get())) {
+        for (const auto& selected : request.sources) {
+          if (localLocation(selected) && adminContains(target, selected, token)) {
+            throwFileError(FileErrorKind::WouldRecurse, "A destination folder contains a selected source.");
+          }
+        }
       }
       if (existing && !node.merged && !resolveConflict(node, *name, target, existing, parent.get(), token, choose)) {
         return;
@@ -809,7 +861,7 @@ struct luciole::ProviderTransfer::State {
         );
       }
       const auto validateParent = [&] {
-        unchanged(parent.get(), info(node.parent, token).get(), false);
+        unchanged(parent.get(), info(node.parent, token, false, node.parent.isAdmin()).get(), false);
         if (nativeParent.valid()) {
           struct stat current{};
           if (::stat(node.parent.nativePath()->c_str(), &current) != 0

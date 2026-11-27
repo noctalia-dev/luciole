@@ -4,6 +4,7 @@
 #include "fs/filename.h"
 #include "fs/posix_fd.h"
 #include "fs/system_mounts.h"
+#include "operations/provider_item.h"
 
 #include <cerrno>
 #include <fcntl.h>
@@ -16,11 +17,14 @@ namespace {
   struct Target {
     std::string parentPath, name;
     luciole::Fd parent, item;
+    std::optional<luciole::ProviderItem> provider, providerParent;
     explicit Target(const std::string& path)
         : parentPath(std::filesystem::path(path).parent_path().native()),
           name(std::filesystem::path(path).filename().native()),
           parent(luciole::checkedFd(::open(parentPath.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC))),
           item(luciole::checkedFd(::openat(parent.get(), name.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC))) {}
+    Target(const luciole::Location& source, const luciole::CancelToken& token)
+        : provider(std::in_place, source, token), providerParent(std::in_place, *source.parent(), token, true) {}
   };
   struct Reply {
     std::shared_ptr<Target> target;
@@ -102,6 +106,12 @@ bool luciole::RenameService::prepare(const Location& source) {
       .status = RenameStatus::Preparing, .source = source, .destination = std::nullopt, .error = {}, .receipt = {}
   };
   State::launch(m_state, [source](const CancelToken& token) {
+    if (source.isAdmin()) {
+      if (!source.parent()) {
+        throwFileError(FileErrorKind::InvalidArgument, "The filesystem root cannot be renamed.");
+      }
+      return Reply{.target = std::make_shared<Target>(source, token), .destination = {}, .receipt = {}};
+    }
     const auto path = source.nativePath();
     if (!path) {
       throwFileError(FileErrorKind::Unsupported, "Renaming remote items is not supported yet.");
@@ -128,6 +138,10 @@ bool luciole::RenameService::rename(std::string name) {
   m_state->snapshot.status = RenameStatus::Renaming;
   m_state->snapshot.error.reset();
   State::launch(m_state, [target = m_state->target, name = std::move(name)](const CancelToken& token) {
+    if (target->provider) {
+      target->providerParent->requireCurrent(token, false);
+      return Reply{.target = {}, .destination = renameProviderItem(*target->provider, name, token), .receipt = {}};
+    }
     const auto mount = openSystemMount(Location::fromPath(target->parentPath), token);
     auto destination = Location::fromPath((std::filesystem::path(target->parentPath) / name).native());
     const auto parent = checkedFd(::open(target->parentPath.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));

@@ -19,7 +19,7 @@ namespace luciole {
     std::shared_ptr<const RenameReceipt> receipt;
   };
 
-  // One native rename. Preparation pins identities while the editor is open.
+  // One native or administrator rename. Preparation captures identities while the editor is open.
   class RenameService {
   public:
     RenameService();

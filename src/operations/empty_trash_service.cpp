@@ -3,6 +3,7 @@
 #include "fs/background_job.h"
 #include "fs/gio_interop.h"
 #include "fs/system_mounts.h"
+#include "operations/provider_item.h"
 #include "operations/transfer_copy.h"
 #include "operations/trash_item.h"
 
@@ -345,7 +346,8 @@ bool luciole::EmptyTrashService::prepareTargets(
         std::set<std::string> seen;
         for (const auto& entry : *selection) {
           const auto location = entry.location();
-          if (!(outsideTrash ? location.isNative() && location.parent().has_value() : isTopLevelTrashItem(location))
+          if (!(outsideTrash ? (location.isNative() || location.isAdmin()) && location.parent().has_value()
+                             : isTopLevelTrashItem(location))
               || !seen.insert(location.uri()).second) {
             throwFileError(FileErrorKind::InvalidArgument, "Select distinct items from a supported folder.");
           }
@@ -391,6 +393,27 @@ void luciole::EmptyTrashService::State::startEmpty(const std::shared_ptr<State>&
           const auto& target = (*targets)[index];
           auto& result = results[index];
           try {
+            if (outsideTrash && target.location.isAdmin()) {
+              if (target.identity != queryTrashItem(target.location, token).identity()) {
+                throwFileError(FileErrorKind::Changed, "The item changed after confirmation. Select it again.");
+              }
+              const auto native = *target.location.unprivilegedLocation();
+              if (const auto childMount = automountInside(native, configured)) {
+                throwFileError(FileErrorKind::NotMounted, "Cannot delete a folder containing an automount.");
+              }
+              bool changed = false;
+              try {
+                deleteProviderTree(ProviderItem(target.location, token), token, changed);
+                result.outcome = EmptyTrashOutcome::Deleted;
+              } catch (...) {
+                result.error = currentFileError();
+                result.outcome = changed                             ? EmptyTrashOutcome::Unconfirmed
+                    : result.error->kind == FileErrorKind::Cancelled ? EmptyTrashOutcome::Cancelled
+                                                                     : failedDelete(result.error->kind);
+              }
+              owner->completed.fetch_add(1);
+              continue;
+            }
             // Pin the confirmed item before checking it, so a later swap at its path is detected.
             Fd parent;
             std::string name;

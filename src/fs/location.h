@@ -23,6 +23,10 @@ namespace luciole {
     std::optional<std::string> nativeFileUri() const;
     bool isTrash() const;
     bool isNative() const;
+    // Local GVfs administrator namespace, with no authority, credentials, query or fragment.
+    bool isAdmin() const;
+    std::optional<Location> administratorLocation() const;
+    std::optional<Location> unprivilegedLocation() const;
 
     // nullopt at a root.
     std::optional<Location> parent() const;

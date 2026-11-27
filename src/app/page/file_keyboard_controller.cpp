@@ -176,7 +176,7 @@ bool FileKeyboardController::commandKey(const KeyboardEvent& event) {
     const bool trash = luciole::keybindMatches(luciole::KeybindCommand::Trash, event.sym, event.modifiers);
     if (permanently || trash) {
       const auto& folder = m_page.browser().model().snapshot().location;
-      if (permanently || (folder && folder->isTrash())) {
+      if (permanently || (folder && (folder->isTrash() || folder->isAdmin()))) {
         m_page.dispatchAction(Action::DeletePermanently);
       } else {
         m_page.dispatchAction(Action::Trash);

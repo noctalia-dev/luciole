@@ -1257,6 +1257,16 @@ bool BrowserPage::dispatchShortcut(const KeyboardEvent& event, std::initializer_
 
 bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
   const bool editing = m_locationBar.textFocused();
+  if (!editing && luciole::keybindMatches(luciole::KeybindCommand::AdministratorAccess, event.sym, event.modifiers)) {
+    if (!event.repeat && !choosing()) {
+      const auto request = actionRequest(true);
+      const auto action = request.folder && request.folder->isAdmin() ? Action::LeaveAdmin
+          : request.targets.empty()                                   ? Action::OpenCurrentAdmin
+                                                                      : Action::OpenAdmin;
+      dispatchAction(action, request);
+    }
+    return true;
+  }
   if (!editing && !event.repeat && dispatchShortcut(event, {Action::Terminal})) {
     return true;
   }
@@ -1653,6 +1663,15 @@ void BrowserPage::runAction(
       {Action::Operations, [](BrowserPage& page, const Call&) { page.m_operations.open(); }},
       {Action::TargetTerminal,
        [](BrowserPage& page, const Call& call) { page.openTerminal(call.targets.front().location()); }},
+      {Action::OpenAdmin, [](BrowserPage& page, const Call& call) {
+        if (const auto target = call.targets.front().location().administratorLocation()) { page.browser().open(*target); }
+      }},
+      {Action::OpenCurrentAdmin, [](BrowserPage& page, const Call& call) {
+        if (const auto target = call.request.folder->administratorLocation()) { page.browser().open(*target); }
+      }},
+      {Action::LeaveAdmin, [](BrowserPage& page, const Call& call) {
+        if (const auto target = call.request.folder->unprivilegedLocation()) { page.browser().open(*target); }
+      }},
       {Action::KeyboardShortcuts, [](BrowserPage& page, const Call&) { page.m_shortcutsController.open(); }},
   });
   static_assert(luciole::actionTableInOrder(kHandlers));

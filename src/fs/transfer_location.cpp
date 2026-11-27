@@ -51,6 +51,9 @@ bool luciole::transferLocationSupported(const Location& location) {
   if (scheme == "file") {
     return location.isNative() && location.nativePath().has_value();
   }
+  if (scheme == "admin") {
+    return location.isAdmin();
+  }
   return (scheme == "sftp" || scheme == "smb" || scheme == "dav" || scheme == "davs")
       && g_uri_get_host(uri.get())
       && *g_uri_get_host(uri.get());
@@ -85,6 +88,11 @@ bool luciole::transferLocationsEqual(const Location& source, const Location& tar
   if (source == target) {
     return true;
   }
+  if (source.isAdmin() || target.isAdmin()) {
+    const auto a = source.unprivilegedLocation().value_or(source);
+    const auto b = target.unprivilegedLocation().value_or(target);
+    return a == b;
+  }
   const auto path = smbPath(source, target);
   if (!path) {
     return false;
@@ -93,6 +101,11 @@ bool luciole::transferLocationsEqual(const Location& source, const Location& tar
   return folded(g_uri_get_path(a.get())) == *path;
 }
 bool luciole::transferLocationInside(const Location& child, const Location& parent) {
+  if (child.isAdmin() || parent.isAdmin()) {
+    const auto a = child.unprivilegedLocation().value_or(child);
+    const auto b = parent.unprivilegedLocation().value_or(parent);
+    return a.isInside(b);
+  }
   if (child.isInside(parent)) {
     return true;
   }
