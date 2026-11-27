@@ -1,9 +1,32 @@
 {
   "pluralRules": [
-    {"mod": 100, "range": [11, 14], "suffix": "-many"},
-    {"mod": 10, "range": [1, 1], "suffix": ""},
-    {"mod": 10, "range": [2, 4], "suffix": "-few"},
-    {"suffix": "-many"}
+    {
+      "mod": 100,
+      "range": [
+        11,
+        14
+      ],
+      "suffix": "-many"
+    },
+    {
+      "mod": 10,
+      "range": [
+        1,
+        1
+      ],
+      "suffix": ""
+    },
+    {
+      "mod": 10,
+      "range": [
+        2,
+        4
+      ],
+      "suffix": "-few"
+    },
+    {
+      "suffix": "-many"
+    }
   ],
   "common": {
     "select": "Вибрати…",
@@ -89,7 +112,18 @@
     "Use System Title Bar And Borders": "Використовувати системний заголовок і межі вікна",
     "When Dropping Files": "Під час перетягування файлів",
     "When Typing": "Під час введення",
-    "When the application suggests no folder": "Коли програма не пропонує теку"
+    "When the application suggests no folder": "Коли програма не пропонує теку",
+    "Toolbar": "Панель інструментів",
+    "Sidebar Button": "Кнопка бічної панелі",
+    "Parent Folder Button": "Кнопка батьківської теки",
+    "New Folder Button": "Кнопка нової теки",
+    "Sort Button": "Кнопка сортування",
+    "View Switch": "Перемикання вигляду",
+    "File Operations Button": "Кнопка файлових операцій",
+    "Always": "Завжди",
+    "While Busy": "Під час роботи",
+    "Button Order": "Порядок кнопок",
+    "Right-click a toolbar button to move it": "Правий клік по кнопці панелі, щоб перемістити її"
   },
   "language": {
     "system": "Системна мова",
@@ -163,7 +197,15 @@
     "results": "результатів",
     "selected": "вибрано",
     "skipped": "пропущено",
-    "used": "використано"
+    "used": "використано",
+    "File changed": "Файл змінився",
+    "Low resolution": "Низька роздільна здатність",
+    "No text preview": "Немає текстового прев'ю",
+    "Not UTF-8 text": "Не UTF-8 текст",
+    "Read error": "Помилка читання",
+    "Remote file": "Віддалений файл",
+    "Truncated": "Обрізано",
+    "Publishing output…": "Публікація результату…"
   },
   "errors": {
     "listing-not-available": "Список недоступний для вибору.",
@@ -210,7 +252,35 @@
     "This item cannot be renamed right now.": "Цей об’єкт зараз не можна перейменувати.",
     "This operation is not supported here.": "Ця операція тут не підтримується.",
     "This password request is no longer active.": "Цей запит пароля більше не активний.",
-    "This request is no longer active.": "Цей запит більше не активний."
+    "This request is no longer active.": "Цей запит більше не активний.",
+    "Administrator access is unavailable. Install or enable the GVfs admin backend, Polkit and a desktop authentication agent, then restart Luciole.": "Доступ адміністратора недоступний. Встановіть або увімкніть адмін-бекенд GVfs, Polkit та агент автентифікації робочого стола, а потім перезапустіть Luciole.",
+    "Choose a local or administrator folder.": "Виберіть локальну теку або теку з доступом адміністратора.",
+    "The item changed after confirmation. Select it again.": "Об'єкт змінився після підтвердження. Виберіть його знову.",
+    "The item changed. Reopen this action.": "Об'єкт змінився. Відкрийте цю дію знову.",
+    "The item was moved or replaced. Reopen this action.": "Об'єкт переміщено або замінено. Відкрийте цю дію знову.",
+    "The provider cannot identify this item safely.": "Провайдер не може надійно ідентифікувати цей об'єкт.",
+    "The provider returned an invalid filename.": "Провайдер повернув некоректну назву файла.",
+    "Provider operation failed.": "Операцію провайдера не вдалося виконати.",
+    "The destination is not a folder.": "Призначення не є текою.",
+    "The filesystem root cannot be renamed.": "Корінь файлової системи не можна перейменувати.",
+    "The folder contains a filesystem cycle.": "У теці є цикл файлової системи.",
+    "The template changed.": "Шаблон змінився.",
+    "The template changed. Close this dialog and choose it again.": "Шаблон змінився. Закрийте це вікно і виберіть його знову.",
+    "The temporary file could not be identified.": "Не вдалося ідентифікувати тимчасовий файл.",
+    "Temporary data remains at ": "Тимчасові дані залишилися в ",
+    "Operation cancelled.": "Операцію скасовано.",
+    "Cannot delete a folder containing an automount.": "Не можна видалити теку, що містить автомонтування.",
+    "A destination folder contains a selected source.": "Тека призначення містить вибраний джерельний об'єкт.",
+    "The output folder would replace a selected source archive.": "Тека результату замінить вибраний джерельний архів.",
+    "The administrator provider cannot identify this folder.": "Адмін-провайдер не може ідентифікувати цю теку.",
+    "This folder is already open with normal access.": "Цю теку вже відкрито зі звичайним доступом.",
+    "Could not start archive extraction.": "Не вдалося розпочати розпакування архівів.",
+    "Could not inspect archive paths: ": "Не вдалося перевірити шляхи архівів: ",
+    "Archive batch cancelled.": "Пакетне розпакування архівів скасовано.",
+    "Select readable native archives.": "Виберіть придатні до читання локальні архіви.",
+    "Select one archive to browse.": "Виберіть один архів для перегляду.",
+    "Select one local folder and wait for file operations to finish.": "Виберіть одну локальну теку і зачекайте, доки завершаться файлові операції.",
+    "Open a local folder and wait for file operations to finish.": "Відкрийте локальну теку і зачекайте, доки завершаться файлові операції."
   },
   "menu": {
     "Add Heading…": "Додати заголовок…",
@@ -271,7 +341,11 @@
     "Undo": "Скасувати",
     "Undo batch rename": "Скасування пакетного перейменування",
     "Undo rename": "Скасування перейменування",
-    "Use Icon": "Використати піктограму"
+    "Use Icon": "Використати піктограму",
+    "Open as Administrator": "Відкрити як адміністратор",
+    "Return to Normal Access": "Повернутися до звичайного доступу",
+    "Reset Button Order": "Скинути порядок кнопок",
+    "Administrator Access": "Доступ адміністратора"
   },
   "navigation": {
     "Back": "Назад",
@@ -347,7 +421,9 @@
     "Up": "Вгору",
     "View": "Вигляд",
     "Views": "Вигляди",
-    "Window": "Вікно"
+    "Window": "Вікно",
+    "Administrator": "Адміністратор",
+    "Administrator access · Return to normal access": "Доступ адміністратора · Повернутися до звичайного доступу"
   },
   "view": {
     "A to Z": "Від А до Я",
@@ -444,7 +520,7 @@
     "Home Folder": "Домашня тека",
     "Last Used Folder": "Остання використана тека",
     "Not mounted": "Не змонтовано",
-    "Pin to Sidebar": "Закріпити на бічній панелі",
+    "Pin to Sidebar": "Пришпилити до бічної панелі",
     "Places": "Місця",
     "Rename Place…": "Перейменувати місце…",
     "Resize Places; Left/Right adjusts, Home resets": "Зміна ширини місць; ліворуч/праворуч — регулювання, Home — скидання",
@@ -457,7 +533,9 @@
     "Sidebar Width": "Ширина бічної панелі",
     "This pin is no longer available.": "Це закріплене місце більше недоступне.",
     "Toggle Sidebar": "Перемикати бічну панель",
-    "Unpin": "Відкріпити"
+    "Unpin": "Відшпилити",
+    "Removable": "Знімна",
+    "Remote": "Віддалене"
   },
   "search": {
     "Arrow keys for more matches": "Використовуйте стрілки для більшої кількості збігів",
@@ -580,7 +658,10 @@
     "Name (0 = auto)": "Назва (0 = автоматично)",
     "New Output Folder": "Нова тека результату",
     "Validate": "Підтвердити",
-    "ZIP AES-256 protects file contents. File names remain visible.": "ZIP AES-256 захищає вміст файлів. Назви файлів залишаються видимими."
+    "ZIP AES-256 protects file contents. File names remain visible.": "ZIP AES-256 захищає вміст файлів. Назви файлів залишаються видимими.",
+    "Extract Archives": "Розпакувати архіви",
+    "Extract archives": "Розпакувати архіви",
+    "Extracted": "Розпаковано"
   },
   "transfers": {
     "Connect": "Під’єднатися",

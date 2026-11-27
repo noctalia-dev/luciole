@@ -1,7 +1,15 @@
 {
   "pluralRules": [
-    {"range": [1, 1], "suffix": ""},
-    {"suffix": "-plural"}
+    {
+      "range": [
+        1,
+        1
+      ],
+      "suffix": ""
+    },
+    {
+      "suffix": "-plural"
+    }
   ],
   "common": {
     "select": "Select…",
@@ -77,7 +85,18 @@
     "Use System Title Bar And Borders": "Use System Title Bar And Borders",
     "When Dropping Files": "When Dropping Files",
     "When Typing": "When Typing",
-    "When the application suggests no folder": "When the application suggests no folder"
+    "When the application suggests no folder": "When the application suggests no folder",
+    "Toolbar": "Toolbar",
+    "Sidebar Button": "Sidebar Button",
+    "Parent Folder Button": "Parent Folder Button",
+    "New Folder Button": "New Folder Button",
+    "Sort Button": "Sort Button",
+    "View Switch": "View Switch",
+    "File Operations Button": "File Operations Button",
+    "Always": "Always",
+    "While Busy": "While Busy",
+    "Button Order": "Button Order",
+    "Right-click a toolbar button to move it": "Right-click a toolbar button to move it"
   },
   "language": {
     "system": "System default",
@@ -151,7 +170,15 @@
     "results": "results",
     "selected": "selected",
     "skipped": "skipped",
-    "used": "used"
+    "used": "used",
+    "File changed": "File changed",
+    "Low resolution": "Low resolution",
+    "No text preview": "No text preview",
+    "Not UTF-8 text": "Not UTF-8 text",
+    "Read error": "Read error",
+    "Remote file": "Remote file",
+    "Truncated": "Truncated",
+    "Publishing output…": "Publishing output…"
   },
   "errors": {
     "listing-not-available": "The listing is not available for selection.",
@@ -198,7 +225,34 @@
     "This item cannot be renamed right now.": "This item cannot be renamed right now.",
     "This operation is not supported here.": "This operation is not supported here.",
     "This password request is no longer active.": "This password request is no longer active.",
-    "This request is no longer active.": "This request is no longer active."
+    "This request is no longer active.": "This request is no longer active.",
+    "Administrator access is unavailable. Install or enable the GVfs admin backend, Polkit and a desktop authentication agent, then restart Luciole.": "Administrator access is unavailable. Install or enable the GVfs admin backend, Polkit and a desktop authentication agent, then restart Luciole.",
+    "Choose a local or administrator folder.": "Choose a local or administrator folder.",
+    "The item changed after confirmation. Select it again.": "The item changed after confirmation. Select it again.",
+    "The item changed. Reopen this action.": "The item changed. Reopen this action.",
+    "The item was moved or replaced. Reopen this action.": "The item was moved or replaced. Reopen this action.",
+    "The provider cannot identify this item safely.": "The provider cannot identify this item safely.",
+    "The provider returned an invalid filename.": "The provider returned an invalid filename.",
+    "Provider operation failed.": "Provider operation failed.",
+    "The destination is not a folder.": "The destination is not a folder.",
+    "The filesystem root cannot be renamed.": "The filesystem root cannot be renamed.",
+    "The folder contains a filesystem cycle.": "The folder contains a filesystem cycle.",
+    "The template changed.": "The template changed.",
+    "The template changed. Close this dialog and choose it again.": "The template changed. Close this dialog and choose it again.",
+    "The temporary file could not be identified.": "The temporary file could not be identified.",
+    "Temporary data remains at ": "Temporary data remains at ",
+    "Cannot delete a folder containing an automount.": "Cannot delete a folder containing an automount.",
+    "A destination folder contains a selected source.": "A destination folder contains a selected source.",
+    "The output folder would replace a selected source archive.": "The output folder would replace a selected source archive.",
+    "The administrator provider cannot identify this folder.": "The administrator provider cannot identify this folder.",
+    "This folder is already open with normal access.": "This folder is already open with normal access.",
+    "Could not start archive extraction.": "Could not start archive extraction.",
+    "Could not inspect archive paths: ": "Could not inspect archive paths: ",
+    "Archive batch cancelled.": "Archive batch cancelled.",
+    "Select readable native archives.": "Select readable native archives.",
+    "Select one archive to browse.": "Select one archive to browse.",
+    "Select one local folder and wait for file operations to finish.": "Select one local folder and wait for file operations to finish.",
+    "Open a local folder and wait for file operations to finish.": "Open a local folder and wait for file operations to finish."
   },
   "menu": {
     "Add Heading…": "Add Heading…",
@@ -259,7 +313,11 @@
     "Undo": "Undo",
     "Undo batch rename": "Undo batch rename",
     "Undo rename": "Undo rename",
-    "Use Icon": "Use Icon"
+    "Use Icon": "Use Icon",
+    "Open as Administrator": "Open as Administrator",
+    "Return to Normal Access": "Return to Normal Access",
+    "Reset Button Order": "Reset Button Order",
+    "Administrator Access": "Administrator Access"
   },
   "navigation": {
     "Back": "Back",
@@ -335,7 +393,9 @@
     "Up": "Up",
     "View": "View",
     "Views": "Views",
-    "Window": "Window"
+    "Window": "Window",
+    "Administrator": "Administrator",
+    "Administrator access · Return to normal access": "Administrator access · Return to normal access"
   },
   "view": {
     "A to Z": "A to Z",
@@ -445,7 +505,9 @@
     "Sidebar Width": "Sidebar Width",
     "This pin is no longer available.": "This pin is no longer available.",
     "Toggle Sidebar": "Toggle Sidebar",
-    "Unpin": "Unpin"
+    "Unpin": "Unpin",
+    "Removable": "Removable",
+    "Remote": "Remote"
   },
   "search": {
     "Arrow keys for more matches": "Arrow keys for more matches",
@@ -568,7 +630,10 @@
     "Name (0 = auto)": "Name (0 = auto)",
     "New Output Folder": "New Output Folder",
     "Validate": "Validate",
-    "ZIP AES-256 protects file contents. File names remain visible.": "ZIP AES-256 protects file contents. File names remain visible."
+    "ZIP AES-256 protects file contents. File names remain visible.": "ZIP AES-256 protects file contents. File names remain visible.",
+    "Extract Archives": "Extract Archives",
+    "Extract archives": "Extract archives",
+    "Extracted": "Extracted"
   },
   "transfers": {
     "Connect": "Connect",
