@@ -1049,7 +1049,7 @@ namespace {
     fs::create_directory(fixture.path / "remote-ish");
     Pump pump;
     int probeCalls = 0;
-    BrowserController browser({}, false, true, [&](const std::string&) {
+    BrowserController browser({}, false, true, {}, [&](const std::string&) {
       ++probeCalls;
       return true;
     });

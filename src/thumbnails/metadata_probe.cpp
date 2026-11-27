@@ -322,7 +322,7 @@ luciole::EntryMedia luciole::parseMediaFacts(std::string_view data) {
       }
     }
     if (const auto rate = format->find("bit_rate"); rate != format->end()) {
-      facts.bitsPerSecond = probeNumber(*rate, 1'000'000U);
+      facts.bitsPerSecond = probeNumber(*rate, 10'000'000'000U);
     }
     if (const auto tags = format->find("tags"); tags != format->end() && tags->is_object() && tags->size() <= 16) {
       const auto text = [&tags](const std::string& key) {

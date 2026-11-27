@@ -653,8 +653,6 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     job->entries = snapshot.entries;
     job->folder = scan->path;
     job->probe = mediaFacts;
-    // The icon pass's filesystem check: network folders answer completed unknowns without probing.
-    const bool probeFilesystem = scan->local && !networkFilesystem(scan->path);
     std::unordered_map<std::size_t, std::uint64_t> waiting;
     while (!mediaRequested.empty() && job->rows.size() < kMediaBatch) {
       const auto found = mediaRequested.begin();
@@ -685,7 +683,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           .facts = {}
       };
       const std::string_view type = row.contentType;
-      row.eligible = probeFilesystem
+      row.eligible = scan->local
           && !known->metadataFailed
           && !known->symlink
           && known->type == FileType::Regular
@@ -727,13 +725,20 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
       auto& job = *static_cast<MediaJob*>(data);
       const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
+      // The icon pass's filesystem check: network folders answer completed unknowns without probing.
+      const bool network = std::ranges::any_of(job.rows, [](const MediaRow& row) { return row.eligible && !row.facts; })
+          && networkFilesystem(job.folder);
       for (auto& row : job.rows) {
         if (g_cancellable_is_cancelled(cancellable) != FALSE) {
           break;
         }
         if (row.eligible && !row.facts) {
-          row.facts =
-              job.probe(std::string(job.folder).append(separator).append(row.name), row.contentType, cancellable);
+          if (network) {
+            row.facts = EntryMedia{};
+          } else {
+            row.facts =
+                job.probe(std::string(job.folder).append(separator).append(row.name), row.contentType, cancellable);
+          }
         }
       }
       g_task_return_boolean(task, TRUE);

@@ -969,7 +969,6 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
       visibility = {};
     }
     m_columns.setDetailsColumnVisibility(visibility);
-    m_page.focusFileList();
   };
   showContextMenu(
       std::move(entries),
@@ -978,12 +977,15 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
           auto widths = id == 105 ? luciole::kDefaultDetailsColumnWidths : m_columns.columnWidths();
           widths[widthIndex] = luciole::kDefaultDetailsColumnWidths[widthIndex];
           m_columns.setDetailsColumnWidths(widths);
+          m_page.focusFileList();
         } else if ((id == 101 || id == 102) && column) {
           if (const auto order = m_columns.movedColumnOrder(*column, id == 101 ? left : -left)) {
             m_columns.setDetailsColumnOrder(*order);
           }
+          m_page.focusFileList();
         } else if (id == 103) {
           m_columns.setDetailsColumnOrder(luciole::kDefaultDetailsColumnOrder);
+          m_page.focusFileList();
         } else {
           toggleColumns(id);
         }

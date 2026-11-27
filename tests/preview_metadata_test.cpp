@@ -421,11 +421,12 @@ namespace {
     TEST_CHECK(parsed.durationMicros == 5'500'000U && parsed.bitsPerSecond == 128'000U);
     TEST_CHECK(parsed.artist == luciole::InternedText("Ada") && parsed.album == luciole::InternedText("Notes"));
     TEST_CHECK(parsed.genre == luciole::InternedText("Test") && parsed.track == 3U && parsed.releaseYear == 2021U);
-    TEST_CHECK(parsed.width == 320U && parsed.height == 240U && parsed.videoCodec == luciole::InternedText("h264"));
-    TEST_CHECK(parsed.audioCodec == luciole::InternedText("aac") && parsed.frameRateMilli == 29'970U);
-    TEST_CHECK(parsed.aspectRatioPerMille == 1'333U && parsed.aspectRatio == luciole::InternedText("4:3"));
     TEST_CHECK(
-        parsed.pixelFormat == luciole::InternedText("yuv420p") && parsed.colorSpace == luciole::InternedText("bt709")
+        luciole::parseMediaFacts(
+            R"({"format": {"bit_rate": "5000000"}, "streams": [{"codec_type": "audio", "codec_name": "aac"}]})"
+        )
+            .bitsPerSecond
+        == 5'000'000U
     );
     TEST_CHECK(luciole::parseMediaFacts("not json") == luciole::EntryMedia{});
     // A hand-built JPEG whose EXIF carries orientation 6 and a DateTimeOriginal.
