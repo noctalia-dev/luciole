@@ -40,6 +40,8 @@ Shown hidden items sort among visible ones by default. **Hidden Last**, in the *
 
 **Settings → List Columns** controls which columns show and their order. Extra columns include accessed and created time, owner, group, permissions and location. Missing metadata shows as unavailable.
 
+Media columns add Dimensions, Width, Height, Orientation and Date Photographed for images; Duration, Bit Rate, codecs, Album, Artist, Genre, Release Year and Track for audio and video; and Aspect Ratio, Color Space, Frame Rate and Pixel Format for video, grouped in the header menu under Image, Audio and Video. Right-click a column header, or press the menu key while it is focused, to show or hide columns and to move or reset them. Media columns read each file itself; folders, links, remote locations and network filesystems answer Unknown.
+
 Folders show their recursive size in the **Size** column, computed in the background for visible rows. The cell stays blank until the calculation finishes, and `≥` marks a partial result. Network folders stay blank.
 
 > [!NOTE]
