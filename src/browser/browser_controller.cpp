@@ -27,9 +27,10 @@ struct luciole::BrowserController::ActivationState {
 };
 
 luciole::BrowserController::BrowserController(
-    SortOptions sort, bool showHidden, bool showBackups, const FolderTotalsService::NetworkFilesystemCheck& networkCheck
+    SortOptions sort, bool showHidden, bool showBackups, DirectorySession::MediaFactsCheck mediaFacts,
+    const FolderTotalsService::NetworkFilesystemCheck& networkCheck
 )
-    : m_activation(std::make_shared<ActivationState>()) {
+    : m_activation(std::make_shared<ActivationState>()), m_session(0, {}, {}, std::move(mediaFacts)) {
   m_activation->resolved = [this](
                                EntryId id, const Location& target, std::uint64_t context,
                                const std::expected<FileType, FileError>& type
@@ -531,6 +532,10 @@ void luciole::BrowserController::updateMetadataPolicy() {
     for (const auto id : m_model.selection().selected) {
       (void)m_model.entry(id);
     }
+  }
+  // A media sort ranks every row by probed facts, not only the visible ones; the session's probe cap bounds the work.
+  if (m_model.sort().field >= SortField::Dimensions) {
+    (void)m_model.metadataPending(m_model.rows(), EntryDetails::Media);
   }
   m_updatingMetadata = false;
 }

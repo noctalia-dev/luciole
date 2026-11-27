@@ -28,9 +28,10 @@ namespace luciole {
   public:
     BrowserController(
         SortOptions sort, bool showHidden, bool showBackups = true,
-        const FolderTotalsService::NetworkFilesystemCheck& networkCheck = [](const std::string& path) {
-          return luciole::networkFilesystem(path);
-        }
+                DirectorySession::MediaFactsCheck mediaFacts = {},
+                const FolderTotalsService::NetworkFilesystemCheck& networkCheck = [](const std::string& path) {
+                  return luciole::networkFilesystem(path);
+                }
     );
     ~BrowserController();
     BrowserController(const BrowserController&) = delete;

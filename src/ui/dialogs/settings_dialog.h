@@ -30,6 +30,7 @@ private:
   template <class T> using Choices = std::vector<std::pair<std::string, T>>;
   void selectPage(std::size_t selected);
   void section(const std::string& title, const std::string& glyph);
+  void buildListColumns();
   // Starts a titled card on the current page; following rows go into it.
   void card(const std::string& title);
   template <class T>

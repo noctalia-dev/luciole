@@ -294,6 +294,51 @@ namespace {
     TEST_CHECK(!data.entries.withDirectoryLinks({}).known(2)->linksToDirectory);
   }
 
+  void testMediaSort() {
+    DirectoryModel model;
+    auto audio = entry(1, "b-song");
+    audio.media = luciole::EntryMedia{
+        .durationMicros = 30'000'000U, .bitsPerSecond = 128'000U, .track = 7U, .album = "Later", .artist = "Zed"
+    };
+    auto video = entry(2, "a-clip");
+    video.media = luciole::EntryMedia{
+        .width = 640,
+        .height = 360,
+        .durationMicros = 10'000'000U,
+        .bitsPerSecond = 900'000U,
+        .frameRateMilli = 25'000U,
+        .aspectRatioPerMille = 1'777U,
+        .videoCodec = "h264",
+        .pixelFormat = "yuv420p"
+    };
+    auto small = entry(3, "c-icon");
+    small.media = luciole::EntryMedia{.width = 32, .height = 32, .videoCodec = "png"};
+    auto photo = entry(5, "e-photo");
+    photo.media = luciole::EntryMedia{.width = 32, .height = 32, .orientation = 6U, .photoDateSeconds = 1'700'000'000U};
+    auto unknown = entry(4, "d-note");
+    auto data = snapshot({unknown, photo, small, video, audio});
+    model.applySnapshot(data);
+    model.setSort({.field = SortField::Duration});
+    rows(model, {2, 1, 3, 4, 5});
+    model.setSort({.field = SortField::Duration, .descending = true});
+    // Unknown values stay last; their name ties follow the sort direction like every other tie.
+    rows(model, {1, 2, 5, 4, 3});
+    model.setSort({.field = SortField::Width});
+    rows(model, {3, 5, 2, 1, 4});
+    model.setSort({.field = SortField::FrameRate, .descending = true});
+    rows(model, {2, 5, 4, 3, 1});
+    model.setSort({.field = SortField::DatePhotographed});
+    rows(model, {5, 2, 1, 3, 4});
+    model.setSort({.field = SortField::Orientation});
+    rows(model, {5, 2, 1, 3, 4});
+    model.setSort({.field = SortField::Track});
+    rows(model, {1, 2, 3, 4, 5});
+    model.setSort({.field = SortField::Artist});
+    rows(model, {1, 2, 3, 4, 5});
+    model.setSort({.field = SortField::VideoCodec});
+    rows(model, {2, 3, 1, 4, 5});
+  }
+
   void testSortAndMetadata() {
     DirectoryModel model;
     auto data = snapshot(
@@ -534,22 +579,34 @@ namespace {
     TEST_CHECK(
         (luciole::moveDetailsColumn(defaults, Column::Type, 1, {})
          == luciole::DetailsColumnOrder{
-             Column::Size, Column::Type, Column::Modified, Column::Accessed, Column::Created, Column::Owner,
-             Column::Group, Column::Permissions, Column::Location
+             Column::Size,      Column::Type,        Column::Modified,    Column::Accessed,    Column::Created,
+             Column::Owner,     Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,
+             Column::Duration,  Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed,
+             Column::Width,     Column::Height,      Column::Orientation, Column::Album,       Column::Artist,
+             Column::Genre,     Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,
+             Column::FrameRate, Column::PixelFormat
          })
     );
     TEST_CHECK(
         (luciole::moveDetailsColumn(defaults, Column::Modified, -1, {})
          == luciole::DetailsColumnOrder{
-             Column::Type, Column::Modified, Column::Size, Column::Accessed, Column::Created, Column::Owner,
-             Column::Group, Column::Permissions, Column::Location
+             Column::Type,      Column::Modified,    Column::Size,        Column::Accessed,    Column::Created,
+             Column::Owner,     Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,
+             Column::Duration,  Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed,
+             Column::Width,     Column::Height,      Column::Orientation, Column::Album,       Column::Artist,
+             Column::Genre,     Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,
+             Column::FrameRate, Column::PixelFormat
          })
     );
     TEST_CHECK(
         (luciole::moveDetailsColumn(defaults, Column::Type, 1, {.size = false})
          == luciole::DetailsColumnOrder{
-             Column::Modified, Column::Size, Column::Type, Column::Accessed, Column::Created, Column::Owner,
-             Column::Group, Column::Permissions, Column::Location
+             Column::Modified,  Column::Size,        Column::Type,        Column::Accessed,    Column::Created,
+             Column::Owner,     Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,
+             Column::Duration,  Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed,
+             Column::Width,     Column::Height,      Column::Orientation, Column::Album,       Column::Artist,
+             Column::Genre,     Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,
+             Column::FrameRate, Column::PixelFormat
          })
     );
     TEST_CHECK(
@@ -566,15 +623,23 @@ namespace {
     TEST_CHECK(
         (luciole::insertDetailsColumnBefore(defaults, Column::Type, std::nullopt)
          == luciole::DetailsColumnOrder{
-             Column::Size, Column::Modified, Column::Accessed, Column::Created, Column::Owner, Column::Group,
-             Column::Permissions, Column::Location, Column::Type
+             Column::Size,        Column::Modified,    Column::Accessed,    Column::Created,          Column::Owner,
+             Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,       Column::Duration,
+             Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed, Column::Width,
+             Column::Height,      Column::Orientation, Column::Album,       Column::Artist,           Column::Genre,
+             Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,       Column::FrameRate,
+             Column::PixelFormat, Column::Type
          })
     );
     TEST_CHECK(
         (luciole::insertDetailsColumnBefore(defaults, Column::Modified, Column::Type)
          == luciole::DetailsColumnOrder{
-             Column::Modified, Column::Type, Column::Size, Column::Accessed, Column::Created, Column::Owner,
-             Column::Group, Column::Permissions, Column::Location
+             Column::Modified,  Column::Type,        Column::Size,        Column::Accessed,    Column::Created,
+             Column::Owner,     Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,
+             Column::Duration,  Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed,
+             Column::Width,     Column::Height,      Column::Orientation, Column::Album,       Column::Artist,
+             Column::Genre,     Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,
+             Column::FrameRate, Column::PixelFormat
          })
     );
     TEST_CHECK(
@@ -1091,6 +1156,7 @@ int main() {
     testCatalogueDirectoryLinks();
     testSortAndMetadata();
     testExtendedMetadataSort();
+    testMediaSort();
     testTextSortRefresh();
     testTextSortKeyPoolLifetime();
     testDetailsLayout();

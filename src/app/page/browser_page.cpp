@@ -38,6 +38,7 @@
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
 #include "render/scene/rect_node.h"
+#include "thumbnails/metadata_probe.h"
 #include "thumbnails/preview_service.h"
 #include "ui/browser/action_shortcuts.h"
 #include "ui/browser/file_icon.h"
@@ -106,7 +107,8 @@ BrowserPage::BrowserPage(
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
-      m_browser(settings.sort, settings.showHidden, settings.showBackups), m_icons(icons), m_thumbnails(thumbnails),
+      m_browser(settings.sort, settings.showHidden, settings.showBackups, &luciole::probeEntryMediaFacts),
+      m_icons(icons), m_thumbnails(thumbnails),
       m_listAdapter(
           m_browser, m_icons, m_thumbnails, luciole::ViewMode::List,
           [this] { return m_connection.keyboardModifiers(); },
@@ -122,6 +124,7 @@ BrowserPage::BrowserPage(
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
+  m_miller.setMediaFactsCheck(&luciole::probeEntryMediaFacts);
   m_gridZoom = static_cast<std::size_t>(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );

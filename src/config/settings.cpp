@@ -54,7 +54,25 @@ namespace {
        {luciole::SortField::Owner, "owner"},
        {luciole::SortField::Group, "group"},
        {luciole::SortField::Permissions, "permissions"},
-       {luciole::SortField::Location, "location"}}
+       {luciole::SortField::Location, "location"},
+       {luciole::SortField::Dimensions, "dimensions"},
+       {luciole::SortField::Duration, "duration"},
+       {luciole::SortField::BitRate, "bit_rate"},
+       {luciole::SortField::AudioCodec, "audio_codec"},
+       {luciole::SortField::VideoCodec, "video_codec"},
+       {luciole::SortField::DatePhotographed, "date_photographed"},
+       {luciole::SortField::Width, "width"},
+       {luciole::SortField::Height, "height"},
+       {luciole::SortField::Orientation, "orientation"},
+       {luciole::SortField::Album, "album"},
+       {luciole::SortField::Artist, "artist"},
+       {luciole::SortField::Genre, "genre"},
+       {luciole::SortField::ReleaseYear, "release_year"},
+       {luciole::SortField::Track, "track"},
+       {luciole::SortField::AspectRatio, "aspect_ratio"},
+       {luciole::SortField::ColorSpace, "color_space"},
+       {luciole::SortField::FrameRate, "frame_rate"},
+       {luciole::SortField::PixelFormat, "pixel_format"}}
   );
   constexpr auto kViewModes = std::to_array<Named<luciole::ViewMode>>(
       {{luciole::ViewMode::List, "list"}, {luciole::ViewMode::Grid, "grid"}, {luciole::ViewMode::Miller, "miller"}}
@@ -484,6 +502,35 @@ namespace {
           P::ShowPermissionsColumn, "show_permissions_column", [](S& s) -> auto& { return s.columns.permissions; }
       ),
       describe(P::ShowLocationColumn, "show_location_column", [](S& s) -> auto& { return s.columns.location; }),
+      describe(P::ShowDimensionsColumn, "show_dimensions_column", [](S& s) -> auto& { return s.columns.dimensions; }),
+      describe(P::ShowDurationColumn, "show_duration_column", [](S& s) -> auto& { return s.columns.duration; }),
+      describe(P::ShowBitRateColumn, "show_bit_rate_column", [](S& s) -> auto& { return s.columns.bitRate; }),
+      describe(P::ShowAudioCodecColumn, "show_audio_codec_column", [](S& s) -> auto& { return s.columns.audioCodec; }),
+      describe(P::ShowVideoCodecColumn, "show_video_codec_column", [](S& s) -> auto& { return s.columns.videoCodec; }),
+      describe(
+          P::ShowDatePhotographedColumn, "show_date_photographed_column",
+          [](S& s) -> auto& { return s.columns.datePhotographed; }
+      ),
+      describe(P::ShowWidthColumn, "show_width_column", [](S& s) -> auto& { return s.columns.width; }),
+      describe(P::ShowHeightColumn, "show_height_column", [](S& s) -> auto& { return s.columns.height; }),
+      describe(
+          P::ShowOrientationColumn, "show_orientation_column", [](S& s) -> auto& { return s.columns.orientation; }
+      ),
+      describe(P::ShowAlbumColumn, "show_album_column", [](S& s) -> auto& { return s.columns.album; }),
+      describe(P::ShowArtistColumn, "show_artist_column", [](S& s) -> auto& { return s.columns.artist; }),
+      describe(P::ShowGenreColumn, "show_genre_column", [](S& s) -> auto& { return s.columns.genre; }),
+      describe(
+          P::ShowReleaseYearColumn, "show_release_year_column", [](S& s) -> auto& { return s.columns.releaseYear; }
+      ),
+      describe(P::ShowTrackColumn, "show_track_column", [](S& s) -> auto& { return s.columns.track; }),
+      describe(
+          P::ShowAspectRatioColumn, "show_aspect_ratio_column", [](S& s) -> auto& { return s.columns.aspectRatio; }
+      ),
+      describe(P::ShowColorSpaceColumn, "show_color_space_column", [](S& s) -> auto& { return s.columns.colorSpace; }),
+      describe(P::ShowFrameRateColumn, "show_frame_rate_column", [](S& s) -> auto& { return s.columns.frameRate; }),
+      describe(
+          P::ShowPixelFormatColumn, "show_pixel_format_column", [](S& s) -> auto& { return s.columns.pixelFormat; }
+      ),
       describe(P::ColumnOrder, "column_order", [](S& s) -> auto& { return s.columnOrder; }),
       describe(
           P::NameColumnWidth, luciole::kDetailsColumnWidthKeys[0], [](S& s) -> auto& { return s.columnWidths[0]; },
@@ -524,6 +571,89 @@ namespace {
       describe(
           P::LocationColumnWidth, luciole::kDetailsColumnWidthKeys[9], [](S& s) -> auto& { return s.columnWidths[9]; },
           {columnWidth<9>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::DimensionsColumnWidth, luciole::kDetailsColumnWidthKeys[10],
+          [](S& s) -> auto& { return s.columnWidths[10]; },
+          {columnWidth<10>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::DurationColumnWidth, luciole::kDetailsColumnWidthKeys[11],
+          [](S& s) -> auto& { return s.columnWidths[11]; },
+          {columnWidth<11>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::BitRateColumnWidth, luciole::kDetailsColumnWidthKeys[12], [](S& s) -> auto& { return s.columnWidths[12]; },
+          {columnWidth<12>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::AudioCodecColumnWidth, luciole::kDetailsColumnWidthKeys[13],
+          [](S& s) -> auto& { return s.columnWidths[13]; },
+          {columnWidth<13>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::VideoCodecColumnWidth, luciole::kDetailsColumnWidthKeys[14],
+          [](S& s) -> auto& { return s.columnWidths[14]; },
+          {columnWidth<14>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::DatePhotographedColumnWidth, luciole::kDetailsColumnWidthKeys[15],
+          [](S& s) -> auto& { return s.columnWidths[15]; },
+          {columnWidth<15>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::WidthColumnWidth, luciole::kDetailsColumnWidthKeys[16], [](S& s) -> auto& { return s.columnWidths[16]; },
+          {columnWidth<16>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::HeightColumnWidth, luciole::kDetailsColumnWidthKeys[17], [](S& s) -> auto& { return s.columnWidths[17]; },
+          {columnWidth<17>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::OrientationColumnWidth, luciole::kDetailsColumnWidthKeys[18],
+          [](S& s) -> auto& { return s.columnWidths[18]; },
+          {columnWidth<18>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::AlbumColumnWidth, luciole::kDetailsColumnWidthKeys[19], [](S& s) -> auto& { return s.columnWidths[19]; },
+          {columnWidth<19>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::ArtistColumnWidth, luciole::kDetailsColumnWidthKeys[20], [](S& s) -> auto& { return s.columnWidths[20]; },
+          {columnWidth<20>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::GenreColumnWidth, luciole::kDetailsColumnWidthKeys[21], [](S& s) -> auto& { return s.columnWidths[21]; },
+          {columnWidth<21>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::ReleaseYearColumnWidth, luciole::kDetailsColumnWidthKeys[22],
+          [](S& s) -> auto& { return s.columnWidths[22]; },
+          {columnWidth<22>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::TrackColumnWidth, luciole::kDetailsColumnWidthKeys[23], [](S& s) -> auto& { return s.columnWidths[23]; },
+          {columnWidth<23>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::AspectRatioColumnWidth, luciole::kDetailsColumnWidthKeys[24],
+          [](S& s) -> auto& { return s.columnWidths[24]; },
+          {columnWidth<24>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::ColorSpaceColumnWidth, luciole::kDetailsColumnWidthKeys[25],
+          [](S& s) -> auto& { return s.columnWidths[25]; },
+          {columnWidth<25>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::FrameRateColumnWidth, luciole::kDetailsColumnWidthKeys[26],
+          [](S& s) -> auto& { return s.columnWidths[26]; },
+          {columnWidth<26>, "expected an integer width from 64 to 2048"}
+      ),
+      describe(
+          P::PixelFormatColumnWidth, luciole::kDetailsColumnWidthKeys[27],
+          [](S& s) -> auto& { return s.columnWidths[27]; },
+          {columnWidth<27>, "expected an integer width from 64 to 2048"}
       ),
       describe(
           P::ThumbnailPolicy, "thumbnail_policy", [](S& s) -> auto& { return s.thumbnails.policy; },

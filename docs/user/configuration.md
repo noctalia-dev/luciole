@@ -122,11 +122,11 @@ All keys belong in `[browser]`. Dimensions are logical pixels. View, zoom and so
 
 ### List columns
 
-Name is always present. Type, Size and Modified are visible by default; Accessed, Created, Owner, Group, Permissions and Location are hidden by default.
+Name is always present. Type, Size and Modified are visible by default. Accessed, Created, Owner, Group, Permissions, Location and the media columns are optional and hidden by default.
 
-Visibility keys are `show_type_column`, `show_size_column`, `show_modified_column`, `show_accessed_column`, `show_created_column`, `show_owner_column`, `show_group_column`, `show_permissions_column` and `show_location_column`.
+Visibility keys are `show_type_column`, `show_size_column`, `show_modified_column`, `show_accessed_column`, `show_created_column`, `show_owner_column`, `show_group_column`, `show_permissions_column`, `show_location_column`, `show_dimensions_column`, `show_duration_column`, `show_bit_rate_column`, `show_audio_codec_column`, `show_video_codec_column`, `show_date_photographed_column`, `show_width_column`, `show_height_column`, `show_orientation_column`, `show_album_column`, `show_artist_column`, `show_genre_column`, `show_release_year_column`, `show_track_column`, `show_aspect_ratio_column`, `show_color_space_column`, `show_frame_rate_column` and `show_pixel_format_column`.
 
-`column_order` lists unique column names. It must include `"type"`, `"size"` and `"modified"`; the optional names are `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"` and `"location"`, and omitted ones are appended in that order. Name is not an entry.
+`column_order` lists unique column names. It must include `"type"`, `"size"` and `"modified"`; the optional names are `"accessed"`, `"created"`, `"owner"`, `"group"`, `"permissions"`, `"location"`, `"dimensions"`, `"duration"`, `"bit_rate"`, `"audio_codec"`, `"video_codec"`, `"date_photographed"`, `"width"`, `"height"`, `"orientation"`, `"album"`, `"artist"`, `"genre"`, `"release_year"`, `"track"`, `"aspect_ratio"`, `"color_space"`, `"frame_rate"` and `"pixel_format"`, and omitted ones are appended in that order. Name is not an entry.
 
 | Key | Default |
 | --- | --- |
@@ -140,6 +140,24 @@ Visibility keys are `show_type_column`, `show_size_column`, `show_modified_colum
 | `group_column_width` | `128` |
 | `permissions_column_width` | `112` |
 | `location_column_width` | `260` |
+| `dimensions_column_width` | `128` |
+| `duration_column_width` | `112` |
+| `bit_rate_column_width` | `112` |
+| `audio_codec_column_width` | `120` |
+| `video_codec_column_width` | `120` |
+| `date_photographed_column_width` | `156` |
+| `width_column_width` | `96` |
+| `height_column_width` | `96` |
+| `orientation_column_width` | `152` |
+| `album_column_width` | `148` |
+| `artist_column_width` | `132` |
+| `genre_column_width` | `120` |
+| `release_year_column_width` | `96` |
+| `track_column_width` | `80` |
+| `aspect_ratio_column_width` | `104` |
+| `color_space_column_width` | `112` |
+| `frame_rate_column_width` | `104` |
+| `pixel_format_column_width` | `120` |
 
 Name accepts `0` for automatic sizing or an integer from `160` through `16384`. Other widths accept integers from `64` through `2048`.
 

@@ -251,39 +251,7 @@ SettingsDialog::SettingsDialog(
   card("Column View");
   addNumber(P::MillerColumnWidth, "Column Width", {180, 208, 240, 260, 300, 360, 480, 640, 800});
   addBool(P::MillerShowParents, "Show Parent Folders");
-  section("List Columns", "list-details");
-  card("List");
-  addBool(P::ExpandableFolders, "Expandable Folders");
-  auto orderLabel = ui::label({.fontSize = Style::fontSizeCaption, .maxWidth = 180.0F});
-  auto* orderText = orderLabel.get();
-  addRow<luciole::DetailsColumnOrder>(
-      P::ColumnOrder, "Column Order",
-      [orderText](const auto& order) {
-        orderText->setText(order == luciole::kDefaultDetailsColumnOrder ? "Default" : "Custom");
-      },
-      std::move(orderLabel)
-  );
-  card("Visible Columns");
-  addBool(P::ShowTypeColumn, "Type");
-  addBool(P::ShowSizeColumn, "Size");
-  addBool(P::ShowModifiedColumn, "Modified");
-  addBool(P::ShowAccessedColumn, "Accessed");
-  addBool(P::ShowCreatedColumn, "Created");
-  addBool(P::ShowOwnerColumn, "Owner");
-  addBool(P::ShowGroupColumn, "Group");
-  addBool(P::ShowPermissionsColumn, "Permissions");
-  addBool(P::ShowLocationColumn, "Location");
-  card("Column Widths");
-  addNumber(P::NameColumnWidth, "Name (0 = auto)", widths(160, 16384, true));
-  addNumber(P::TypeColumnWidth, "Type", widths(64, 2048));
-  addNumber(P::SizeColumnWidth, "Size", widths(64, 2048));
-  addNumber(P::ModifiedColumnWidth, "Modified", widths(64, 2048));
-  addNumber(P::AccessedColumnWidth, "Accessed", widths(64, 2048));
-  addNumber(P::CreatedColumnWidth, "Created", widths(64, 2048));
-  addNumber(P::OwnerColumnWidth, "Owner", widths(64, 2048));
-  addNumber(P::GroupColumnWidth, "Group", widths(64, 2048));
-  addNumber(P::PermissionsColumnWidth, "Permissions", widths(64, 2048));
-  addNumber(P::LocationColumnWidth, "Location", widths(64, 2048));
+  buildListColumns();
   section("File Picker", "folder-search");
   card("Opening");
   addChoice(
@@ -330,6 +298,78 @@ SettingsDialog::SettingsDialog(
   section("Keybinds", "keyboard");
   addKeybinds();
   selectPage(0);
+}
+
+void SettingsDialog::buildListColumns() {
+  section("List Columns", "list-details");
+  card("List");
+  addBool(P::ExpandableFolders, "Expandable Folders");
+  auto orderLabel = ui::label({.fontSize = Style::fontSizeCaption, .maxWidth = 180.0F});
+  auto* orderText = orderLabel.get();
+  addRow<luciole::DetailsColumnOrder>(
+      P::ColumnOrder, "Column Order",
+      [orderText](const auto& order) {
+        orderText->setText(order == luciole::kDefaultDetailsColumnOrder ? "Default" : "Custom");
+      },
+      std::move(orderLabel)
+  );
+  card("Visible Columns");
+  addBool(P::ShowTypeColumn, "Type");
+  addBool(P::ShowSizeColumn, "Size");
+  addBool(P::ShowModifiedColumn, "Modified");
+  addBool(P::ShowAccessedColumn, "Accessed");
+  addBool(P::ShowCreatedColumn, "Created");
+  addBool(P::ShowOwnerColumn, "Owner");
+  addBool(P::ShowGroupColumn, "Group");
+  addBool(P::ShowPermissionsColumn, "Permissions");
+  addBool(P::ShowLocationColumn, "Location");
+  addBool(P::ShowDimensionsColumn, "Dimensions");
+  addBool(P::ShowDurationColumn, "Duration");
+  addBool(P::ShowBitRateColumn, "Bit Rate");
+  addBool(P::ShowAudioCodecColumn, "Audio Codec");
+  addBool(P::ShowVideoCodecColumn, "Video Codec");
+  addBool(P::ShowDatePhotographedColumn, "Date Photographed");
+  addBool(P::ShowWidthColumn, "Width");
+  addBool(P::ShowHeightColumn, "Height");
+  addBool(P::ShowOrientationColumn, "Orientation");
+  addBool(P::ShowAlbumColumn, "Album");
+  addBool(P::ShowArtistColumn, "Artist");
+  addBool(P::ShowGenreColumn, "Genre");
+  addBool(P::ShowReleaseYearColumn, "Release Year");
+  addBool(P::ShowTrackColumn, "Track");
+  addBool(P::ShowAspectRatioColumn, "Aspect Ratio");
+  addBool(P::ShowColorSpaceColumn, "Color Space");
+  addBool(P::ShowFrameRateColumn, "Frame Rate");
+  addBool(P::ShowPixelFormatColumn, "Pixel Format");
+  card("Column Widths");
+  addNumber(P::NameColumnWidth, "Name (0 = auto)", widths(160, 16384, true));
+  addNumber(P::TypeColumnWidth, "Type", widths(64, 2048));
+  addNumber(P::SizeColumnWidth, "Size", widths(64, 2048));
+  addNumber(P::ModifiedColumnWidth, "Modified", widths(64, 2048));
+  addNumber(P::AccessedColumnWidth, "Accessed", widths(64, 2048));
+  addNumber(P::CreatedColumnWidth, "Created", widths(64, 2048));
+  addNumber(P::OwnerColumnWidth, "Owner", widths(64, 2048));
+  addNumber(P::GroupColumnWidth, "Group", widths(64, 2048));
+  addNumber(P::PermissionsColumnWidth, "Permissions", widths(64, 2048));
+  addNumber(P::LocationColumnWidth, "Location", widths(64, 2048));
+  addNumber(P::DimensionsColumnWidth, "Dimensions", widths(64, 2048));
+  addNumber(P::DurationColumnWidth, "Duration", widths(64, 2048));
+  addNumber(P::BitRateColumnWidth, "Bit Rate", widths(64, 2048));
+  addNumber(P::AudioCodecColumnWidth, "Audio Codec", widths(64, 2048));
+  addNumber(P::VideoCodecColumnWidth, "Video Codec", widths(64, 2048));
+  addNumber(P::DatePhotographedColumnWidth, "Date Photographed", widths(64, 2048));
+  addNumber(P::WidthColumnWidth, "Width", widths(64, 2048));
+  addNumber(P::HeightColumnWidth, "Height", widths(64, 2048));
+  addNumber(P::OrientationColumnWidth, "Orientation", widths(64, 2048));
+  addNumber(P::AlbumColumnWidth, "Album", widths(64, 2048));
+  addNumber(P::ArtistColumnWidth, "Artist", widths(64, 2048));
+  addNumber(P::GenreColumnWidth, "Genre", widths(64, 2048));
+  addNumber(P::ReleaseYearColumnWidth, "Release Year", widths(64, 2048));
+  addNumber(P::TrackColumnWidth, "Track", widths(64, 2048));
+  addNumber(P::AspectRatioColumnWidth, "Aspect Ratio", widths(64, 2048));
+  addNumber(P::ColorSpaceColumnWidth, "Color Space", widths(64, 2048));
+  addNumber(P::FrameRateColumnWidth, "Frame Rate", widths(64, 2048));
+  addNumber(P::PixelFormatColumnWidth, "Pixel Format", widths(64, 2048));
 }
 
 void SettingsDialog::section(const std::string& title, const std::string& glyph) {

@@ -95,19 +95,23 @@ namespace {
     writer.saveDetailsColumns({false, true, false});
     const luciole::DetailsColumnVisibility hiddenColumns{false, false, false};
     writer.saveDetailsColumns(hiddenColumns);
-    writer.saveColumnOrder(
-        {luciole::DetailsColumn::Size, luciole::DetailsColumn::Type, luciole::DetailsColumn::Modified,
-         luciole::DetailsColumn::Accessed, luciole::DetailsColumn::Created, luciole::DetailsColumn::Owner,
-         luciole::DetailsColumn::Group, luciole::DetailsColumn::Permissions, luciole::DetailsColumn::Location}
-    );
-    const luciole::DetailsColumnOrder finalOrder{luciole::DetailsColumn::Modified, luciole::DetailsColumn::Size,
-                                                 luciole::DetailsColumn::Type,     luciole::DetailsColumn::Accessed,
-                                                 luciole::DetailsColumn::Created,  luciole::DetailsColumn::Owner,
-                                                 luciole::DetailsColumn::Group,    luciole::DetailsColumn::Permissions,
-                                                 luciole::DetailsColumn::Location};
+    const luciole::DetailsColumnOrder shuffled = [] {
+      auto order = luciole::kDefaultDetailsColumnOrder;
+      std::ranges::swap(order[0], order[1]);
+      return order;
+    }();
+    writer.saveColumnOrder(shuffled);
+    const luciole::DetailsColumnOrder finalOrder = [] {
+      auto order = luciole::kDefaultDetailsColumnOrder;
+      std::ranges::swap(order[0], order[2]);
+      return order;
+    }();
     writer.saveColumnOrder(finalOrder);
-    writer.saveColumnWidths({400, 200, 100, 180, 156, 156, 128, 128, 112, 260});
-    const luciole::DetailsColumnWidths finalWidths{640, 192, 96, 224, 156, 156, 128, 128, 112, 260};
+    writer.saveColumnWidths({400, 200, 100, 180, 156, 156, 128, 128, 112, 260, 128, 112, 112, 120,
+                             120, 156, 96,  96,  152, 148, 132, 120, 96,  80,  104, 112, 104, 120});
+    const luciole::DetailsColumnWidths finalWidths{640, 192, 96,  224, 156, 156, 128, 128, 112, 260,
+                                                   136, 120, 120, 128, 128, 164, 104, 104, 160, 152,
+                                                   136, 124, 104, 88,  112, 120, 112, 128};
     writer.saveColumnWidths(finalWidths);
     writer.saveInteraction(luciole::ActivationMode::SingleClick, luciole::TypingMode::Search);
     writer.saveInteraction(luciole::ActivationMode::DoubleClick, luciole::TypingMode::Typeahead);

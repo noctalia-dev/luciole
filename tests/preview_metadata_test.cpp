@@ -1,4 +1,5 @@
 #include "fs/gio_interop.h"
+#include "fs/posix_fd.h"
 #include "test_check.h"
 #include "thumbnails/metadata_probe.h"
 #include "thumbnails/preview_metadata.h"
@@ -7,15 +8,18 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <print>
 #include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 
 namespace {
   namespace fs = std::filesystem;
+  using luciole::Fd;
   using luciole::GioPtr;
   void wait(const std::function<bool()>& done) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
@@ -349,6 +353,12 @@ namespace {
          "ultrafast",
          "-pix_fmt",
          "yuv420p",
+         "-colorspace",
+         "bt709",
+         "-color_primaries",
+         "bt709",
+         "-color_trc",
+         "bt709",
          "-threads",
          "1",
          "-c:a",
@@ -385,6 +395,104 @@ namespace {
     fields = inspect(rotated, "video/mp4");
     TEST_CHECK(value(fields, "Frame size") == "160 × 90 px" && !value(fields, "Rotation").empty());
   }
+
+  void columnChecks(const fs::path& root) {
+    const auto image = root / "image <literal> café\n.png";
+    auto facts = luciole::probeEntryMediaFacts(image.native(), "image/png", nullptr);
+    TEST_CHECK(facts.width == 640U && facts.height == 360U);
+    TEST_CHECK(!facts.durationMicros && !facts.bitsPerSecond && !facts.audioCodec && !facts.videoCodec);
+    TEST_CHECK(!facts.orientation && !facts.photoDateSeconds); // PNG carries no EXIF.
+    const auto clip = root / "clip café\n.mp4";
+    facts = luciole::probeEntryMediaFacts(clip.native(), "video/mp4", nullptr);
+    TEST_CHECK(facts.width == 160U && facts.height == 90U);
+    TEST_CHECK(facts.videoCodec == luciole::InternedText("h264") && facts.audioCodec == luciole::InternedText("aac"));
+    TEST_CHECK(facts.frameRateMilli == 25'000U && facts.aspectRatioPerMille == 1'777U);
+    TEST_CHECK(facts.pixelFormat == luciole::InternedText("yuv420p") && facts.colorSpace);
+    TEST_CHECK(facts.durationMicros && facts.bitsPerSecond);
+    // The parser accepts the fields ffprobe emits, including tags, and rejects anything else.
+    const auto parsed = luciole::parseMediaFacts(
+        R"({"format": {"duration": "5.5", "bit_rate": "128000",)"
+        R"("tags": {"artist": "Ada", "album": "Notes", "genre": "Test", "track": "3/12", "date": "2021-03-04"}},)"
+        R"("streams": [)"
+        R"({"codec_type": "video", "codec_name": "h264", "width": "320", "height": "240",)"
+        R"("avg_frame_rate": "30000/1001", "display_aspect_ratio": "4:3", "pix_fmt": "yuv420p", "color_space": "bt709"},)"
+        R"({"codec_type": "audio", "codec_name": "aac"}]})"
+    );
+    TEST_CHECK(parsed.durationMicros == 5'500'000U && parsed.bitsPerSecond == 128'000U);
+    TEST_CHECK(parsed.artist == luciole::InternedText("Ada") && parsed.album == luciole::InternedText("Notes"));
+    TEST_CHECK(parsed.genre == luciole::InternedText("Test") && parsed.track == 3U && parsed.releaseYear == 2021U);
+    TEST_CHECK(parsed.width == 320U && parsed.height == 240U && parsed.videoCodec == luciole::InternedText("h264"));
+    TEST_CHECK(parsed.audioCodec == luciole::InternedText("aac") && parsed.frameRateMilli == 29'970U);
+    TEST_CHECK(parsed.aspectRatioPerMille == 1'333U && parsed.aspectRatio == luciole::InternedText("4:3"));
+    TEST_CHECK(
+        parsed.pixelFormat == luciole::InternedText("yuv420p") && parsed.colorSpace == luciole::InternedText("bt709")
+    );
+    TEST_CHECK(luciole::parseMediaFacts("not json") == luciole::EntryMedia{});
+    // A hand-built JPEG whose EXIF carries orientation 6 and a DateTimeOriginal.
+    std::vector<std::uint8_t> tiff;
+    const auto push16 = [&tiff](std::uint16_t value) {
+      tiff.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+      tiff.push_back(static_cast<std::uint8_t>(value >> 8));
+    };
+    const auto push32 = [&tiff](std::uint32_t value) {
+      for (auto shift = 0U; shift < 32U; shift += 8U) {
+        tiff.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFU));
+      }
+    };
+    const std::string datetime = "2021:03:04 05:06:07";
+    const auto exifIfd = 8 + 2 + 2 * 12 + 4; // IFD0 with two entries and its next-IFD word.
+    tiff.insert(tiff.end(), {'I', 'I'});
+    push16(42);
+    push32(8);
+    push16(2); // Two IFD0 entries.
+    push16(0x0112);
+    push16(3);
+    push32(1);
+    push16(6);
+    push16(0); // Orientation 6, inline SHORT.
+    push16(0x8769);
+    push16(4);
+    push32(1);
+    push32(exifIfd);
+    push32(0); // No further IFD.
+    push16(1); // One EXIF IFD entry.
+    push16(0x9003);
+    push16(2);
+    push32(datetime.size() + 1);
+    push32(exifIfd + 2 + 12);
+    for (const auto character : datetime) {
+      tiff.push_back(static_cast<std::uint8_t>(character));
+    }
+    tiff.push_back(0);
+    std::vector<std::uint8_t> jpeg{0xFF, 0xD8, 0xFF, 0xE1};
+    const std::size_t segment = 2 + 6 + tiff.size();
+    jpeg.push_back(static_cast<std::uint8_t>(segment >> 8));
+    jpeg.push_back(static_cast<std::uint8_t>(segment & 0xFFU));
+    jpeg.insert(jpeg.end(), {'E', 'x', 'i', 'f', 0, 0});
+    jpeg.insert(jpeg.end(), tiff.begin(), tiff.end());
+    const auto encoded = root / "exif.jpg";
+    std::ofstream(encoded, std::ios::binary)
+        .write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
+    TEST_CHECK(
+        static_cast<std::size_t>(std::ifstream(encoded, std::ios::binary | std::ios::ate).tellg()) == jpeg.size()
+    );
+    const Fd opened(::open(encoded.c_str(), O_RDONLY));
+    TEST_CHECK(opened.valid());
+    const auto exif = luciole::readExifFacts(opened.get());
+    TEST_CHECK(exif.orientation == 6U);
+    std::tm fields{};
+    fields.tm_year = 2021 - 1900;
+    fields.tm_mon = 2;
+    fields.tm_mday = 4;
+    fields.tm_hour = 5;
+    fields.tm_min = 6;
+    fields.tm_sec = 7;
+    TEST_CHECK(exif.dateSeconds == static_cast<std::uint64_t>(::mktime(&fields)));
+    const Fd plain(::open((root / "plain.jpg").c_str(), O_RDONLY | O_CREAT | O_WRONLY | O_TRUNC, 0600));
+    TEST_CHECK(::write(plain.get(), "FFD8 not enough", 15) == 15);
+    TEST_CHECK(luciole::readExifFacts(plain.get()).orientation == std::nullopt);
+  }
+
   struct PathOverride {
     std::string original = std::getenv("PATH");
     ~PathOverride() { ::setenv("PATH", original.c_str(), 1); }
@@ -482,6 +590,7 @@ int main(int argc, char** argv) {
   nativeFactsChecks(root);
   symbolicLinkChecks(root);
   mediaChecks(root);
+  columnChecks(root);
   lifecycleChecks(root);
   fs::remove_all(root);
   std::println("preview metadata checks passed");

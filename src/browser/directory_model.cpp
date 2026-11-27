@@ -20,7 +20,14 @@ namespace {
     return field == luciole::SortField::Type
         || field == luciole::SortField::Owner
         || field == luciole::SortField::Group
-        || field == luciole::SortField::Location;
+        || field == luciole::SortField::Location
+        || field == luciole::SortField::AudioCodec
+        || field == luciole::SortField::VideoCodec
+        || field == luciole::SortField::Album
+        || field == luciole::SortField::Artist
+        || field == luciole::SortField::Genre
+        || field == luciole::SortField::ColorSpace
+        || field == luciole::SortField::PixelFormat;
   }
 
   std::string textSortKey(const std::string& text) {
@@ -354,6 +361,20 @@ void luciole::DirectoryModel::prepareSortKeys() {
       value = &*entry->details.owner;
     } else if (m_sort.field == SortField::Group && entry->details.group) {
       value = &*entry->details.group;
+    } else if (m_sort.field == SortField::AudioCodec && entry->media && entry->media->audioCodec) {
+      value = &*entry->media->audioCodec;
+    } else if (m_sort.field == SortField::VideoCodec && entry->media && entry->media->videoCodec) {
+      value = &*entry->media->videoCodec;
+    } else if (m_sort.field == SortField::Album && entry->media && entry->media->album) {
+      value = &*entry->media->album;
+    } else if (m_sort.field == SortField::Artist && entry->media && entry->media->artist) {
+      value = &*entry->media->artist;
+    } else if (m_sort.field == SortField::Genre && entry->media && entry->media->genre) {
+      value = &*entry->media->genre;
+    } else if (m_sort.field == SortField::ColorSpace && entry->media && entry->media->colorSpace) {
+      value = &*entry->media->colorSpace;
+    } else if (m_sort.field == SortField::PixelFormat && entry->media && entry->media->pixelFormat) {
+      value = &*entry->media->pixelFormat;
     }
     if (value) {
       auto [key, inserted] = m_alternateSortKeys.try_emplace(*value);

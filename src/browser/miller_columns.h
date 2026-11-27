@@ -34,6 +34,7 @@ namespace luciole {
     [[nodiscard]] const std::vector<std::unique_ptr<Column>>& columns() const { return m_columns; }
     void setChangedCallback(std::function<void()> callback) { m_changed = std::move(callback); }
     void setFileActivatedCallback(std::function<void(const Location&)> callback) { m_activate = std::move(callback); }
+    void setMediaFactsCheck(DirectorySession::MediaFactsCheck check) { m_mediaFacts = std::move(check); }
 
   private:
     std::unique_ptr<Column> makeColumn(BrowserController& source, const Location& location, bool inheritHistory = true);
@@ -46,5 +47,6 @@ namespace luciole {
     bool m_showParents = true;
     std::function<void()> m_changed;
     std::function<void(const Location&)> m_activate;
+    DirectorySession::MediaFactsCheck m_mediaFacts;
   };
 } // namespace luciole

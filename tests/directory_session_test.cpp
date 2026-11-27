@@ -1005,6 +1005,79 @@ namespace {
     TEST_CHECK(session.snapshot().status == DirectoryStatus::Cancelled && pending.metadataPending);
   }
 
+  void testMediaFacts(Pump& pump) {
+    Fixture fixture;
+    fixture.write("song.mp3", "audio");
+    fixture.write("notes.txt", "text");
+    std::atomic<int> probes = 0;
+    DirectorySession session(0, {}, {}, [&probes](const std::string& path, const std::string&, GCancellable*) {
+      ++probes;
+      if (path.ends_with(".mp3")) {
+        return luciole::EntryMedia{.durationMicros = 12'000'000U, .bitsPerSecond = 128'000U};
+      }
+      return luciole::EntryMedia{};
+    });
+    session.open(fixture.location());
+    ready(pump, session);
+    const auto initial = session.snapshot().entries;
+    TEST_CHECK(!initial.isCatalogue() && initial.size() == 2);
+    const auto indexOf = [](const luciole::DirectoryEntries& entries, const std::string& name) {
+      for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (entries.brief(i).name == name) {
+          return i;
+        }
+      }
+      throw std::runtime_error("missing entry");
+    };
+    const auto song = indexOf(initial, "song.mp3"), notes = indexOf(initial, "notes.txt");
+    // A visible media column requests the Media bit; the probed facts publish through an overlay.
+    pump.until([&] {
+      session.requestMetadata(song, initial.brief(song).id, luciole::EntryDetails::Media);
+      const auto* known = session.snapshot().entries.known(song);
+      return known && (known->queriedDetails & luciole::EntryDetails::Media) != 0;
+    });
+    const auto* facts = session.snapshot().entries.known(song);
+    TEST_CHECK(facts->media && facts->media->durationMicros == 12'000'000U && facts->media->bitsPerSecond == 128'000U);
+    TEST_CHECK(probes.load() == 1);
+    // A non-media file answers as a completed unknown without invoking the probe.
+    pump.until([&] {
+      session.requestMetadata(notes, initial.brief(notes).id, luciole::EntryDetails::Media);
+      const auto* known = session.snapshot().entries.known(notes);
+      return known && (known->queriedDetails & luciole::EntryDetails::Media) != 0;
+    });
+    TEST_CHECK(!session.snapshot().entries.known(notes)->media);
+    TEST_CHECK(probes.load() == 1);
+    // Changing the file retires its retained facts; the next request probes again.
+    fixture.write("song.mp3", "longer audio data");
+    session.refresh();
+    ready(pump, session);
+    const auto rescanned = session.snapshot().entries;
+    const auto rescannedSong = indexOf(rescanned, "song.mp3");
+    pump.until([&] {
+      session.requestMetadata(rescannedSong, rescanned.brief(rescannedSong).id, luciole::EntryDetails::Media);
+      const auto* known = session.snapshot().entries.known(rescannedSong);
+      return known && known->media && known->media->durationMicros == 12'000'000U;
+    });
+    TEST_CHECK(probes.load() == 2);
+    // A catalogue listing reuses the retained fact without probing again. Small folders stay eager by design,
+    // so the catalogue phase needs more than 512 names.
+    for (int i = 0; i < 600; ++i) {
+      fixture.write(std::format("pad{}", i));
+    }
+    session.setCatalogueEnabled(true);
+    session.refresh();
+    pump.until([&] { return session.snapshot().entries.isCatalogue(); });
+    const auto listed = session.snapshot().entries;
+    const auto listedSong = indexOf(listed, "song.mp3");
+    pump.until([&] {
+      session.requestMetadata(listedSong, listed.brief(listedSong).id, luciole::EntryDetails::Media);
+      const auto* known = session.snapshot().entries.known(listedSong);
+      return known && (known->queriedDetails & luciole::EntryDetails::Media) != 0;
+    });
+    TEST_CHECK(session.snapshot().entries.known(listedSong)->media->bitsPerSecond == 128'000U);
+    TEST_CHECK(probes.load() == 2);
+  }
+
   void testCatalogueContinuity() {
     Fixture fixture;
     for (int i = 0; i < 600; ++i) {
@@ -1171,6 +1244,7 @@ int main() {
     testDeferredSniffing(pump);
     testBrowseCatalogue(pump);
     testCatalogueContinuity();
+    testMediaFacts(pump);
     std::println("directory session checks passed");
     return 0;
   } catch (const std::exception& error) {

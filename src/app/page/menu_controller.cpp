@@ -870,10 +870,15 @@ void MenuController::openToolbarMenu(const LayoutRect& anchor, luciole::ToolbarI
 }
 
 void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luciole::DetailsColumn> column) {
+  // The filesystem columns stay flat; the media columns group under their kind.
+  const auto isMedia = [](luciole::DetailsColumn candidate) { return candidate >= luciole::DetailsColumn::Dimensions; };
   std::vector<ContextMenuControlEntry> entries{
       {.label = "Name", .enabled = false, .checkmark = true, .toggleState = 1, .glyph = "text-caption"}
   };
   for (const auto candidate : m_columns.columnOrder()) {
+    if (isMedia(candidate)) {
+      continue;
+    }
     entries.push_back(
         {.id = static_cast<int>(candidate) + 1,
          .label = std::string(luciole::detailsColumnLabel(candidate)),
@@ -896,6 +901,28 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
        .glyph = "eye"}
   );
   const int left = Style::rtl() ? 1 : -1;
+  const std::vector<std::pair<std::string_view, std::vector<luciole::DetailsColumn>>> groups{
+      {"Image",
+       {luciole::DetailsColumn::DatePhotographed, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Height,
+        luciole::DetailsColumn::Orientation, luciole::DetailsColumn::Width}},
+      {"Audio",
+       {luciole::DetailsColumn::Album, luciole::DetailsColumn::Artist, luciole::DetailsColumn::AudioCodec,
+        luciole::DetailsColumn::BitRate, luciole::DetailsColumn::Duration, luciole::DetailsColumn::Genre,
+        luciole::DetailsColumn::ReleaseYear, luciole::DetailsColumn::Track}},
+      {"Video",
+       {luciole::DetailsColumn::AspectRatio, luciole::DetailsColumn::AudioCodec, luciole::DetailsColumn::BitRate,
+        luciole::DetailsColumn::ColorSpace, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Duration,
+        luciole::DetailsColumn::FrameRate, luciole::DetailsColumn::Height, luciole::DetailsColumn::PixelFormat,
+        luciole::DetailsColumn::VideoCodec, luciole::DetailsColumn::Width}}
+  };
+  std::vector<std::size_t> groupRows;
+  entries.push_back({.label = "", .separator = true});
+  for (std::size_t index = 0; index < groups.size(); ++index) {
+    groupRows.push_back(entries.size());
+    entries.push_back(
+        {.id = 201 + static_cast<int>(index), .label = std::string(groups[index].first), .hasSubmenu = true}
+    );
+  }
   if (column) {
     entries.push_back({.label = "", .separator = true});
     entries.push_back(
@@ -931,9 +958,22 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
        .enabled = m_columns.columnWidths() != luciole::kDefaultDetailsColumnWidths,
        .glyph = "clear-all"}
   );
+  const auto toggleColumns = [this](int id) {
+    auto visibility = m_columns.columnVisibility();
+    if (id >= 1 && id <= static_cast<int>(luciole::kDetailsColumnCount)) {
+      auto& flag = luciole::detailsColumnFlag(visibility, static_cast<luciole::DetailsColumn>(id - 1));
+      flag = !flag;
+    } else if (id == 100) {
+      visibility = luciole::allDetailsColumns();
+    } else if (id == 106) {
+      visibility = {};
+    }
+    m_columns.setDetailsColumnVisibility(visibility);
+    m_page.focusFileList();
+  };
   showContextMenu(
       std::move(entries),
-      [this, column, left, widthIndex](int id) {
+      [this, column, left, widthIndex, toggleColumns](int id) {
         if (id == 104 || id == 105) {
           auto widths = id == 105 ? luciole::kDefaultDetailsColumnWidths : m_columns.columnWidths();
           widths[widthIndex] = luciole::kDefaultDetailsColumnWidths[widthIndex];
@@ -945,21 +985,28 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
         } else if (id == 103) {
           m_columns.setDetailsColumnOrder(luciole::kDefaultDetailsColumnOrder);
         } else {
-          auto visibility = m_columns.columnVisibility();
-          if (id >= 1 && id <= static_cast<int>(luciole::kDetailsColumnCount)) {
-            auto& flag = luciole::detailsColumnFlag(visibility, static_cast<luciole::DetailsColumn>(id - 1));
-            flag = !flag;
-          } else if (id == 100) {
-            visibility = luciole::allDetailsColumns();
-          } else if (id == 106) {
-            visibility = {};
-          }
-          m_columns.setDetailsColumnVisibility(visibility);
+          toggleColumns(id);
         }
-        m_page.focusFileList();
       },
       anchor
   );
+  // Each group row fills its submenu when it opens, reading the current visibility then.
+  for (std::size_t index = 0; index < groups.size(); ++index) {
+    const auto& columns = groups[index].second;
+    m_submenus.attach(groupRows[index], 201 + static_cast<int>(index), [this, columns, toggleColumns] {
+      std::vector<ContextMenuControlEntry> submenu;
+      submenu.reserve(columns.size());
+      for (const auto candidate : columns) {
+        submenu.push_back(
+            {.id = static_cast<int>(candidate) + 1,
+             .label = std::string(luciole::detailsColumnLabel(candidate)),
+             .checkmark = true,
+             .toggleState = luciole::detailsColumnVisible(m_columns.columnVisibility(), candidate) ? 1 : 0}
+        );
+      }
+      m_submenus.show(std::move(submenu), toggleColumns, 264.0F);
+    });
+  }
 }
 
 std::vector<ContextMenuControlEntry> MenuController::sortEntries(const luciole::ActionRequest& request) const {
