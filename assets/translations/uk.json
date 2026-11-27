@@ -344,6 +344,11 @@
     "Use Icon": "Використати піктограму",
     "Open as Administrator": "Відкрити як адміністратор",
     "Return to Normal Access": "Повернутися до звичайного доступу",
+    "Run as a Program": "Запустити як програму",
+    "Run in Terminal": "Запустити в терміналі",
+    "Open Terminal Here": "Викликати термінал тут",
+    "Unpin This Folder": "Відшпилити цю теку",
+    "Reload Pins": "Оновити пришпилене",
     "Reset Button Order": "Скинути порядок кнопок",
     "Administrator Access": "Доступ адміністратора"
   },

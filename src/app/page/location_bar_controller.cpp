@@ -53,11 +53,11 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
        .flexGrow = 1.0F},
       ui::button(
           {.out = &m_adminButton,
-           .text = "Administrator",
+           .text = i18n::text("Administrator"),
            .glyph = "shield-lock",
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Secondary,
-           .tooltip = "Administrator access · Return to normal access",
+           .tooltip = i18n::text("Administrator access · Return to normal access"),
            .visible = false,
            .participatesInLayout = false,
            .onClick = [this] { m_page.dispatchAction(luciole::BrowserAction::LeaveAdmin); }}
@@ -396,7 +396,7 @@ void LocationBarController::syncAdministrator() {
   const auto& location = m_page.browser().model().snapshot().location;
   const bool compact = m_page.surface().width() < 760;
   const bool shown = location && location->isAdmin() && !(compact && m_editingLocation);
-  m_adminButton->setText(compact ? "" : "Administrator");
+  m_adminButton->setText(compact ? "" : i18n::text("Administrator"));
   m_adminButton->setVisible(shown);
   m_adminButton->setParticipatesInLayout(shown);
 }

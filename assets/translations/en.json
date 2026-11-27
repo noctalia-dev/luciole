@@ -316,6 +316,11 @@
     "Use Icon": "Use Icon",
     "Open as Administrator": "Open as Administrator",
     "Return to Normal Access": "Return to Normal Access",
+    "Run as a Program": "Run as a Program",
+    "Run in Terminal": "Run in Terminal",
+    "Open Terminal Here": "Open Terminal Here",
+    "Unpin This Folder": "Unpin This Folder",
+    "Reload Pins": "Reload Pins",
     "Reset Button Order": "Reset Button Order",
     "Administrator Access": "Administrator Access"
   },

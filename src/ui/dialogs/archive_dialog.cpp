@@ -125,7 +125,7 @@ ArchiveDialog::ArchiveDialog(
                                  }}));
     section->addChild(
         ui::label(
-            {.text = "ZIP AES-256 protects file contents. File names remain visible.",
+            {.text = i18n::text("ZIP AES-256 protects file contents. File names remain visible."),
              .fontSize = Style::fontSizeCaption,
              .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
              .maxLines = 2}

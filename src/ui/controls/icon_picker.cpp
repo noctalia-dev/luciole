@@ -281,7 +281,7 @@ IconPicker::IconPicker(luciole::FileIconCache& icons, std::vector<ThemedIcon> na
           }),
           ui::button({
               .out = &m_applyButton,
-              .text = "Use Icon",
+              .text = i18n::text("Use Icon"),
               .variant = ButtonVariant::Primary,
               .minWidth = 88.0F,
               .onClick = [this] {

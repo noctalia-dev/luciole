@@ -1484,7 +1484,7 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
   }
   const auto state = actionState(action, request);
   if (!state.enabled) {
-    actionError(std::string(state.reason));
+    actionError(i18n::text(state.reason));
     return;
   }
   m_statusBar.clearMessage();
@@ -1824,7 +1824,7 @@ void BrowserPage::openPatternSelection(const luciole::ActionRequest& request) {
       [this, request](std::string pattern) {
         const auto state = actionState(Action::SelectPattern, request);
         if (!state.enabled) {
-          m_patternEditor->showError(std::string(state.reason));
+          m_patternEditor->showError(i18n::text(state.reason));
           return;
         }
         if (const auto error = browser().model().selectPattern(pattern)) {
@@ -2409,7 +2409,7 @@ void BrowserPage::syncBrowser() {
       tooltip += std::format(" ({})", shortcut);
     }
     if (!state.enabled) {
-      tooltip += "\n" + std::string(state.reason);
+      tooltip += "\n" + i18n::text(state.reason);
     }
     button->setTooltip(std::move(tooltip));
   }
@@ -2424,7 +2424,7 @@ void BrowserPage::syncBrowser() {
   const std::string emptyTrashLabel(i18n::tr(luciole::ActionRegistry::definition(Action::EmptyTrash).label));
   m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
   m_emptyTrashButton->setTooltip(
-      emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)
+      emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + i18n::text(emptyTrashState.reason)
   );
   m_sidebar.sync(snapshot.location);
   m_statusBar.sync(m_miller.enabled());

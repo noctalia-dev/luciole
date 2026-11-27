@@ -394,7 +394,7 @@ void SettingsDialog::addRow(
     copy = ui::column(
         {.align = FlexAlign::Stretch, .gap = 2.0F, .flexGrow = 1.0F}, std::move(titleLabel),
         ui::label(
-            {.text = std::move(subtitle),
+            {.text = i18n::text(subtitle),
              .fontSize = Style::fontSizeCaption,
              .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
              .maxLines = 3}

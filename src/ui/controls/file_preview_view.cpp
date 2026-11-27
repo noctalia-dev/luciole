@@ -277,7 +277,7 @@ void FilePreviewView::sync(
   metadata.insert(metadata.end(), fileFacts.begin(), fileFacts.end());
   // The table sits inside the Details card, which pads it on both sides.
   m_metadata->sync(metadata, std::max(40.0F, budget - Style::spaceMd * 2), true);
-  m_status->setText(snapshot.message);
+  m_status->setText(i18n::text(snapshot.message));
   m_status->setColor(colorSpecFromRole(
       snapshot.status == luciole::PreviewStatus::Error ? ColorRole::Error : ColorRole::OnSurfaceVariant
   ));
