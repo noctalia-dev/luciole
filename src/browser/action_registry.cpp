@@ -173,16 +173,16 @@ namespace {
     }
     return {};
   }
-  // One readable native regular archive: what Browse Archive and Extract accept, regardless of running jobs.
-  bool browsableArchive(const C& c, const R& r) {
-    return single(r) && all(c, r, [](const DirectoryEntry& entry) {
-             return entry.type == FileType::Regular
-                 && !entry.symlink
-                 && entry.location().nativePath().has_value()
-                 && entry.access.read.value_or(true)
-                 && luciole::isSupportedArchive(entry.location(), entry.contentType.value_or(""));
-           });
+  bool extractableArchives(const C& c, const R& r) {
+    return !r.targets.empty() && all(c, r, [](const DirectoryEntry& entry) {
+      return entry.type == FileType::Regular
+          && !entry.symlink
+          && entry.location().nativePath().has_value()
+          && entry.access.read.value_or(true)
+          && luciole::isSupportedArchive(entry.location(), entry.contentType.value_or(""));
+    });
   }
+  bool browsableArchive(const C& c, const R& r) { return single(r) && extractableArchives(c, r); }
   State archive(const C& c, const R& r, bool compress) {
     if (c.operationsBusy) {
       return unavailable("Another file operation is still finishing.");
@@ -198,8 +198,8 @@ namespace {
           })) {
         return unavailable("Special files cannot be compressed.");
       }
-    } else if (!browsableArchive(c, r)) {
-      return unavailable("Select one ZIP or TAR archive.");
+    } else if (!extractableArchives(c, r)) {
+      return unavailable("Select readable native archives.");
     }
     return {};
   }
@@ -260,7 +260,9 @@ namespace {
   }
   State pin(const C& c, const R& r, bool unpin) {
     if (!all(c, r, [](const DirectoryEntry& entry) {
-          return entry.type == FileType::Directory && !entry.location().isTrash();
+          return entry.type == FileType::Directory
+              && !entry.location().isTrash()
+              && entry.location() != luciole::Location::network();
         })) {
       return unavailable("Only folders outside Trash can be pinned.");
     }
@@ -272,7 +274,7 @@ namespace {
     return require(any, unpin ? "These folders are not pinned." : "These folders are already pinned.");
   }
   State pinCurrent(const C& c, const R& r, bool unpin) {
-    if (!r.folder || r.folder->isTrash()) {
+    if (!r.folder || r.folder->isTrash() || *r.folder == luciole::Location::network()) {
       return unavailable("This location cannot be pinned.");
     }
     if (!c.pinsEditable) {
@@ -577,7 +579,8 @@ namespace {
        .label = "Browse Archive",
        .glyph = "folder-open",
        .scope = S::Targets,
-       .rule = extract},
+       .rule = [](const C& c,
+                  const R& r) { return single(r) ? extract(c, r) : unavailable("Select one archive to browse."); }},
       {.action = A::CreateFolder,
        .label = "New Folder…",
        .glyph = "folder-plus",

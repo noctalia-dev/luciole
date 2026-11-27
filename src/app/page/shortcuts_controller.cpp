@@ -15,7 +15,10 @@
 #include "wayland/popup_surface.h"
 #include "wayland/wayland_seat.h"
 
+#include <algorithm>
+#include <cmath>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,16 +86,53 @@ namespace {
     };
   }
 
-  std::unique_ptr<Label> plainLabel(std::string_view text, float size, ColorSpec color, float grow) {
-    return ui::label(
-        {.text = i18n::text(text),
-         .fontSize = size,
-         .color = color,
-         .maxLines = 2,
-         .flexGrow = grow,
-         .configure = [](Label& label) { label.setUseMarkup(false); }}
-    );
-  }
+  class ShortcutRow final : public Flex {
+  public:
+    ShortcutRow(std::string_view text, std::string_view keys) {
+      setAlign(FlexAlign::Start);
+      setGap(Style::spaceMd);
+      const auto literal = [](Label& label) { label.setUseMarkup(false); };
+      addChild(
+          ui::label(
+              {.text = std::string(text),
+               .fontSize = Style::fontSizeBody,
+               .color = colorSpecFromRole(ColorRole::OnSurface),
+               .maxLines = 2,
+               .flexGrow = 1.0F,
+               .configure = literal}
+          )
+      );
+      addChild(
+          ui::label(
+              {.out = &m_bindings,
+               .text = std::string(keys),
+               .fontSize = Style::fontSizeCaption,
+               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+               .textAlign = TextAlign::End,
+               .configure = literal}
+          )
+      );
+    }
+
+  protected:
+    LayoutSize doMeasure(Renderer& renderer, const LayoutConstraints& constraints) override {
+      m_bindings->setMaxWidth(constraints.hasMaxWidth ? bindingWidthLimit(constraints.maxWidth) : 0.0F);
+      return Flex::doMeasure(renderer, constraints);
+    }
+
+    void doArrange(Renderer& renderer, const LayoutRect& rect) override {
+      m_bindings->setMaxWidth(bindingWidthLimit(rect.width));
+      Flex::doArrange(renderer, rect);
+    }
+
+  private:
+    static float bindingWidthLimit(float rowWidth) {
+      // Leave room for the description when bindings need to wrap.
+      return std::max(1.0F, std::floor((rowWidth - Style::spaceMd) * 2.0F / 3.0F));
+    }
+
+    Label* m_bindings = nullptr;
+  };
 } // namespace
 
 ShortcutsController::ShortcutsController(PageContext& page) : m_page(page) {}
@@ -119,13 +159,7 @@ void ShortcutsController::open() {
     if (keys.empty()) {
       return;
     }
-    content->addChild(
-        ui::row(
-            {.justify = FlexJustify::SpaceBetween, .gap = Style::spaceMd},
-            plainLabel(text, Style::fontSizeBody, colorSpecFromRole(ColorRole::OnSurface), 1.0F),
-            plainLabel(keys, Style::fontSizeCaption, colorSpecFromRole(ColorRole::OnSurfaceVariant), 0.0F)
-        )
-    );
+    content->addChild(std::make_unique<ShortcutRow>(text, keys));
   };
   const bool singleWindow = m_page.settings().singleWindow;
   heading(i18n::text("Files and Folders"));

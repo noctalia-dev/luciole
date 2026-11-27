@@ -396,7 +396,7 @@ void FileChooserSession::syncSave() {
     }
   }
   std::string_view problem;
-  if (!folder || !folder->isNative()) {
+  if (!folder || !folder->nativePath()) {
     problem = "Only local folders can be chosen.";
   } else if (m_name != nullptr) {
     problem = luciole::fileNameProblem(m_name->value());
@@ -504,7 +504,7 @@ void FileChooserSession::save() {
     return;
   }
   const auto folder = m_page->location();
-  if (!folder || !folder->isNative()) {
+  if (!folder || !folder->nativePath()) {
     return;
   }
   std::vector<luciole::Location> targets;
@@ -686,7 +686,9 @@ void FileChooserSession::apply(const luciole::ChooserDecision& decision) {
   case luciole::ChooserDecision::Kind::Accept: {
     luciole::FileChooserResult result;
     for (const auto& location : decision.locations) {
-      result.uris.push_back(location.uri());
+      // The path's file:// URI (a GVfs FUSE path for remote folders), as GTK returns; clients cannot open smb:// and
+      // the like.
+      result.uris.push_back(*location.nativeFileUri());
     }
     if (!m_filters.empty()) {
       result.currentFilter = m_filters[m_activeFilter];

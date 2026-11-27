@@ -70,6 +70,11 @@ namespace {
        {luciole::ColorScheme::Dark, "dark"},
        {luciole::ColorScheme::Light, "light"}}
   );
+  constexpr auto kOperationsButtons = std::to_array<Named<luciole::OperationsButton>>(
+      {{luciole::OperationsButton::Always, "always"},
+       {luciole::OperationsButton::Busy, "busy"},
+       {luciole::OperationsButton::Never, "never"}}
+  );
   constexpr auto kDensities = std::to_array<Named<luciole::ViewDensity>>(
       {{luciole::ViewDensity::Compact, "compact"}, {luciole::ViewDensity::Comfortable, "comfortable"}}
   );
@@ -99,6 +104,7 @@ namespace {
     std::string_view expected;
   };
   template <> struct Rule<luciole::DetailsColumnOrder> {};
+  template <> struct Rule<luciole::ToolbarOrder> {};
   template <> struct Rule<luciole::KeybindConfig> {};
 
   bool accepts(const Rule<std::string>& /*rule*/, const std::string& value) {
@@ -109,6 +115,9 @@ namespace {
   bool accepts(const Rule<double>& rule, double value) { return value >= rule.minimum && value <= rule.maximum; }
   bool accepts(const Rule<luciole::DetailsColumnOrder>& /*rule*/, const luciole::DetailsColumnOrder& order) {
     return luciole::validDetailsColumnOrder(order);
+  }
+  bool accepts(const Rule<luciole::ToolbarOrder>& /*rule*/, const luciole::ToolbarOrder& order) {
+    return luciole::validToolbarOrder(order);
   }
   bool accepts(const Rule<luciole::KeybindConfig>& /*rule*/, const luciole::KeybindConfig& config) {
     return luciole::keybindConfigValid(config);
@@ -167,6 +176,31 @@ namespace {
     }
     return order;
   }
+  // Items the list leaves out follow it in their default order.
+  std::optional<luciole::ToolbarOrder> decode(const Rule<luciole::ToolbarOrder>& /*rule*/, const toml::node& node) {
+    const auto* items = node.as_array();
+    luciole::ToolbarOrder order{};
+    if (items == nullptr || items->empty() || items->size() > order.size()) {
+      return std::nullopt;
+    }
+    std::array<bool, luciole::kToolbarItemCount> seen{};
+    std::size_t index = 0;
+    for (const auto& entry : *items) {
+      const auto* name = entry.as_string();
+      const auto item = name ? luciole::toolbarItemFromName(name->get()) : std::nullopt;
+      if (!item || seen[static_cast<std::size_t>(*item)]) {
+        return std::nullopt;
+      }
+      seen[static_cast<std::size_t>(*item)] = true;
+      order[index++] = *item;
+    }
+    for (const auto item : luciole::kDefaultToolbarOrder) {
+      if (!seen[static_cast<std::size_t>(item)]) {
+        order[index++] = item;
+      }
+    }
+    return order;
+  }
   std::optional<luciole::KeybindConfig>
   decode(const Rule<luciole::KeybindConfig>& /*rule*/, const toml::node& node, const luciole::KeybindConfig& base) {
     const auto* table = node.as_table();
@@ -212,6 +246,9 @@ namespace {
   std::string expected(const Rule<luciole::DetailsColumnOrder>& /*rule*/) {
     return "expected unique column names including 'type', 'size', and 'modified'; optional columns may be omitted";
   }
+  std::string expected(const Rule<luciole::ToolbarOrder>& /*rule*/) {
+    return "expected unique toolbar item names; items left out follow in their default order";
+  }
   std::string expected(const Rule<luciole::KeybindConfig>& /*rule*/) {
     return "expected a table of command names with arrays of at most four shortcut strings";
   }
@@ -246,6 +283,16 @@ namespace {
       columns.push_back(luciole::detailsColumnName(column));
     }
     table.insert(key, std::move(columns));
+  }
+  void encode(
+      toml::table& table, std::string_view key, const Rule<luciole::ToolbarOrder>& /*rule*/,
+      const luciole::ToolbarOrder& order
+  ) {
+    toml::array items;
+    for (const auto item : order) {
+      items.push_back(luciole::toolbarItemName(item));
+    }
+    table.insert(key, std::move(items));
   }
   void encode(
       toml::table& table, std::string_view key, const luciole::KeybindConfig& value,
@@ -331,6 +378,16 @@ namespace {
       describe(P::CompactMenus, "compact_menus", [](S& s) -> auto& { return s.compactMenus; }),
       describe(P::ContextMenuIcons, "context_menu_icons", [](S& s) -> auto& { return s.contextMenuIcons; }),
       describe(P::ShowCloseButtons, "show_close_buttons", [](S& s) -> auto& { return s.showCloseButtons; }),
+      describe(P::ShowSidebarButton, "show_sidebar_button", [](S& s) -> auto& { return s.showSidebarButton; }),
+      describe(P::ShowParentButton, "show_parent_button", [](S& s) -> auto& { return s.showParentButton; }),
+      describe(P::ShowNewFolderButton, "show_new_folder_button", [](S& s) -> auto& { return s.showNewFolderButton; }),
+      describe(P::ShowSortButton, "show_sort_button", [](S& s) -> auto& { return s.showSortButton; }),
+      describe(P::ShowViewSwitch, "show_view_switch", [](S& s) -> auto& { return s.showViewSwitch; }),
+      describe(
+          P::OperationsButton, "operations_button", [](S& s) -> auto& { return s.operationsButton; },
+          {kOperationsButtons}
+      ),
+      describe(P::ToolbarOrder, "toolbar_order", [](S& s) -> auto& { return s.toolbarOrder; }),
       describe(P::ReduceAnimations, "reduce_animations", [](S& s) -> auto& { return s.reduceAnimations; }),
       describe(P::UseSSD, "use_ssd", [](S& s) -> auto& { return s.useSSD; }),
       describe(P::ShowFolderInTitle, "show_folder_in_title", [](S& s) -> auto& { return s.showFolderInTitle; }),
@@ -736,9 +793,11 @@ template luciole::ViewMode& luciole::preferenceValue(BrowserSettings&, Preferenc
 template luciole::ViewDensity& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ViewDensity>);
 template luciole::FilenameTruncation& luciole::preferenceValue(BrowserSettings&, PreferenceKey<FilenameTruncation>);
 template luciole::DetailsColumnOrder& luciole::preferenceValue(BrowserSettings&, PreferenceKey<DetailsColumnOrder>);
+template luciole::ToolbarOrder& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ToolbarOrder>);
 template luciole::ThumbnailPolicy& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ThumbnailPolicy>);
 template luciole::ChooserStartFolder& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ChooserStartFolder>);
 template luciole::ColorScheme& luciole::preferenceValue(BrowserSettings&, PreferenceKey<ColorScheme>);
+template luciole::OperationsButton& luciole::preferenceValue(BrowserSettings&, PreferenceKey<OperationsButton>);
 template const bool& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<bool>);
 template const int& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<int>);
 template const double& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<double>);
@@ -752,11 +811,14 @@ template const luciole::FilenameTruncation&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<FilenameTruncation>);
 template const luciole::DetailsColumnOrder&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<DetailsColumnOrder>);
+template const luciole::ToolbarOrder& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ToolbarOrder>);
 template const luciole::ThumbnailPolicy&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ThumbnailPolicy>);
 template const luciole::ChooserStartFolder&
 luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ChooserStartFolder>);
 template const luciole::ColorScheme& luciole::preferenceValue(const BrowserSettings&, PreferenceKey<ColorScheme>);
+template const luciole::OperationsButton&
+luciole::preferenceValue(const BrowserSettings&, PreferenceKey<OperationsButton>);
 
 std::string_view luciole::sortFieldName(SortField field) {
   const auto* found = std::ranges::find(kSortFields, field, &Named<SortField>::value);

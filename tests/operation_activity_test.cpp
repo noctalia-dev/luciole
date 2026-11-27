@@ -9,6 +9,7 @@
 #include "test_check.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <fcntl.h>
@@ -105,6 +106,25 @@ namespace {
     result.setIdentity(luciole::readFileIdentity(info.get()));
     return result;
   }
+  void activityAttention() {
+    const auto activity = [](ActivityState state, bool finished) {
+      luciole::JobActivity item;
+      item.state = state;
+      item.finished = finished;
+      return item;
+    };
+    TEST_CHECK(!luciole::activitiesNeedAttention({}));
+    TEST_CHECK(luciole::activitiesNeedAttention(std::array{activity(ActivityState::Working, false)}));
+    TEST_CHECK(!luciole::activitiesNeedAttention(
+        std::array{activity(ActivityState::Succeeded, true), activity(ActivityState::Cancelled, true)}
+    ));
+    TEST_CHECK(
+        luciole::activitiesNeedAttention(
+            std::array{activity(ActivityState::Succeeded, true), activity(ActivityState::Partial, true)}
+        )
+    );
+  }
+
   void removableFlushActivity(Pump& pump) {
     Fixture fixture;
     fixture.write("first");
@@ -1205,6 +1225,60 @@ namespace {
     }
     TEST_CHECK(completions == 3 && fs::exists(fixture.root / "keep"));
   }
+  void batchArchiveActivity(Pump& pump) {
+    Fixture fixture;
+    fixture.write("alpha");
+    fixture.write("beta");
+    fixture.write("broken.zip");
+    luciole::ArchiveService writer;
+    for (const auto& name : {std::string("alpha"), std::string("beta")}) {
+      TEST_CHECK(writer.compress({fixture.at(name)}, fixture.at(name + ".tar"), luciole::ArchiveFormat::Tar));
+      pump.until([&] { return !writer.busy(); });
+      TEST_CHECK(!writer.error());
+    }
+    Workspace workspace;
+    const auto otherWindow = workspace.model.addWindow();
+    const auto other = workspace.model.addTab(otherWindow);
+    Owner otherOwner;
+    workspace.hub.attach(other, otherOwner);
+    auto job = workspace.hub.create<luciole::ArchiveService>(workspace.page);
+    auto& batch = job->service<luciole::ArchiveService>();
+    TEST_CHECK(batch.extractMany(
+        {fixture.at("alpha.tar"), fixture.at("broken.zip"), fixture.at("beta.tar")}, fixture.at("destination")
+    ));
+    const auto preparing = workspace.hub.activities();
+    TEST_CHECK(preparing.size() == 1 && preparing[0].title == "Extract archives" && preparing[0].canCancel);
+    TEST_CHECK(preparing[0].summary.contains("0 of 3 archives"));
+    TEST_CHECK(workspace.model.close(workspace.page));
+    workspace.hub.detach(workspace.page);
+    workspace.hub.update(otherWindow);
+    TEST_CHECK(workspace.hub.owner(*job) == other);
+    pump.until([&] { return !batch.busy(); });
+    const auto finished = workspace.hub.activities();
+    TEST_CHECK(finished.size() == 1 && finished[0].state == ActivityState::Partial && finished[0].finished);
+    TEST_CHECK(finished[0].summary.contains("2 completed") && finished[0].summary.contains("1 failed"));
+    const auto report = workspace.hub.activityReport(job->id());
+    TEST_CHECK(
+        report && report->contains("alpha.tar") && report->contains("broken.zip") && report->contains("beta.tar")
+    );
+    TEST_CHECK(report->contains("Extracted") && !report->contains("Moved"));
+    std::string alpha, beta;
+    std::getline(std::ifstream(fixture.root / "destination/alpha/alpha"), alpha);
+    std::getline(std::ifstream(fixture.root / "destination/beta/beta"), beta);
+    TEST_CHECK(alpha == "alpha" && beta == "beta");
+    auto cancelled = workspace.hub.create<luciole::ArchiveService>(other);
+    auto& pending = cancelled->service<luciole::ArchiveService>();
+    TEST_CHECK(pending.extractMany({fixture.at("alpha.tar"), fixture.at("beta.tar")}, fixture.at("destination")));
+    workspace.hub.shutdown();
+    pump.until([&] { return !workspace.hub.shutdownPending(); });
+    TEST_CHECK(!pending.busy() && pending.results().size() == 2);
+    TEST_CHECK(std::ranges::all_of(pending.results(), [](const auto& result) {
+      return result.outcome == luciole::TransferOutcome::Cancelled;
+    }));
+    TEST_CHECK(fs::exists(fixture.root / "destination/alpha/alpha"));
+    workspace.hub.detach(other);
+  }
+
   void cancelledArchive(Pump& pump) {
     Fixture fixture;
     fixture.write("input");
@@ -1291,6 +1365,7 @@ int main(int argc, char** argv) {
     return 0;
   }
   TEST_CHECK(argc == 1);
+  activityAttention();
   removableFlushActivity(pump);
   overwriteHistory(pump);
   trashMoveNotifications(pump, false);
@@ -1298,6 +1373,7 @@ int main(int argc, char** argv) {
   conflictCancelAndRehome(pump);
   historyAndInspection(pump);
   cancelledArchive(pump);
+  batchArchiveActivity(pump);
   preparedJobCompletion(pump);
   boundedReports(pump);
   batchRenameHistory(pump);

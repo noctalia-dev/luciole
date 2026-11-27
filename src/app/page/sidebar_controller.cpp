@@ -48,6 +48,7 @@ void SidebarController::load(const luciole::BrowserSettings& settings) {
   m_sidebarTree = settings.sidebarTree;
   m_showDrives = settings.showDrives;
   m_showNetwork = settings.showNetwork;
+  m_showToggle = settings.showSidebarButton;
 }
 
 void SidebarController::applySettings(
@@ -76,6 +77,11 @@ void SidebarController::applySettings(
   }
   if (force || before.sidebarWidth != settings.sidebarWidth) {
     m_sidebarWidth = settings.sidebarWidth;
+  }
+  m_showToggle = settings.showSidebarButton;
+  if (m_toggle) {
+    m_toggle->setVisible(m_showToggle);
+    m_toggle->setParticipatesInLayout(m_showToggle);
   }
 }
 

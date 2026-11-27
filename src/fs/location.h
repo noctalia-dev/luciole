@@ -19,6 +19,8 @@ namespace luciole {
 
     const std::string& uri() const { return m_uri; }
     std::optional<std::string> nativePath() const;
+    // file:// URI of nativePath() built without GVfs, which would map a FUSE path back to its remote URI.
+    std::optional<std::string> nativeFileUri() const;
     bool isTrash() const;
     bool isNative() const;
 

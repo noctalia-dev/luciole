@@ -15,6 +15,8 @@ namespace luciole {
     SystemMountMonitor& operator=(const SystemMountMonitor&) = delete;
     void start(std::function<void()> changed);
     const std::vector<SystemMount>& mounts() const;
+    const std::vector<MountedFilesystem>& mountedFilesystems() const;
+    const std::vector<ConfiguredFilesystem>& configuredFilesystems() const;
 
   private:
     struct State;

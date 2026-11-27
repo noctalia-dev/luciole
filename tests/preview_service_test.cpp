@@ -159,12 +159,13 @@ namespace {
     TEST_CHECK(preview.snapshot().totals.phase == luciole::FolderTotalsPhase::Idle);
   }
   void checks(const std::filesystem::path& root) {
-    const auto portraitLayout = luciole::previewImageLayout(1000, 3000, 320, 1300, 1);
-    TEST_CHECK(portraitLayout.pixels >= 846);
-    const auto landscapeLayout = luciole::previewImageLayout(3840, 2160, 320, 1300, 1);
-    TEST_CHECK(landscapeLayout.pixels <= 320);
-    const auto retinaLayout = luciole::previewImageLayout(3840, 2160, 800, 720, 2);
-    TEST_CHECK(retinaLayout.pixels > 1024 && retinaLayout.pixels <= 2048);
+    // A portrait image is bounded by the stage height, a landscape one by the narrow pane's width.
+    const auto stage = luciole::previewStage(320, 1300, false);
+    const int portrait = luciole::previewImagePixels(1000, 3000, 320, 1300, 1, false);
+    TEST_CHECK(std::abs(portrait - static_cast<int>(std::ceil(stage.height))) <= 1);
+    TEST_CHECK(luciole::previewImagePixels(3840, 2160, 320, 1300, 1, false) <= 320);
+    const int retina = luciole::previewImagePixels(3840, 2160, 800, 720, 2, false);
+    TEST_CHECK(retina > 1024 && retina <= 2048);
     luciole::ThumbnailService grid;
     luciole::PreviewService preview(grid);
     grid.setChangedCallback([&] { preview.thumbnailsChanged(); });
@@ -192,7 +193,7 @@ namespace {
     TEST_CHECK(
         preview.snapshot().status == luciole::PreviewStatus::Ready
         && preview.snapshot().text.size() < 9000
-        && preview.snapshot().message == "Preview truncated"
+        && preview.snapshot().message == "Truncated"
     );
     write(b, std::string("binary\0text", 11));
     preview.show(entry(b), 512);
@@ -202,7 +203,9 @@ namespace {
     stale.size = 3;
     preview.show(stale, 512);
     finish();
-    TEST_CHECK(preview.snapshot().status == luciole::PreviewStatus::Error);
+    TEST_CHECK(
+        preview.snapshot().status == luciole::PreviewStatus::Unavailable && preview.snapshot().message == "File changed"
+    );
     const auto link = root / "link.txt";
     std::filesystem::create_symlink(a, link);
     preview.show(entry(link), 512);
@@ -309,7 +312,7 @@ namespace {
         && preview.snapshot().image == fallback
         && preview.snapshot().image->pixels
         && preview.snapshot().image->pixels->width == 128
-        && preview.snapshot().message == "Larger preview unavailable."
+        && preview.snapshot().message == "Low resolution"
         && preview.snapshot().imageUpgradeFailed
     );
     preview.clear();

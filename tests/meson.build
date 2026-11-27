@@ -48,6 +48,8 @@ test_table = [
   {'name': 'provider-transfer', 'deps': [operations_dep, event_loop_dep], 'env': gio_env},
   {'name': 'transfer-service', 'deps': [operations_dep, event_loop_dep], 'timeout': 90, 'env': gio_env},
   {'name': 'places', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'places-sidebar', 'deps': [ui_dep, event_loop_dep],
+    'env': gio_env + ['LUCIOLE_LIBRARY_ASSETS_DIR=' + (meson.project_source_root() / 'lib/assets')]},
   {'name': 'icon-theme', 'deps': [thumbnails_dep, imaging_dep, system_dep, event_loop_dep], 'wrapper': files('icon_theme_test.py')},
   {'name': 'file-icon', 'deps': [thumbnails_dep, imaging_dep, system_dep, event_loop_dep], 'env': gio_env},
   {'name': 'folder-icon', 'deps': [fs_dep, system_dep, event_loop_dep], 'env': gio_env},

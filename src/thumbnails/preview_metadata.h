@@ -13,6 +13,8 @@ namespace luciole {
     std::string value;
     // Extended technical and filesystem facts belong only in Properties.
     bool preview = true;
+    // One line, eliding the middle: long paths keep both their root and the file name.
+    bool singleLine = false;
     bool operator==(const MetadataField&) const = default;
   };
   using MetadataFields = std::vector<MetadataField>;

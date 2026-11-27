@@ -82,6 +82,20 @@ namespace {
   constexpr float kDialogMargin = 32.0F;
   // The lib's default popup shadow, as on its context menus.
   constexpr ShadowStyle kDialogShadow{};
+
+  // Hosts one child at its own size and catches the clicks the child leaves, including those on disabled buttons,
+  // whose own input is off.
+  class FallbackClickArea final : public InputArea {
+  protected:
+    LayoutSize doMeasure(Renderer& renderer, const LayoutConstraints& constraints) override {
+      return children().front()->measure(renderer, constraints);
+    }
+    void doArrange(Renderer& renderer, const LayoutRect& rect) override {
+      setPosition(rect.x, rect.y);
+      setSize(rect.width, rect.height);
+      children().front()->arrange(renderer, {0.0F, 0.0F, rect.width, rect.height});
+    }
+  };
 } // namespace
 
 BrowserPage::BrowserPage(
@@ -142,6 +156,7 @@ BrowserPage::BrowserPage(
   m_launcher.setTerminalCommand(settings.terminalCommand);
   m_sidebar.load(settings);
   m_detailsHeader.load(settings);
+  m_operations.setButtonMode(settings.operationsButton);
   m_activationMode = settings.activationMode;
   m_fileKeys.setTypingMode(settings.typingMode);
   m_browser.setSearchRecursive(settings.typingMode != luciole::TypingMode::Filter);
@@ -1501,6 +1516,18 @@ void BrowserPage::runAction(
   static constexpr auto fileClipboard = [](BrowserPage& page, const Call& call) {
     page.copyFiles(call.action, call.targets);
   };
+  static constexpr auto extractArchives = [](BrowserPage& page, const Call& call) {
+    std::vector<luciole::Location> sources;
+    sources.reserve(call.targets.size());
+    for (const auto& target : call.targets) {
+      sources.push_back(target.location());
+    }
+    if (call.action == Action::ExtractHere) {
+      page.m_archiveController.extractHere(std::move(sources));
+    } else {
+      page.m_archiveController.extractTo(std::move(sources));
+    }
+  };
   static constexpr auto pathClipboard = [](BrowserPage& page, const Call& call) {
     page.copyPaths(call.action, call.request, call.targets);
   };
@@ -1578,12 +1605,8 @@ void BrowserPage::runAction(
        [](BrowserPage& page, const Call& call) { page.m_propertiesController.show(call.targets); }},
       {Action::Compress,
        [](BrowserPage& page, const Call& call) { page.m_archiveController.compress(call.targets); }},
-      {Action::ExtractHere,
-       [](BrowserPage& page, const Call& call) {
-         page.m_archiveController.extractHere(call.targets.front().location());
-       }},
-      {Action::ExtractTo,
-       [](BrowserPage& page, const Call& call) { page.m_archiveController.extractTo(call.targets.front().location()); }},
+      {Action::ExtractHere, extractArchives},
+      {Action::ExtractTo, extractArchives},
       {Action::BrowseArchive,
        [](BrowserPage& page, const Call& call) { page.m_archiveController.browse(call.targets.front().location()); }},
       {Action::CreateFolder, createItem},
@@ -2004,6 +2027,7 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
   if (m_body && (force || before.backgroundOpacity != settings.backgroundOpacity)) {
     m_body->setFill(colorSpecFromRole(ColorRole::Surface, static_cast<float>(settings.backgroundOpacity)));
   }
+  m_operations.setButtonMode(settings.operationsButton);
   m_sidebar.applySettings(before, settings, force);
   if (m_settingsController.open()) {
     m_detailsHeader.applySettings(before, settings, force);
@@ -2015,8 +2039,26 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
     m_restartMiller = true;
   }
   m_savedSettings = settings;
+  if (m_toolbar) {
+    if (before.toolbarOrder != settings.toolbarOrder) {
+      arrangeToolbar();
+    }
+    showToolbarButtons();
+  }
   m_browserDirty = true;
   m_surface->requestLayout();
+}
+
+void BrowserPage::showToolbarButtons() {
+  for (const auto& [node, show] : std::array<std::pair<Node*, bool>, 4>{
+           {{m_up, m_savedSettings.showParentButton},
+            {m_newFolderButton, choosing() || m_savedSettings.showNewFolderButton},
+            {m_sortButton, m_savedSettings.showSortButton},
+            {m_viewSwitch, m_savedSettings.showViewSwitch}}
+       }) {
+    node->setVisible(show);
+    node->setParticipatesInLayout(show);
+  }
 }
 
 void BrowserPage::cancelDrag() { m_dragDrop.cancelDrag(); }
@@ -2137,7 +2179,8 @@ void BrowserPage::applyViewMode() {
 
 float BrowserPage::gridHeight() const {
   const auto& location = browser().model().snapshot().location;
-  const bool context = !browser().searchQuery().empty() || (location && location->isTrash());
+  const bool context =
+      (browser().searchRecursive() && !browser().searchQuery().empty()) || (location && location->isTrash());
   return m_viewMode == luciole::ViewMode::Grid
       ? luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, context).height
       : luciole::fileRowHeight(m_savedSettings.presentation, context, rowIconSize());
@@ -2633,6 +2676,7 @@ void BrowserPage::buildScene() {
   root->setFillHeight(true);
   root->addChild(buildTitlebar());
   root->addChild(buildToolbar());
+  showToolbarButtons();
   root->addChild(
       ui::column(
           {.out = &m_body,
@@ -2753,109 +2797,161 @@ std::unique_ptr<Flex> BrowserPage::buildTitlebar() {
 }
 
 std::unique_ptr<Flex> BrowserPage::buildToolbar() {
-  return ui::row(
-      {.out = &m_toolbar, .align = FlexAlign::Center, .gap = Style::spaceSm, .padding = Style::spaceSm},
-      ui::row(
-          {.align = FlexAlign::Center, .gap = Style::spaceXs}, m_sidebar.buildToggle(),
-          ui::button(
-              {.out = &m_back,
-               .glyph = "arrow-left",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .tooltip = luciole::shortcutTooltip("Back", Action::Back),
-               .onClick = [this] { dispatchAction(Action::Back); }}
-          ),
-          ui::button(
-              {.out = &m_forward,
-               .glyph = "arrow-right",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .tooltip = luciole::shortcutTooltip("Forward", Action::Forward),
-               .onClick = [this] { dispatchAction(Action::Forward); }}
-          ),
-          ui::button(
-              {.out = &m_up,
-               .glyph = "arrow-up",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .tooltip = luciole::shortcutTooltip("Parent folder", Action::Up),
-               .onClick = [this] { dispatchAction(Action::Up); }}
-          )
+  auto clicks = std::make_unique<FallbackClickArea>();
+  clicks->setFlexGrow(1.0F);
+  clicks->addChild(ui::row({.out = &m_toolbarContent, .align = FlexAlign::Center, .gap = Style::spaceSm}));
+  // A file picker has no menus.
+  if (!choosing()) {
+    clicks->setAcceptedButtons(InputArea::buttonMask(BTN_RIGHT));
+    clicks->setOnPress([this](const InputArea::PointerData& data) {
+      if (data.pressed) {
+        openToolbarMenuAt(data.sceneX, data.sceneY);
+      }
+    });
+  }
+  auto toolbar = ui::row({.out = &m_toolbar, .align = FlexAlign::Center, .padding = Style::spaceSm}, std::move(clicks));
+  // In ToolbarItem order; arrangeToolbar() places them in the saved order.
+  std::array<std::unique_ptr<Node>, luciole::kToolbarItemCount> items{
+      m_sidebar.buildToggle(),
+      ui::button(
+          {.out = &m_back,
+           .glyph = "arrow-left",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .tooltip = luciole::shortcutTooltip("Back", Action::Back),
+           .onClick = [this] { dispatchAction(Action::Back); }}
       ),
-      m_locationBar.buildLocationArea(), m_locationBar.buildSearchArea(),
-      ui::row(
-          {.align = FlexAlign::Center, .gap = Style::spaceXs},
-          ui::button(
-              {.out = &m_newFolderButton,
-               .glyph = "folder-plus",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .tooltip = luciole::shortcutTooltip("New Folder…", Action::CreateFolder),
-               .visible = choosing(),
-               .participatesInLayout = choosing(),
-               .onClick = [this] { dispatchAction(Action::CreateFolder); }}
-          ),
-          ui::button(
-              {.out = &m_emptyTrashButton,
-               .glyph = "trash-x",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .visible = false,
-               .participatesInLayout = false,
-               .onClick = [this] { dispatchAction(Action::EmptyTrash); }}
-          ),
-          ui::button(
-              {.out = &m_sortButton,
-               .glyph = "arrows-sort",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .tooltip = "Sort files",
-               .onClick = [this] { m_menuController.openSortMenu(sceneRect(*m_sortButton)); }}
-          ),
-          ui::segmented(
-              {.out = &m_viewSwitch,
-               .options =
-                   [this] {
-                     std::vector<ui::SegmentedOption> views{
-                         {.label = "",
-                          .glyph = "layout-grid",
-                          .tooltip = luciole::shortcutTooltip("Grid view", Action::Grid)},
-                         {.label = "", .glyph = "list", .tooltip = luciole::shortcutTooltip("List view", Action::List)}
-                     };
-                     // Column view is unavailable while choosing files.
-                     if (!choosing()) {
-                       views.push_back(
-                           {.label = "",
-                            .glyph = "columns-3",
-                            .tooltip = luciole::shortcutTooltip("Column view", Action::Miller)}
-                       );
-                     }
-                     return views;
-                   }(),
-               .selectedIndex = m_viewMode == luciole::ViewMode::Grid ? 0U
-                   : m_viewMode == luciole::ViewMode::List            ? 1U
-                                                                      : 2U,
-               // The segments are glyph-only, so the font size is the glyph size.
-               .fontSize = Style::baseGlyphSize,
-               .compact = true,
-               .onChange =
-                   [this](std::size_t index) {
-                     dispatchAction(index == 0 ? Action::Grid : index == 1 ? Action::List : Action::Miller);
-                   },
-               // Same pill colour as the address and search fields; the default track is the chrome colour.
-               .configure = [](Segmented& view) { view.setSurfaceRole(ColorRole::SurfaceContainerHigh); }}
-          ),
-          m_operations.buildButton(),
-          ui::button(
-              {.out = &m_menuButton,
-               .glyph = "dots-vertical",
-               .glyphSize = Style::baseGlyphSize,
-               .variant = ButtonVariant::Ghost,
-               .visible = !choosing(),
-               .onClick = [this] { m_menuController.openMenu(); }}
-          )
+      ui::button(
+          {.out = &m_forward,
+           .glyph = "arrow-right",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .tooltip = luciole::shortcutTooltip("Forward", Action::Forward),
+           .onClick = [this] { dispatchAction(Action::Forward); }}
+      ),
+      ui::button(
+          {.out = &m_up,
+           .glyph = "arrow-up",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .tooltip = luciole::shortcutTooltip("Parent folder", Action::Up),
+           .onClick = [this] { dispatchAction(Action::Up); }}
+      ),
+      m_locationBar.buildLocationArea(),
+      m_locationBar.buildSearchArea(),
+      ui::button(
+          {.out = &m_newFolderButton,
+           .glyph = "folder-plus",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .tooltip = luciole::shortcutTooltip("New Folder…", Action::CreateFolder),
+           .visible = choosing(),
+           .participatesInLayout = choosing(),
+           .onClick = [this] { dispatchAction(Action::CreateFolder); }}
+      ),
+      ui::button(
+          {.out = &m_emptyTrashButton,
+           .glyph = "trash-x",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .visible = false,
+           .participatesInLayout = false,
+           .onClick = [this] { dispatchAction(Action::EmptyTrash); }}
+      ),
+      ui::button(
+          {.out = &m_sortButton,
+           .glyph = "arrows-sort",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .tooltip = "Sort files",
+           .onClick = [this] { m_menuController.openSortMenu(sceneRect(*m_sortButton)); }}
+      ),
+      ui::segmented(
+          {.out = &m_viewSwitch,
+           .options =
+               [this] {
+                 std::vector<ui::SegmentedOption> views{
+                     {.label = "",
+                      .glyph = "layout-grid",
+                      .tooltip = luciole::shortcutTooltip("Grid view", Action::Grid)},
+                     {.label = "", .glyph = "list", .tooltip = luciole::shortcutTooltip("List view", Action::List)}
+                 };
+                 // Column view is unavailable while choosing files.
+                 if (!choosing()) {
+                   views.push_back(
+                       {.label = "",
+                        .glyph = "columns-3",
+                        .tooltip = luciole::shortcutTooltip("Column view", Action::Miller)}
+                   );
+                 }
+                 return views;
+               }(),
+           .selectedIndex = m_viewMode == luciole::ViewMode::Grid ? 0U
+               : m_viewMode == luciole::ViewMode::List            ? 1U
+                                                                  : 2U,
+           // The segments are glyph-only, so the font size is the glyph size.
+           .fontSize = Style::baseGlyphSize,
+           .compact = true,
+           .onChange =
+               [this](std::size_t index) {
+                 dispatchAction(index == 0 ? Action::Grid : index == 1 ? Action::List : Action::Miller);
+               },
+           // Same pill colour as the address and search fields; the default track is the chrome colour.
+           .configure = [](Segmented& view) { view.setSurfaceRole(ColorRole::SurfaceContainerHigh); }}
+      ),
+      m_operations.buildButton(),
+      ui::button(
+          {.out = &m_menuButton,
+           .glyph = "dots-vertical",
+           .glyphSize = Style::baseGlyphSize,
+           .variant = ButtonVariant::Ghost,
+           .visible = !choosing(),
+           .onClick = [this] { m_menuController.openMenu(); }}
       )
-  );
+  };
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    m_toolbarItems[index] = m_toolbarContent->addChild(std::move(items[index]));
+  }
+  arrangeToolbar();
+  return toolbar;
+}
+
+void BrowserPage::arrangeToolbar() {
+  std::array<std::unique_ptr<Node>, luciole::kToolbarItemCount> items;
+  for (std::size_t index = 0; index < items.size(); ++index) {
+    items[index] = m_toolbarItems[index]->parent()->removeChild(m_toolbarItems[index]);
+  }
+  while (!m_toolbarContent->children().empty()) {
+    (void)m_toolbarContent->removeChild(m_toolbarContent->children().back().get());
+  }
+  // Neighbouring buttons share a tight group; the location and search fields stand alone.
+  Flex* group = nullptr;
+  for (const auto item : m_savedSettings.toolbarOrder) {
+    auto node = std::move(items[static_cast<std::size_t>(item)]);
+    if (item == luciole::ToolbarItem::Location || item == luciole::ToolbarItem::Search) {
+      group = nullptr;
+      m_toolbarContent->addChild(std::move(node));
+      continue;
+    }
+    if (group == nullptr) {
+      m_toolbarContent->addChild(ui::row({.out = &group, .align = FlexAlign::Center, .gap = Style::spaceXs}));
+    }
+    group->addChild(std::move(node));
+  }
+}
+
+void BrowserPage::openToolbarMenuAt(float sceneX, float sceneY) {
+  for (const auto item : luciole::kDefaultToolbarOrder) {
+    auto* node = m_toolbarItems[static_cast<std::size_t>(item)];
+    if (node->visible() && node->containsScenePoint(sceneX, sceneY)) {
+      m_menuController.openToolbarMenu({sceneX, sceneY, 1.0F, 1.0F}, item);
+      return;
+    }
+  }
+}
+
+bool BrowserPage::toolbarItemShown(luciole::ToolbarItem item) const {
+  return m_toolbarItems[static_cast<std::size_t>(item)]->visible();
 }
 
 std::unique_ptr<Flex> BrowserPage::buildFilePane() {

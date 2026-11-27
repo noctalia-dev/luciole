@@ -32,6 +32,7 @@ namespace luciole::archive_work {
     std::shared_ptr<ArchiveCatalog> catalog;
     std::optional<Location> output;
     std::uint64_t expandedBytes = 0;
+    bool archive = false;
   };
   // Entry icons are left empty; see archive_icons.h.
   Prepared inspect(

@@ -71,27 +71,22 @@ namespace luciole {
     bool operator==(const PinSlot&) const = default;
   };
 
-  // Whether the flat Places list shows a row; Settings can hide Network.
-  bool placeShown(const Bookmark& place, bool showNetwork);
-
-  // The gaps between the Places rows the sidebar shows, which is where separator lines go. A separator saved in
-  // front of a hidden row is drawn in front of the next shown row, and a gap draws at most one line, so the menus
-  // and dragging work on what is on screen. Rows here are rows of PinService::bookmarks().
+  // The gaps between Places rows where separator lines can go. Rows here are indices in PinService::bookmarks().
   class SeparatorGaps {
   public:
-    SeparatorGaps(const PinService& pins, bool showNetwork);
-    // The shown row that the separator saved in front of row `before` is drawn above, if it is drawn.
+    explicit SeparatorGaps(const PinService& pins);
+    // The row that the separator saved in front of row `before` is drawn above, if it is drawn.
     std::optional<std::size_t> gap(std::size_t before) const;
-    // The separator drawn above shown row `row`, as the row it is saved in front of.
+    // The separator drawn above row `row`, as the row it is saved in front of.
     std::optional<std::size_t> separatorAbove(std::size_t row) const;
-    // Whether a separator can go above shown row `row`: not the first shown row, and no line there yet.
+    // Whether a separator can go above row `row`: not the first row, and no line there yet.
     bool free(std::size_t row) const;
-    // The shown row after or before row `row`.
+    // The row after or before row `row`.
     std::optional<std::size_t> nextShown(std::size_t row) const;
     std::optional<std::size_t> previousShown(std::size_t row) const;
 
   private:
-    std::vector<std::size_t> m_shown;
+    std::size_t m_count = 0;
     std::vector<std::size_t> m_separators;
   };
 } // namespace luciole

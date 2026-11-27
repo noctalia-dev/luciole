@@ -12,6 +12,12 @@
 #include <unistd.h>
 
 namespace {
+  // Preview status labels are short: the view shows them as a badge on the Details card. A file that changed under
+  // the listing is a passing state the watcher resolves, not an error.
+  constexpr const char* kEmptyFile = "Empty";
+  constexpr const char* kFileChanged = "File changed";
+  constexpr const char* kLowResolution = "Low resolution";
+
   bool sameSource(const luciole::DirectoryEntry& a, const luciole::DirectoryEntry& b) {
     return a.id == b.id
         && a.location() == b.location()
@@ -42,7 +48,7 @@ namespace {
     const auto location = entry.location();
     const auto path = location.nativePath();
     if (!path) {
-      return {{}, "Text previews are available for local files."};
+      return {{}, "Remote file"};
     }
     const GioPtr<GFileInfo> fs(
         g_file_query_filesystem_info(gioFile(location).get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE, cancel, nullptr)
@@ -50,7 +56,7 @@ namespace {
     if (!fs
         || !g_file_info_has_attribute(fs.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)
         || g_file_info_get_attribute_boolean(fs.get(), G_FILE_ATTRIBUTE_FILESYSTEM_REMOTE)) {
-      return {{}, "Text previews are available for local files."};
+      return {{}, "Remote file"};
     }
     struct File {
       int fd;
@@ -62,14 +68,14 @@ namespace {
     } file{::open(path->c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)};
     struct stat before{};
     if (file.fd < 0 || ::fstat(file.fd, &before) < 0) {
-      return {{}, "Could not read this file.", true};
+      return {{}, "Read error", true};
     }
     if (!S_ISREG(before.st_mode)) {
-      return {{}, "This item does not have a text preview."};
+      return {{}, "No text preview"};
     }
     if ((entry.size && *entry.size != static_cast<std::uint64_t>(before.st_size))
         || (entry.modifiedSeconds && *entry.modifiedSeconds != static_cast<std::uint64_t>(before.st_mtim.tv_sec))) {
-      return {{}, "The file changed. Select it again.", true};
+      return {{}, kFileChanged};
     }
     const GioPtr<GFileInfo> info(g_file_query_info(
         gioFile(location).get(),
@@ -83,10 +89,10 @@ namespace {
     if (!info
         || (identity && readFileIdentity(info.get()) != identity)
         || (etag && (!g_file_info_get_etag(info.get()) || *etag != g_file_info_get_etag(info.get())))) {
-      return {{}, "The file changed. Select it again.", true};
+      return {{}, kFileChanged};
     }
     if (entry.contentRevision && readChangeRevision(info.get()) != entry.contentRevision) {
-      return {{}, "The file changed. Select it again.", true};
+      return {{}, kFileChanged};
     }
     constexpr std::size_t limit = 64U * 1024U;
     std::string bytes;
@@ -97,7 +103,7 @@ namespace {
         continue;
       }
       if (count < 0) {
-        return {{}, "Could not read this file.", true};
+        return {{}, "Read error", true};
       }
       if (!count) {
         break;
@@ -112,7 +118,7 @@ namespace {
         || ::lstat(path->c_str(), &named) < 0
         || stamp(before) != stamp(after)
         || stamp(before) != stamp(named)) {
-      return {{}, "The file changed while reading the preview.", true};
+      return {{}, kFileChanged};
     }
     bool truncated = static_cast<std::uint64_t>(before.st_size) > bytes.size();
     if (bytes.starts_with("\xEF\xBB\xBF")) {
@@ -123,7 +129,7 @@ namespace {
       if (!truncated
           || bytes.data() + bytes.size() - end > 3
           || g_utf8_get_char_validated(end, bytes.data() + bytes.size() - end) != static_cast<gunichar>(-2)) {
-        return {{}, "This file does not contain supported UTF-8 text."};
+        return {{}, "Not UTF-8 text"};
       }
       bytes.resize(static_cast<std::size_t>(end - bytes.data()));
     }
@@ -150,7 +156,7 @@ namespace {
         truncated = true;
       }
     }
-    return {std::move(text), truncated ? "Preview truncated" : bytes.empty() ? "Empty file" : ""};
+    return {std::move(text), truncated ? "Truncated" : bytes.empty() ? kEmptyFile : ""};
   }
 } // namespace
 
@@ -187,7 +193,7 @@ struct luciole::PreviewService::State : std::enable_shared_from_this<State> {
     }
     view.imageUpgradeFailed = !pendingImage->pixels;
     view.status = view.image && view.image->pixels ? PreviewStatus::Ready : PreviewStatus::Unavailable;
-    view.message = !pendingImage->pixels && view.image ? "Larger preview unavailable." : "";
+    view.message = !pendingImage->pixels && view.image ? kLowResolution : "";
     pendingImage.reset();
   }
   void notify() {
@@ -219,9 +225,9 @@ struct luciole::PreviewService::State : std::enable_shared_from_this<State> {
           if (state->alive && work.serial == state->serial && text) {
             state->view.text = text->text;
             state->view.message = text->message;
-            state->view.status = text->error                             ? PreviewStatus::Error
-                : (!text->text.empty() || text->message == "Empty file") ? PreviewStatus::Ready
-                                                                         : PreviewStatus::Unavailable;
+            state->view.status = text->error                           ? PreviewStatus::Error
+                : (!text->text.empty() || text->message == kEmptyFile) ? PreviewStatus::Ready
+                                                                       : PreviewStatus::Unavailable;
             state->notify();
           }
           state->start();
@@ -294,7 +300,7 @@ void luciole::PreviewService::show(
     if (prepared && prepared->pixels && (!m_state->view.image || !m_state->view.image->pixels)) {
       m_state->view.image = std::move(prepared);
       m_state->view.status = PreviewStatus::Ready;
-      m_state->view.message = m_state->view.imageUpgradeFailed ? "Larger preview unavailable." : "";
+      m_state->view.message = m_state->view.imageUpgradeFailed ? kLowResolution : "";
       m_state->notify();
     }
     return;

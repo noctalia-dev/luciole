@@ -8,6 +8,7 @@
 #include "ui/controls/segmented.h"
 #include "ui/dialogs/dialog_chrome.h"
 
+#include <format>
 #include <utility>
 
 ArchiveDialog::ArchiveDialog(
@@ -17,13 +18,21 @@ ArchiveDialog::ArchiveDialog(
         const std::string&
     )>
         submit,
-    std::function<void()> cancel
+    std::function<void()> cancel, std::size_t archiveCount
 )
     : m_submit(std::move(submit)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
   luciole::applyDialogStyle(*this);
-  addChild(luciole::dialogHeader(compress ? "Compress" : "Extract Archive", compress ? "file-zip" : "archive", cancel));
+  const bool batch = !compress && archiveCount > 1;
+  addChild(
+      luciole::dialogHeader(
+          compress    ? "Compress"
+              : batch ? "Extract Archives"
+                      : "Extract Archive",
+          compress ? "file-zip" : "archive", cancel
+      )
+  );
   auto scroll =
       ui::scrollView({.out = &m_scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .flexGrow = 1.0F});
   scroll->content()->setDirection(FlexDirection::Vertical);
@@ -83,7 +92,7 @@ ArchiveDialog::ArchiveDialog(
     const auto formats = luciole::archiveFormats();
     showCompression(m_format < formats.size() && luciole::archiveCompressionLevelAvailable(formats[m_format].format));
   }
-  body->addChild(ui::label({.text = compress ? "Destination Folder" : "New Output Folder"}));
+  body->addChild(ui::label({.text = compress || batch ? "Destination Folder" : "New Output Folder"}));
   body->addChild(
       ui::input({.out = &m_destination, .value = std::move(destination), .onSubmit = [this](const std::string&) {
                    this->submit();
@@ -92,7 +101,12 @@ ArchiveDialog::ArchiveDialog(
   if (!compress) {
     body->addChild(
         ui::label(
-            {.text = "Extract into a new folder. Existing folders require a conflict decision.",
+            {.text = batch ? std::format(
+                                 "Extract {} archives into separate folders inside this existing folder. Existing "
+                                 "output folders require a conflict decision.",
+                                 archiveCount
+                             )
+                           : "Extract into a new folder. Existing folders require a conflict decision.",
              .fontSize = Style::fontSizeCaption,
              .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
              .maxLines = 2}

@@ -41,6 +41,8 @@ namespace luciole {
   enum class ChooserStartFolder : std::uint8_t { Home, Last };
   // Which colors.toml table the palette comes from; Auto follows Noctalia's current mode.
   enum class ColorScheme : std::uint8_t { Auto, Dark, Light };
+  // When the toolbar shows the File Operations button; Busy keeps it while a job runs or a failed one is listed.
+  enum class OperationsButton : std::uint8_t { Always, Busy, Never };
   // Complete column allocations, including the gap after their contents. Zero
   // is the automatic Name width; metadata always has an explicit allocation.
   inline constexpr std::size_t kDetailsColumnCount = 9;

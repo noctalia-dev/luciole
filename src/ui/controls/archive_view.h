@@ -18,19 +18,30 @@ public:
   ArchiveView(
       luciole::FileIconCache& icons, std::function<std::uint32_t()> modifiers, std::function<void()> close,
       std::function<void(std::vector<std::string>)> extract, std::function<void(std::vector<std::string>)> extractHere,
-      std::function<void(const std::string&)> open, std::function<void()> reload, std::function<void()> cancel
+      std::function<void(const std::string&)> open, std::function<void()> reload, std::function<void()> cancel,
+      std::function<void(std::size_t)> archiveParent
   );
   ~ArchiveView() override;
   void sync(
       std::shared_ptr<const luciole::ArchiveCatalog> catalog, luciole::ArchivePhase phase, std::size_t items,
-      std::uint64_t bytes, const std::optional<luciole::FileError>& error
+      std::uint64_t bytes, const std::optional<luciole::FileError>& error, const std::vector<std::string>& archives
   );
+  enum class SortColumn : std::uint8_t { Name, Type, Size, Modified };
+  struct Position {
+    std::string parent;
+    std::set<std::string> selection;
+    std::optional<std::size_t> focus, anchor;
+    float scroll = 0.0F;
+    SortColumn sort = SortColumn::Name;
+    bool descending = false;
+  };
+  Position position() const;
+  void restore(Position position);
   bool key(std::uint32_t symbol, std::uint32_t modifiers);
   InputArea* focusArea() const;
 
 private:
   class Adapter;
-  enum class SortColumn : std::uint8_t { Name, Type, Size, Modified };
   void rebuildCrumbs();
   void openFolder(const std::string& path);
   std::string statusText() const;
@@ -52,6 +63,8 @@ private:
   std::function<std::uint32_t()> m_modifiers;
   std::function<void(std::vector<std::string>)> m_extract, m_extractHere;
   std::function<void(const std::string&)> m_open;
+  std::function<void(std::size_t)> m_archiveParent;
+  std::vector<std::string> m_archives;
   VirtualGridView* m_grid = nullptr;
   InputArea* m_shield = nullptr;
   Label *m_title = nullptr, *m_info = nullptr, *m_status = nullptr, *m_cardName = nullptr;

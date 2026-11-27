@@ -5,7 +5,6 @@
 #include "operations/transfer_copy.h"
 
 #include <algorithm>
-#include <array>
 #include <fcntl.h>
 #include <format>
 #include <fstream>
@@ -113,7 +112,8 @@ namespace {
     if (::fstatfs(directory, &fs) != 0) {
       return 0;
     }
-    if (fs.f_type == CIFS_SUPER_MAGIC || fs.f_type == SMB2_SUPER_MAGIC) {
+    if (fs.f_type == static_cast<decltype(fs.f_type)>(CIFS_SUPER_MAGIC)
+        || fs.f_type == static_cast<decltype(fs.f_type)>(SMB2_SUPER_MAGIC)) {
       return luciole::transfer::kSmbPaceLimit;
     }
     if (
@@ -177,45 +177,8 @@ namespace luciole::transfer {
     if (type == "cifs" || type == "smb3") {
       return kSmbPaceLimit;
     }
-    if (networkMountType(type)) {
-      return kDefaultPaceLimit;
-    }
-    static constexpr std::array<std::string_view, 33> kSlowMounts{
-        "9p",
-        "afs",
-        "ceph",
-        "coda",
-        "davfs",
-        "glusterfs",
-        "lustre",
-        "orangefs",
-        "pvfs2",
-        "fuse.afpfs",
-        "fuse.ceph",
-        "fuse.curlftpfs",
-        "fuse.davfs",
-        "fuse.davfs2",
-        "fuse.ftpfs",
-        "fuse.gcsfuse",
-        "fuse.glusterfs",
-        "fuse.google-drive-ocamlfuse",
-        "fuse.gphotofs",
-        "fuse.gvfsd-fuse",
-        "fuse.ifuse",
-        "fuse.jmtpfs",
-        "fuse.kio-fuse",
-        "fuse.mtpfs",
-        "fuse.obexfs",
-        "fuse.onedrive",
-        "fuse.rclone",
-        "fuse.s3fs",
-        "fuse.s3ql",
-        "fuse.sftp",
-        "fuse.simple-mtpfs",
-        "fuse.smbnetfs",
-        "fuse.sshfs",
-    };
-    return std::ranges::contains(kSlowMounts, type) ? kDefaultPaceLimit : 0;
+    return networkFilesystemType(type) || removableFilesystemType(type) || type == "fuse.gvfsd-fuse" ? kDefaultPaceLimit
+                                                                                                     : 0;
   }
 
   bool removableBlockDevice(const fs::path& device) {

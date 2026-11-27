@@ -35,6 +35,15 @@ namespace luciole {
     std::string path;
     std::string source;
     std::string type;
+    bool operator==(const MountedFilesystem&) const = default;
+  };
+
+  struct ConfiguredFilesystem {
+    std::string path;
+    std::string source;
+    std::string type;
+    std::string label;
+    bool operator==(const ConfiguredFilesystem&) const = default;
   };
 
   struct SystemMount {
@@ -47,13 +56,24 @@ namespace luciole {
 
   // Share types read from fstab and from native systemd units: NFS and SMB, plus legacy smbfs and ncpfs entries.
   bool networkMountType(std::string_view type);
+  // Kernel and FUSE filesystem types backed by remote storage (including networkMountType() entries).
+  bool networkFilesystemType(std::string_view type);
+  // FUSE filesystem types backed by attached removable devices such as phones and cameras.
+  bool removableFilesystemType(std::string_view type);
   bool sameMountSource(std::string_view left, std::string_view right);
   // A bind mount exposes a directory already reachable elsewhere; a btrfs subvolume mount also has a non-root root.
   bool bindMount(std::string_view root, std::string_view options);
   std::vector<MountConfiguration> readFstabMounts();
   std::vector<MountConfiguration>
   mergeMountConfiguration(std::vector<MountConfiguration> result, std::span<const MountConfiguration> native);
+  std::vector<ConfiguredFilesystem> readConfiguredFilesystems();
   std::vector<MountedFilesystem> readMountedFilesystems();
+  const MountedFilesystem* mountedFilesystemAt(std::string_view path, std::span<const MountedFilesystem> mounted);
+  // Matches a configured fstab entry by path, source, or (when both are absent) unique display label.
+  const ConfiguredFilesystem* configuredFilesystemFor(
+      std::string_view path, std::string_view source, std::string_view label,
+      std::span<const ConfiguredFilesystem> configured
+  );
   std::vector<SystemMount> systemMounts(
       std::span<const MountConfiguration> configuration, std::span<const MountedFilesystem> mounted,
       std::string_view home, std::string_view user

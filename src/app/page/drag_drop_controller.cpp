@@ -435,7 +435,8 @@ std::optional<DragDropController::DropTarget> DragDropController::dropTarget() c
       }
     }
   }
-  if (m_page.upButton().containsScenePoint(m_page.pointerX(), m_page.pointerY())
+  if (m_page.upButton().visible()
+      && m_page.upButton().containsScenePoint(m_page.pointerX(), m_page.pointerY())
       && m_page.browser().model().snapshot().location) {
     if (const auto location = m_page.browser().model().snapshot().location->parent()) {
       if (validDropFolder(*location)) {
@@ -748,8 +749,6 @@ void DragDropController::layout(Renderer& renderer) {
   luciole::FileIconSource icon{.names = {"folder"}, .filePath = {}, .desktopFile = {}};
   if (m_drag->sourcePin == luciole::Location::trash()) {
     icon.names = {"user-trash"};
-  } else if (m_drag->sourcePin == luciole::Location::network()) {
-    icon.names = {"network-workgroup"};
   }
   if (!m_drag->entries.empty()) {
     if (const auto* entry = m_page.browser().model().entry(m_drag->entries.front().id)) {

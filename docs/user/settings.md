@@ -17,7 +17,7 @@ Changes save automatically and apply right away; there is no Apply button. Categ
 | Category | Covers |
 | --- | --- |
 | **General** | Opening items, typing, dropping files, tabs, single window, terminal |
-| **Appearance** | Color scheme, opacity, corners, menus, animations, sidebar, preview |
+| **Appearance** | Color scheme, opacity, corners, menus, animations, toolbar, sidebar, preview |
 | **Views** | View mode, density, zoom, sorting, captions, long filenames |
 | **List Columns** | Expandable folders, visible columns, order and widths |
 | **File Picker** | Start folder, view, preview and sorting for file picker windows |
@@ -25,6 +25,10 @@ Changes save automatically and apply right away; there is no Apply button. Categ
 | **Keybinds** | Shortcuts; see [Keyboard shortcuts](keybinds.md) |
 
 Every control maps to a key in [`config.toml`](configuration.md#browser-preferences).
+
+## Arrange the toolbar
+
+Right-click a toolbar button to move it left or right, show or hide the sidebar, parent folder, sort and view buttons, or reset the order. **Appearance → Toolbar** has the same switches, and sets when the File Operations button shows: always, only while a job runs or has failed, or never. Hidden actions stay in the main menu.
 
 ## Reset settings
 

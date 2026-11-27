@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace luciole {
@@ -16,4 +18,9 @@ namespace luciole {
     bool finished = false, canCancel = false, canRetry = false, canReview = false;
     bool failed() const { return state == ActivityState::Failed || state == ActivityState::Partial; }
   };
+
+  // True while a job is still running or a failed one is still listed, so the user has something to look at.
+  inline bool activitiesNeedAttention(std::span<const JobActivity> activities) {
+    return std::ranges::any_of(activities, [](const JobActivity& item) { return !item.finished || item.failed(); });
+  }
 } // namespace luciole

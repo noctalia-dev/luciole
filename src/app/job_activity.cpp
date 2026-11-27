@@ -80,7 +80,10 @@ namespace {
       activity.progress = std::clamp(static_cast<float>(done) / static_cast<float>(total), 0.0F, 1.0F);
     }
   }
-  void transferResults(JobActivity& activity, const std::vector<luciole::TransferResult>& results, bool details) {
+  void transferResults(
+      JobActivity& activity, const std::vector<luciole::TransferResult>& results, bool details,
+      std::string_view completedLabel = {}
+  ) {
     constexpr std::array names{"Moved", "Copied", "Skipped", "Failed", "Cancelled", "Partial", "Linked", "Deleted"};
     Counts counts;
     Report report;
@@ -111,7 +114,10 @@ namespace {
             report.rows = 2049;
             return;
           }
-          report.add(itemName(item.source), names.at(static_cast<std::size_t>(item.outcome)), item.error);
+          const auto label = item.outcome == luciole::TransferOutcome::Moved && !completedLabel.empty()
+              ? completedLabel
+              : std::string_view(names.at(static_cast<std::size_t>(item.outcome)));
+          report.add(itemName(item.source), std::string(label), item.error);
           for (const auto& child : item.children) {
             self(self, child, depth + 1);
           }
@@ -175,7 +181,7 @@ namespace {
   }
   void archive(const OperationJob& job, JobActivity& activity, bool details) {
     const auto& service = job.service<luciole::ArchiveService>();
-    activity.title = "Archive operation";
+    activity.title = service.archiveCount() ? "Extract archives" : "Archive operation";
     if (job.running()) {
       switch (service.phase()) {
       case luciole::ArchivePhase::Reading:
@@ -203,9 +209,17 @@ namespace {
         break;
       }
       activity.summary += std::format(" · {} entries · {} processed", service.items(), sizeText(service.bytes()));
+      if (service.archiveCount()) {
+        activity.summary = std::format(
+            "{} of {} archives · {}{}", service.completedArchives(), service.archiveCount(),
+            service.currentArchive() ? itemName(*service.currentArchive()) + " · " : "", activity.summary
+        );
+        activity.progress =
+            static_cast<float>(service.completedArchives()) / static_cast<float>(service.archiveCount());
+      }
       activity.state = activity.canReview ? ActivityState::Waiting : ActivityState::Working;
     } else if (!service.results().empty()) {
-      transferResults(activity, service.results(), details);
+      transferResults(activity, service.results(), details, service.archiveCount() ? "Extracted" : "");
     } else {
       simple(activity, false, false, !service.error(), false, service.error(), details);
     }

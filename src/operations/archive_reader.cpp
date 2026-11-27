@@ -592,15 +592,10 @@ luciole::archive_work::Prepared luciole::archive_work::extract(
   if (expected && (expected->source != source || expected->stamp != contents->stamp)) {
     throwFileError(FileErrorKind::Changed, "The archive changed. Reload its contents before extracting.");
   }
-  // Capture the container's decode budget before applying the smaller limit
-  // to the selected member's staged output. Other TAR members still stream by.
   Reader reader(source, work, &passwords);
   reader.sevenzip = scan.sevenzip;
   if (reader.original != contents->stamp) {
     throwFileError(FileErrorKind::Changed, "Archive changed before extraction.");
-  }
-  if (open) {
-    work.limits.maxExpandedBytes = std::min<std::uint64_t>(work.limits.maxExpandedBytes, 128U * 1024U * 1024U);
   }
   const auto destinationName = open ? "member" : destinationParts(destination).second;
   Stage stage;

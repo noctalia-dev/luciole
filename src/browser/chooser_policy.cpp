@@ -57,8 +57,9 @@ luciole::FileType luciole::chosenType(const DirectoryEntry& entry) {
 luciole::ChooserDecision luciole::chooserDecision(
     ChooserMode mode, const std::optional<Location>& folder, std::span<const DirectoryEntry> entries
 ) {
-  if (!folder || !folder->isNative() || std::ranges::any_of(entries, [](const DirectoryEntry& entry) {
-        return !entry.location().isNative();
+  // As GTK's local-only chooser: remote GVfs locations count when gvfsd-fuse gives them a path.
+  if (!folder || !folder->nativePath() || std::ranges::any_of(entries, [](const DirectoryEntry& entry) {
+        return !entry.location().nativePath();
       })) {
     return unavailable("Only local files can be chosen.");
   }

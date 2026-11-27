@@ -7,6 +7,7 @@
 #include "ui/palette.h"
 
 class ImageNode;
+class RectNode;
 class Flex;
 class Glyph;
 class TextureManager;
@@ -42,6 +43,7 @@ namespace luciole {
     FileIconSource m_source;
     SharedFileIcon m_sourceHandle;
     ColorSpec m_foreground = colorSpecFromRole(ColorRole::OnSurface);
+    RectNode* m_shadow = nullptr;
     ImageNode* m_image = nullptr;
     Flex* m_linkEmblem = nullptr;
     Flex* m_readOnlyEmblem = nullptr;

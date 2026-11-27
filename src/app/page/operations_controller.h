@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/timer_manager.h"
+#include "model/directory_options.h"
 #include "model/job_activity.h"
 
 #include <array>
@@ -12,6 +13,7 @@
 class Button;
 class InputArea;
 class Label;
+struct LayoutRect;
 class OperationHub;
 class OperationsView;
 class PageContext;
@@ -23,6 +25,7 @@ class OperationsController {
 public:
   OperationsController(PageContext& page, OperationHub& hub, std::function<void(std::uint64_t, bool)> route);
   std::unique_ptr<Button> buildButton();
+  void setButtonMode(luciole::OperationsButton mode);
   void markDirty();
   void onFrame();
   void open();
@@ -35,6 +38,8 @@ private:
   void details(std::uint64_t id);
   void closed();
   float popupHeight(std::size_t count) const;
+  // The toolbar button, or the main menu button while the toolbar button is hidden.
+  LayoutRect popupAnchor() const;
 
   PageContext& m_page;
   OperationHub& m_hub;
@@ -49,5 +54,6 @@ private:
   std::optional<std::uint64_t> m_pendingDetails;
   bool m_reopen = false;
   std::pair<std::uint32_t, std::uint32_t> m_parentSize;
+  luciole::OperationsButton m_buttonMode = luciole::OperationsButton::Always;
   bool m_dirty = true;
 };

@@ -357,7 +357,7 @@ namespace luciole::transfer {
       if (sameIdentity(here, ancestor)) {
         return true;
       }
-      auto parent = directory(current.get(), "..");
+      auto parent = opened(::openat(current.get(), "..", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
       if (sameIdentity(here, statFd(parent.get()))) {
         return false;
       }

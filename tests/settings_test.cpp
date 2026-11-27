@@ -884,6 +884,115 @@ namespace {
     }
   }
 
+  void testToolbarButtons() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    using luciole::OperationsButton;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload());
+    const auto& defaults = config.settings().browser;
+    TEST_CHECK(
+        defaults.showSidebarButton
+        && defaults.showParentButton
+        && defaults.showNewFolderButton
+        && defaults.showSortButton
+        && defaults.showViewSwitch
+        && defaults.operationsButton == OperationsButton::Always
+    );
+    fixture.write(
+        "config.toml",
+        "[browser]\nshow_sidebar_button = false\nshow_parent_button = false\nshow_new_folder_button = false\n"
+        "show_sort_button = false\nshow_view_switch = false\noperations_button = \"busy\"\n"
+    );
+    TEST_CHECK(config.reload());
+    const auto& hidden = config.settings().browser;
+    TEST_CHECK(
+        !hidden.showSidebarButton
+        && !hidden.showParentButton
+        && !hidden.showNewFolderButton
+        && !hidden.showSortButton
+        && !hidden.showViewSwitch
+        && hidden.operationsButton == OperationsButton::Busy
+    );
+    TEST_CHECK(
+        config.saveOverrides(
+            std::array{
+                luciole::OverrideEdit{Preference::ShowSortButton, true},
+                luciole::OverrideEdit{Preference::OperationsButton, OperationsButton::Never}
+            }
+        )
+        == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(
+        loaded
+        && loaded->browser.showSortButton
+        && !loaded->browser.showViewSwitch
+        && loaded->browser.operationsButton == OperationsButton::Never
+        && read(fixture.paths().overrides).contains("operations_button = \"never\"")
+    );
+    for (const auto* line : {"show_view_switch = 0", "operations_button = \"sometimes\"", "operations_button = 1"}) {
+      fixture.write("config.toml", std::string("[browser]\n") + line + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
+  void testToolbarOrder() {
+    using Preference = luciole::BrowserPreference;
+    using State = luciole::AtomicWriteState;
+    using luciole::ToolbarItem;
+    Fixture fixture;
+    luciole::ConfigService config(fixture.paths());
+    TEST_CHECK(config.reload() && config.settings().browser.toolbarOrder == luciole::kDefaultToolbarOrder);
+    // Listed items come first; the rest follow in their default order.
+    fixture.write("config.toml", "[browser]\ntoolbar_order = [\"menu\", \"search\", \"back\"]\n");
+    TEST_CHECK(config.reload());
+    const auto& order = config.settings().browser.toolbarOrder;
+    TEST_CHECK(
+        order[0] == ToolbarItem::Menu
+        && order[1] == ToolbarItem::Search
+        && order[2] == ToolbarItem::Back
+        && order[3] == ToolbarItem::Sidebar
+        && order[4] == ToolbarItem::Forward
+        && order[11] == ToolbarItem::Operations
+        && luciole::validToolbarOrder(order)
+    );
+    auto swapped = luciole::kDefaultToolbarOrder;
+    std::swap(swapped[0], swapped[11]);
+    TEST_CHECK(
+        config.saveOverrides(std::array{luciole::OverrideEdit{Preference::ToolbarOrder, swapped}}) == State::Durable
+    );
+    const auto loaded = luciole::loadSettings(fixture.paths());
+    TEST_CHECK(
+        loaded && loaded->browser.toolbarOrder == swapped && read(fixture.paths().overrides).contains("toolbar_order")
+    );
+    for (const auto* value : {"[]", R"(["back", "back"])", "[\"toolbar\"]", "\"back\"", "[1]"}) {
+      fixture.write("config.toml", std::string("[browser]\ntoolbar_order = ") + value + "\n");
+      TEST_CHECK(!luciole::validateConfigFile(fixture.paths().base).empty());
+    }
+  }
+
+  void testMoveToolbarItem() {
+    using luciole::ToolbarItem;
+    const auto all = [](ToolbarItem) { return true; };
+    const auto defaults = luciole::kDefaultToolbarOrder;
+    const auto right = luciole::moveToolbarItem(defaults, ToolbarItem::Back, 1, all);
+    TEST_CHECK(right && (*right)[1] == ToolbarItem::Forward && (*right)[2] == ToolbarItem::Back);
+    TEST_CHECK(!luciole::moveToolbarItem(defaults, ToolbarItem::Sidebar, -1, all));
+    TEST_CHECK(!luciole::moveToolbarItem(defaults, ToolbarItem::Menu, 1, all));
+    TEST_CHECK(!luciole::moveToolbarItem(defaults, ToolbarItem::Back, 2, all));
+    // Hidden items are skipped and keep their slots.
+    const auto noForward = [](ToolbarItem item) { return item != ToolbarItem::Forward; };
+    const auto skipped = luciole::moveToolbarItem(defaults, ToolbarItem::Back, 1, noForward);
+    TEST_CHECK(
+        skipped
+        && (*skipped)[1] == ToolbarItem::Parent
+        && (*skipped)[2] == ToolbarItem::Forward
+        && (*skipped)[3] == ToolbarItem::Back
+    );
+  }
+
   void testContextMenuIcons() {
     using Preference = luciole::BrowserPreference;
     using State = luciole::AtomicWriteState;
@@ -1749,6 +1858,9 @@ int main() {
     testNetworkVisibility();
     testAlwaysShowTabBar();
     testShowCloseButtons();
+    testToolbarButtons();
+    testToolbarOrder();
+    testMoveToolbarItem();
     testContextMenuIcons();
     testShowFolderInTitle();
     testAlwaysShowStatusBar();

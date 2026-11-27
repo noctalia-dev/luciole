@@ -2,6 +2,7 @@
 
 #include "fs/location.h"
 #include "render/scene/node.h"
+#include "ui/controls/archive_view.h"
 
 #include <memory>
 #include <optional>
@@ -15,7 +16,6 @@ namespace luciole {
 } // namespace luciole
 
 struct KeyboardEvent;
-class ArchiveView;
 class OperationJob;
 class PageContext;
 class Renderer;
@@ -27,10 +27,11 @@ public:
   ArchiveController(
       PageContext& page, luciole::FileLauncher& launcher, luciole::FileIconCache& icons, WaylandConnection& connection
   );
+  ~ArchiveController();
 
   void compress(const std::vector<luciole::DirectoryEntry>& targets);
-  void extractTo(const luciole::Location& archive);
-  void extractHere(const luciole::Location& archive);
+  void extractTo(std::vector<luciole::Location> archives);
+  void extractHere(std::vector<luciole::Location> archives);
   void browse(const luciole::Location& archive);
   // Owned archive job change: opens an extracted member, reports a finished operation and syncs the archive
   // browser on the next frame.
@@ -47,7 +48,10 @@ public:
   void layout(Renderer& renderer, LayoutRect bounds);
 
 private:
-  static luciole::Location destination(const luciole::Location& source);
+  luciole::Location containingFolder(const luciole::Location& source) const;
+  luciole::Location destination(const luciole::Location& source) const;
+  void openNested(luciole::ArchiveMember member);
+  void visit(std::size_t index);
   void openDialog(std::vector<luciole::Location> sources, std::vector<std::string> selected, bool compress);
   bool
   extract(const luciole::Location& source, const luciole::Location& destination, std::vector<std::string> selected);
@@ -64,11 +68,20 @@ private:
   PageContext& m_page;
   // The archive browser's job: reads the catalog and opens members. Compress and extract jobs are separate.
   std::shared_ptr<OperationJob> m_browser;
+  std::shared_ptr<OperationJob> m_rootBrowser;
+  std::vector<std::shared_ptr<OperationJob>> m_retiredBrowsers;
+  struct Frame {
+    std::shared_ptr<OperationJob> job;
+    luciole::Location source;
+    std::optional<ArchiveView::Position> position;
+  };
+  std::vector<Frame> m_frames;
+  std::optional<luciole::ArchiveMember> m_pendingMember;
+  bool m_restorePosition = false;
   luciole::FileLauncher& m_launcher;
   luciole::FileIconCache& m_icons;
   WaylandConnection& m_connection;
   ArchiveView* m_view = nullptr;
-  std::optional<luciole::Location> m_source;
   bool m_wanted = false;
   bool m_dirty = false;
   std::shared_ptr<int> m_lifetime = std::make_shared<int>(0);

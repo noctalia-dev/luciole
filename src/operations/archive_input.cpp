@@ -198,3 +198,12 @@ luciole::Fd luciole::archive_work::Input::duplicateSingle() const {
   }
   return opened(::fcntl(m_parts.front().fd.get(), F_DUPFD_CLOEXEC, 4));
 }
+
+std::vector<std::filesystem::path> luciole::archive_work::Input::sourcePaths() const {
+  std::vector<std::filesystem::path> result;
+  result.reserve(m_parts.size());
+  for (const auto& part : m_parts) {
+    result.push_back(std::filesystem::path(m_parentPath) / part.name);
+  }
+  return result;
+}

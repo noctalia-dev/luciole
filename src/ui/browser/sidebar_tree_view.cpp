@@ -207,9 +207,6 @@ void luciole::SidebarTreeView::setRoots(
   m_pinCount = pins.bookmarks().size();
   for (std::size_t i = 0; i < pins.bookmarks().size(); ++i) {
     const auto& pin = pins.bookmarks()[i];
-    if (!placeShown(pin, showNetwork)) {
-      continue;
-    }
     const auto prior = m_rootIds.find(pin.location.uri());
     const auto id = prior == m_rootIds.end() ? m_nextRoot++ : prior->second;
     roots.emplace(pin.location.uri(), id);
@@ -235,16 +232,15 @@ void luciole::SidebarTreeView::setRoots(
     entry.setDisplayName(i18n::text(pin.label));
     entries.push_back(std::move(entry));
   }
-  for (const auto& drive : drives) {
-    const auto& target = drive.activation ? *drive.activation : *drive.root;
+  const auto addRoot = [&](const Location& target, const std::string& label, const std::string& glyph) {
     const auto& uri = target.uri();
     if (roots.contains(uri)) {
-      continue;
+      return;
     }
     const auto prior = m_rootIds.find(uri);
     const auto id = prior == m_rootIds.end() ? m_nextRoot++ : prior->second;
     roots.emplace(uri, id);
-    m_glyphs.emplace(id, driveGlyph(drive));
+    m_glyphs.emplace(id, glyph);
     DirectoryEntry entry{
         .id = id,
         .place = target,
@@ -253,8 +249,24 @@ void luciole::SidebarTreeView::setRoots(
         .size = {},
         .modifiedSeconds = {},
     };
-    entry.setDisplayName(drive.label);
+    entry.setDisplayName(label);
     entries.push_back(std::move(entry));
+  };
+  const auto addDriveRoot = [&](const Drive& drive) {
+    addRoot(drive.activation ? *drive.activation : *drive.root, drive.label, driveGlyph(drive));
+  };
+  for (const auto& drive : drives) {
+    if (drive.kind != DriveKind::Network) {
+      addDriveRoot(drive);
+    }
+  }
+  if (showNetwork) {
+    addRoot(Location::network(), "Network", "network");
+  }
+  for (const auto& drive : drives) {
+    if (drive.kind == DriveKind::Network) {
+      addDriveRoot(drive);
+    }
   }
   snapshot.entries = std::move(entries);
   m_rootIds = std::move(roots);
@@ -378,7 +390,7 @@ bool luciole::SidebarTreeView::key(std::uint32_t sym, std::uint32_t modifiers) {
     return true;
   }
   if (luciole::keybindMatches(luciole::KeybindCommand::Rename, sym, modifiers) && m_pinIndices.contains(id)) {
-    if (rename && bookmark && bookmark->location != Location::network()) {
+    if (rename && bookmark) {
       rename(*bookmark);
     }
     return true;

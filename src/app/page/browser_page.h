@@ -267,6 +267,7 @@ private:
   ) override;
   LayoutRect menuAnchor() const override;
   Node& upButton() override;
+  bool toolbarItemShown(luciole::ToolbarItem item) const override;
   void requestSync() override;
   float pointerX() const override;
   float pointerY() const override;
@@ -340,6 +341,12 @@ private:
   void buildScene();
   std::unique_ptr<Flex> buildTitlebar();
   std::unique_ptr<Flex> buildToolbar();
+  // Hides the toolbar buttons that Settings turns off.
+  void showToolbarButtons();
+  // Places the toolbar items in the saved order.
+  void arrangeToolbar();
+  // Opens the toolbar menu for the item under a right-click that the item itself left unhandled.
+  void openToolbarMenuAt(float sceneX, float sceneY);
   std::unique_ptr<Flex> buildFilePane();
 
   void dismissPopup() override;
@@ -480,6 +487,8 @@ private:
   Flex* m_paneHeader = nullptr;
   Label* m_paneTitle = nullptr;
   Flex* m_toolbar = nullptr;
+  Flex* m_toolbarContent = nullptr;
+  std::array<Node*, luciole::kToolbarItemCount> m_toolbarItems{};
   LayoutRect m_pageBounds{};
   std::optional<InputDispatcher::TabFocusSnapshot> m_stashedFocus;
   std::optional<luciole::BrowseViewport> m_inactiveViewport;

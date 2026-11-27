@@ -148,6 +148,7 @@ private:
   InputArea* m_drawerScrim = nullptr;
   Box* m_scrimFill = nullptr;
   Button* m_toggle = nullptr;
+  bool m_showToggle = true;
   bool m_sidebarTree = false;
   bool m_showDrives = true;
   bool m_showNetwork = true;

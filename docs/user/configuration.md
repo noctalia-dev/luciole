@@ -76,6 +76,13 @@ All keys belong in `[browser]`. Dimensions are logical pixels. View, zoom and so
 | `compact_menus` | `true` | Reduce context menu row height and padding without shrinking text |
 | `context_menu_icons` | `true` | Show action icons at the start of context menu rows; disabling removes the icon column only |
 | `show_close_buttons` | `true` | Show close buttons on tabs, dialogs, panes, the preview and archives. Window controls, `Escape` and Close/Cancel still work when hidden |
+| `show_sidebar_button` | `true` | Show the sidebar button in the toolbar; the main menu and its shortcut still toggle the sidebar |
+| `show_parent_button` | `true` | Show the parent folder button in the toolbar; `Alt+Up` and the breadcrumbs still go up |
+| `show_new_folder_button` | `true` | Show the New Folder button in the toolbar; file pickers always show it, and `Ctrl+Shift+N` and the folder background menu still create folders |
+| `show_sort_button` | `true` | Show the sort button in the toolbar; the main menu and the folder background menu still sort |
+| `show_view_switch` | `true` | Show the Grid/List/Columns switch in the toolbar; the main menu and `Ctrl+1`/`2`/`3` still switch views |
+| `operations_button` | `"always"` | Show the File Operations button `"always"`, `"busy"` (while a job runs or a failed one is listed) or `"never"`; the main menu still opens File Operations |
+| `toolbar_order` | default order | Toolbar items left to right, from `"sidebar"`, `"back"`, `"forward"`, `"parent"`, `"location"`, `"search"`, `"new_folder"`, `"empty_trash"`, `"sort"`, `"view"`, `"operations"` and `"menu"`; omitted ones follow in that order. `empty_trash` shows only in Trash |
 | `reduce_animations` | `false` | Skip animated transitions (entries fading in, smooth scrolling, the sidebar drawer). Applies live |
 | `use_ssd` | `true` | Let the compositor draw the title bar and borders when it supports them; disable to always draw Luciole's own. Open windows switch live |
 | `show_folder_in_title` | `true` | Title each browser window after the folder its active pane shows (`Downloads - Luciole`); disable to title every window `Luciole`. File picker windows keep their own title. Open windows switch live |
@@ -99,8 +106,8 @@ All keys belong in `[browser]`. Dimensions are logical pixels. View, zoom and so
 | `show_sidebar` | `true` | Show the docked sidebar in wide windows; narrow windows use a temporary drawer |
 | `sidebar_width` | `206` | Integer `160` through `400` |
 | `sidebar_tree` | `false` | Sidebar folder tree |
-| `show_drives` | `true` | Show drive rows |
-| `show_network` | `true` | Show Network in the sidebar; a hidden entry keeps its saved position |
+| `show_drives` | `true` | Show drives, removable devices and network shares in the sidebar |
+| `show_network` | `true` | Show Network in the sidebar |
 | `expandable_folders` | `false` | Expand folders within List view |
 | `show_preview` | `true` | Show the side preview when space permits |
 | `chooser_show_preview` | `false` | Show the side preview in file picker windows; toggling it there changes only this key |

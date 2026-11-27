@@ -379,7 +379,7 @@ namespace {
               included[i] = true;
               break;
             }
-            auto parent = directory(current.get(), "..");
+            auto parent = opened(::openat(current.get(), "..", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
             if (luciole::sameIdentity(here, luciole::statFd(parent.get()))) {
               break;
             }

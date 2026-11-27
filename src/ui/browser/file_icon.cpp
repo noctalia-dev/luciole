@@ -3,7 +3,10 @@
 #include "render/core/renderer.h"
 #include "render/core/texture_manager.h"
 #include "render/scene/image_node.h"
+#include "render/scene/rect_node.h"
+#include "ui/browser/preview_layout.h"
 #include "ui/builders.h"
+#include "ui/surface_shadow.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +14,8 @@
 
 luciole::FileIcon::FileIcon(FileIconCache& cache, float size, ThumbnailService* thumbnails)
     : m_cache(cache), m_thumbnails(thumbnails), m_size(size) {
+  m_shadow = static_cast<RectNode*>(addChild(std::make_unique<RectNode>()));
+  m_shadow->setVisible(false);
   m_image = static_cast<ImageNode*>(addChild(std::make_unique<ImageNode>()));
   m_image->setFitMode(ImageFitMode::Contain);
   for (const auto& [badge, glyph, name] :
@@ -188,8 +193,8 @@ void luciole::FileIcon::doLayout(Renderer& renderer) {
   const bool symbolic = m_asset && m_asset->symbolic;
   m_image->setAlphaMaskTint(symbolic);
   m_image->setTint(symbolic ? resolveColorSpec(m_foreground) : Color{1, 1, 1, 1});
-  m_image->setPosition(0, 0);
-  m_image->setSize(width(), height());
+  // A preview image is placed at its fitted size so its corners can be rounded; icons keep the full box.
+  const bool roundPreview = m_previewHeight > 0 && !symbolic && texture.width > 0 && texture.height > 0;
   float imageWidth = width(), imageHeight = height();
   if (texture.width > 0 && texture.height > 0) {
     const float fit = std::min(width() / texture.width, height() / texture.height);
@@ -198,6 +203,26 @@ void luciole::FileIcon::doLayout(Renderer& renderer) {
   }
   const float left = (width() - imageWidth) * 0.5F;
   const float bottom = (height() + imageHeight) * 0.5F;
+  if (roundPreview) {
+    m_image->setPosition(left, bottom - imageHeight);
+    m_image->setSize(imageWidth, imageHeight);
+  } else {
+    m_image->setPosition(0, 0);
+    m_image->setSize(width(), height());
+  }
+  m_image->setRadius(roundPreview ? Style::radiusMd : 0.0F);
+  m_image->setBorder(
+      roundPreview ? resolveColorSpec(colorSpecFromRole(ColorRole::OutlineVariant)) : Color{},
+      roundPreview ? Style::borderWidth : 0.0F
+  );
+  const bool shadow = roundPreview && Style::popupShadowsEnabled();
+  m_shadow->setVisible(shadow);
+  if (shadow) {
+    const auto offset = shadowDirectionOffset(kPreviewShadow.direction);
+    m_shadow->setStyle(surface_shadow::style(kPreviewShadow, 1.0F, {.radius = Radii(Style::radiusMd)}));
+    m_shadow->setPosition(left + static_cast<float>(offset.x), bottom - imageHeight + static_cast<float>(offset.y));
+    m_shadow->setFrameSize(imageWidth, imageHeight);
+  }
   const float badgeSize = std::clamp(m_size * 0.3F, 12.0F, 22.0F);
   m_linkGlyph->setGlyphSize(badgeSize * 0.68F);
   m_readOnlyGlyph->setGlyphSize(badgeSize * 0.64F);

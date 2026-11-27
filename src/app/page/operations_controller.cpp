@@ -42,6 +42,16 @@ std::unique_ptr<Button> OperationsController::buildButton() {
   );
 }
 
+void OperationsController::setButtonMode(luciole::OperationsButton mode) {
+  if (std::exchange(m_buttonMode, mode) != mode) {
+    markDirty();
+  }
+}
+
+LayoutRect OperationsController::popupAnchor() const {
+  return m_button->visible() ? sceneRect(*m_button) : m_page.menuAnchor();
+}
+
 void OperationsController::markDirty() {
   m_dirty = true;
   m_page.surface().requestUpdate();
@@ -76,6 +86,13 @@ void OperationsController::onFrame() {
   m_button->setTooltip(
       active ? std::format("{} · {} active", i18n::text("File operations"), active) : i18n::text("File operations")
   );
+  // A file picker never shows the button.
+  if (!m_page.choosing()) {
+    const bool shown = m_buttonMode == luciole::OperationsButton::Always
+        || (m_buttonMode == luciole::OperationsButton::Busy && luciole::activitiesNeedAttention(activities));
+    m_button->setVisible(shown);
+    m_button->setParticipatesInLayout(shown);
+  }
   if (m_view) {
     m_count = activities.size();
     m_clear->setEnabled(std::ranges::any_of(activities, [](const auto& item) { return item.finished; }));
@@ -118,8 +135,8 @@ void OperationsController::open() {
   );
   luciole::applyDialogStyle(*root);
   m_page.showPopup(
-      std::move(root), nullptr, sceneRect(*m_button),
-      std::min(484.0F, static_cast<float>(m_page.surface().width()) - 32.0F), popupHeight(activities.size()), true
+      std::move(root), nullptr, popupAnchor(), std::min(484.0F, static_cast<float>(m_page.surface().width()) - 32.0F),
+      popupHeight(activities.size()), true
   );
   if (!m_page.popupSurface()) {
     return;
@@ -220,7 +237,7 @@ void OperationsController::layoutDialog() {
     if (resized) {
       (void)popup->resize(width, height, false);
     }
-    const auto rect = sceneRect(*m_button);
+    const auto rect = popupAnchor();
     const std::array anchor{
         static_cast<int>(rect.x), static_cast<int>(rect.y), std::max(1, static_cast<int>(rect.width)),
         std::max(1, static_cast<int>(rect.height))

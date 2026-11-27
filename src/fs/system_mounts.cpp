@@ -6,6 +6,7 @@
 #include "fs/systemd_mounts.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <fcntl.h>
@@ -347,10 +348,78 @@ namespace {
     }
     return directory;
   }
+  std::string mountDisplayLabel(std::string_view path, std::string_view options) {
+    const auto target = luciole::Location::fromPath(std::string(path));
+    const auto name = option(options, "x-gvfs-name");
+    const luciole::GString label(
+        name && !name->empty() ? g_uri_unescape_segment(name->data(), name->data() + name->size(), nullptr) : nullptr
+    );
+    return label && g_utf8_validate(label.get(), -1, nullptr) ? std::string(label.get())
+                                                              : target.displayName().value_or(std::string(path));
+  }
+
+  template <typename Fn> void forEachFstabPoint(Fn&& fn) {
+    GList* points = g_unix_mount_points_get(nullptr);
+    for (GList* item = points; item; item = item->next) {
+      auto* point = static_cast<GUnixMountPoint*>(item->data);
+      const auto* type = g_unix_mount_point_get_fs_type(point);
+      const auto* path = g_unix_mount_point_get_mount_path(point);
+      const auto* source = g_unix_mount_point_get_device_path(point);
+      // A hand-edited entry can lack a field or name a relative target; skip it instead of failing every refresh.
+      if (type && path && source && g_path_is_absolute(path)) {
+        const auto* options = g_unix_mount_point_get_options(point);
+        fn(normalizeMountPath(path), std::string_view(source), std::string_view(type),
+           options ? std::string_view(options) : std::string_view{});
+      }
+    }
+    g_list_free_full(points, reinterpret_cast<GDestroyNotify>(g_unix_mount_point_free));
+  }
 } // namespace
 
 bool luciole::networkMountType(std::string_view type) {
   return type == "nfs" || type == "nfs4" || type == "cifs" || type == "smb3" || type == "smbfs" || type == "ncpfs";
+}
+
+bool luciole::networkFilesystemType(std::string_view type) {
+  if (networkMountType(type)) {
+    return true;
+  }
+  static constexpr std::array<std::string_view, 26> kRemoteTypes{
+      "9p",
+      "afs",
+      "ceph",
+      "coda",
+      "davfs",
+      "glusterfs",
+      "lustre",
+      "orangefs",
+      "pvfs2",
+      "fuse.afpfs",
+      "fuse.ceph",
+      "fuse.curlftpfs",
+      "fuse.davfs",
+      "fuse.davfs2",
+      "fuse.ftpfs",
+      "fuse.gcsfuse",
+      "fuse.glusterfs",
+      "fuse.google-drive-ocamlfuse",
+      "fuse.kio-fuse",
+      "fuse.onedrive",
+      "fuse.rclone",
+      "fuse.s3fs",
+      "fuse.s3ql",
+      "fuse.sftp",
+      "fuse.smbnetfs",
+      "fuse.sshfs",
+  };
+  return std::ranges::contains(kRemoteTypes, type);
+}
+
+bool luciole::removableFilesystemType(std::string_view type) {
+  static constexpr std::array<std::string_view, 6> kRemovableTypes{
+      "fuse.gphotofs", "fuse.ifuse", "fuse.jmtpfs", "fuse.mtpfs", "fuse.obexfs", "fuse.simple-mtpfs",
+  };
+  return std::ranges::contains(kRemovableTypes, type);
 }
 
 bool luciole::sameMountSource(std::string_view left, std::string_view right) {
@@ -363,25 +432,32 @@ bool luciole::bindMount(std::string_view root, std::string_view options) {
 
 std::vector<luciole::MountConfiguration> luciole::readFstabMounts() {
   std::vector<MountConfiguration> result;
-  GList* points = g_unix_mount_points_get(nullptr);
-  for (GList* item = points; item; item = item->next) {
-    auto* point = static_cast<GUnixMountPoint*>(item->data);
-    const auto* type = g_unix_mount_point_get_fs_type(point);
-    const auto* path = g_unix_mount_point_get_mount_path(point);
-    const auto* source = g_unix_mount_point_get_device_path(point);
-    // A hand-edited entry can lack a field or name a relative target; skip it instead of failing every refresh.
-    if (type && path && source && g_path_is_absolute(path) && networkMountType(type)) {
-      const auto* options = g_unix_mount_point_get_options(point);
+  forEachFstabPoint([&](std::string_view path, std::string_view source, std::string_view type,
+                        std::string_view options) {
+    if (networkMountType(type)) {
       result.push_back(
-          {.path = std::string(normalizeMountPath(path)),
-           .source = source,
-           .type = type,
-           .options = options ? options : "",
-           .automount = options && option(options, "x-systemd.automount").has_value()}
+          {.path = std::string(path),
+           .source = std::string(source),
+           .type = std::string(type),
+           .options = std::string(options),
+           .automount = option(options, "x-systemd.automount").has_value()}
       );
     }
-  }
-  g_list_free_full(points, reinterpret_cast<GDestroyNotify>(g_unix_mount_point_free));
+  });
+  return result;
+}
+
+std::vector<luciole::ConfiguredFilesystem> luciole::readConfiguredFilesystems() {
+  std::vector<ConfiguredFilesystem> result;
+  forEachFstabPoint([&](std::string_view path, std::string_view source, std::string_view type,
+                        std::string_view options) {
+    result.push_back(
+        {.path = std::string(path),
+         .source = std::string(source),
+         .type = std::string(type),
+         .label = mountDisplayLabel(path, options)}
+    );
+  });
   return result;
 }
 
@@ -402,6 +478,59 @@ std::vector<luciole::MountedFilesystem> luciole::readMountedFilesystems() {
   g_list_free_full(mounts, reinterpret_cast<GDestroyNotify>(g_unix_mount_free));
   G_GNUC_END_IGNORE_DEPRECATIONS
   return result;
+}
+
+const luciole::MountedFilesystem*
+luciole::mountedFilesystemAt(std::string_view path, std::span<const MountedFilesystem> mounted) {
+  const auto normalized = normalizeMountPath(path);
+  const MountedFilesystem* found = nullptr;
+  for (const auto& entry : mounted) {
+    if (entry.path == normalized) {
+      found = &entry;
+    }
+  }
+  return found;
+}
+
+const luciole::ConfiguredFilesystem* luciole::configuredFilesystemFor(
+    std::string_view path, std::string_view source, std::string_view label,
+    std::span<const ConfiguredFilesystem> configured
+) {
+  if (!path.empty()) {
+    const auto normalized = normalizeMountPath(path);
+    const ConfiguredFilesystem* found = nullptr;
+    for (const auto& entry : configured) {
+      if (entry.path == normalized) {
+        found = &entry;
+      }
+    }
+    if (found != nullptr) {
+      return found;
+    }
+  }
+  if (!source.empty()) {
+    for (const auto& entry : configured) {
+      if (sameMountSource(entry.source, source)) {
+        return &entry;
+      }
+    }
+    return nullptr;
+  }
+  if (label.empty()) {
+    return nullptr;
+  }
+  // Unmounted GVfs fstab volumes expose no path or device identifier, only their display label.
+  const ConfiguredFilesystem* found = nullptr;
+  for (const auto& entry : configured) {
+    if (entry.label != label) {
+      continue;
+    }
+    if (found != nullptr && found->type != entry.type) {
+      return nullptr;
+    }
+    found = &entry;
+  }
+  return found;
 }
 
 luciole::SystemMountState
@@ -429,16 +558,10 @@ std::vector<luciole::SystemMount> luciole::systemMounts(
 ) {
   std::vector<SystemMount> result;
   for (const auto& config : configuration) {
-    const auto target = Location::fromPath(config.path);
-    const auto name = option(config.options, "x-gvfs-name");
-    const GString label(
-        name && !name->empty() ? g_uri_unescape_segment(name->data(), name->data() + name->size(), nullptr) : nullptr
-    );
     result.push_back(
         {.configuration = config,
          .state = mountState(config, mounted),
-         .label = label && g_utf8_validate(label.get(), -1, nullptr) ? std::string(label.get())
-                                                                     : target.displayName().value_or(config.path),
+         .label = mountDisplayLabel(config.path, config.options),
          .visible = visible(config, home, user)}
     );
   }

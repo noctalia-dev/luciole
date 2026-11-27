@@ -26,12 +26,25 @@
 #include "wayland/wayland_seat.h"
 
 #include <algorithm>
+#include <ranges>
 #include <utility>
 
 ArchiveController::ArchiveController(
     PageContext& page, luciole::FileLauncher& launcher, luciole::FileIconCache& icons, WaylandConnection& connection
 )
     : m_page(page), m_launcher(launcher), m_icons(icons), m_connection(connection) {}
+
+ArchiveController::~ArchiveController() {
+  for (const auto& frame : std::views::reverse(m_frames)) {
+    frame.job->service<luciole::ArchiveService>().shutdown();
+  }
+  for (const auto& job : m_retiredBrowsers) {
+    job->service<luciole::ArchiveService>().shutdown();
+  }
+  if (m_rootBrowser) {
+    m_rootBrowser->service<luciole::ArchiveService>().shutdown();
+  }
+}
 
 void ArchiveController::compress(const std::vector<luciole::DirectoryEntry>& targets) {
   std::vector<luciole::Location> sources;
@@ -42,25 +55,77 @@ void ArchiveController::compress(const std::vector<luciole::DirectoryEntry>& tar
   openDialog(std::move(sources), {}, true);
 }
 
-void ArchiveController::extractTo(const luciole::Location& archive) { openDialog({archive}, {}, false); }
+void ArchiveController::extractTo(std::vector<luciole::Location> archives) {
+  openDialog(std::move(archives), {}, false);
+}
 
-void ArchiveController::extractHere(const luciole::Location& archive) {
-  if (!extract(archive, destination(archive), {})) {
+void ArchiveController::extractHere(std::vector<luciole::Location> archives) {
+  if (archives.empty()) {
+    return;
+  }
+  const bool started = archives.size() == 1
+      ? extract(archives.front(), destination(archives.front()), {})
+      : m_page.jobs().create<luciole::ArchiveService>()->service<luciole::ArchiveService>().extractMany(
+            std::move(archives)
+        );
+  if (!started) {
     m_page.actionError("Could not start extraction.");
   }
 }
 
 void ArchiveController::browse(const luciole::Location& archive) {
-  if (!m_browser) {
-    m_browser = m_page.jobs().create<luciole::ArchiveService>(JobScope::Page);
+  close();
+  m_retiredBrowsers.reserve(m_retiredBrowsers.size() + m_frames.size());
+  for (const auto& frame : m_frames | std::views::drop(1)) {
+    m_retiredBrowsers.push_back(frame.job);
   }
+  m_frames.clear();
+  if (!m_rootBrowser) {
+    m_rootBrowser = m_page.jobs().create<luciole::ArchiveService>(JobScope::Page);
+  }
+  m_browser = m_rootBrowser;
+  m_frames.push_back({m_browser, archive, std::nullopt});
   if (m_browser->service<luciole::ArchiveService>().inspect(archive)) {
-    m_source = archive;
     m_wanted = true;
     m_dirty = true;
   } else {
     m_page.actionError("Could not read this archive.");
   }
+}
+
+void ArchiveController::openNested(luciole::ArchiveMember member) {
+  if (!m_wanted || !m_browser) {
+    return;
+  }
+  m_browser = m_page.jobs().create<luciole::ArchiveService>(JobScope::Page);
+  m_frames.push_back({m_browser, member.location, std::nullopt});
+  auto& frame = m_frames.back();
+  if (!m_browser->service<luciole::ArchiveService>().inspect(frame.source, std::move(member.lease))) {
+    visit(m_frames.size() - 2);
+    m_page.actionError("Could not read this archive.");
+  }
+  if (m_view) {
+    m_page.dispatcher().setFocus(m_view->focusArea());
+  }
+  m_dirty = true;
+}
+
+void ArchiveController::visit(std::size_t index) {
+  if (index + 1 >= m_frames.size()) {
+    return;
+  }
+  m_pendingMember.reset();
+  while (m_frames.size() > index + 1) {
+    m_frames.back().job->cancel();
+    m_retiredBrowsers.push_back(m_frames.back().job);
+    m_frames.pop_back();
+  }
+  m_browser = m_frames.back().job;
+  if (m_view) {
+    m_page.dispatcher().setFocus(m_view->focusArea());
+  }
+  m_restorePosition = true;
+  m_dirty = true;
 }
 
 bool ArchiveController::extract(
@@ -82,12 +147,18 @@ OperationJob* ArchiveController::shown() const {
 void ArchiveController::changed(OperationJob& job) {
   auto& archives = job.service<luciole::ArchiveService>();
   m_dirty = true;
-  if (&job == m_browser.get()) {
-    if (auto file = archives.takeOpenedFile()) {
-      m_launcher.open(*file);
+  if (m_wanted && &job == m_browser.get()) {
+    if (auto member = archives.takeOpenedMember()) {
+      if (member->archive) {
+        m_pendingMember = std::move(member);
+      } else {
+        m_launcher.open(member->location);
+      }
     }
   }
-  if (!archives.busy() && job.takeResult()) {
+  const bool retired =
+      std::ranges::any_of(m_retiredBrowsers, [&job](const auto& browser) { return browser.get() == &job; });
+  if (!retired && !archives.busy() && job.takeResult()) {
     std::string message = luciole::fileErrorText(archives.error());
     const bool finished = !archives.results().empty();
     if (finished && message.empty()) {
@@ -101,6 +172,9 @@ void ArchiveController::changed(OperationJob& job) {
 }
 
 void ArchiveController::onFrame() {
+  if (auto member = std::exchange(m_pendingMember, std::nullopt)) {
+    openNested(std::move(*member));
+  }
   if (std::exchange(m_dirty, false)) {
     sync();
   }
@@ -109,8 +183,14 @@ void ArchiveController::onFrame() {
   syncPassword();
 }
 
-luciole::Location ArchiveController::destination(const luciole::Location& source) {
-  return source.parent().value_or(source).child(luciole::archiveFolderName(source));
+luciole::Location ArchiveController::containingFolder(const luciole::Location& source) const {
+  if (!m_frames.empty() && m_frames.back().source == source) {
+    return m_frames.front().source.parent().value_or(m_frames.front().source);
+  }
+  return source.parent().value_or(source);
+}
+luciole::Location ArchiveController::destination(const luciole::Location& source) const {
+  return containingFolder(source).child(luciole::archiveFolderName(source));
 }
 
 void ArchiveController::openDialog(
@@ -132,11 +212,13 @@ void ArchiveController::openDialog(
     m_page.actionError("The source has no destination parent.");
     return;
   }
-  const auto& base = *parent;
+  const auto base = compress ? *parent : containingFolder(source);
+  const auto archiveCount = compress ? 1 : sources.size();
+  const bool batch = archiveCount > 1;
   const std::string name = (sources.size() == 1 ? source.displayName().value_or("Archive") : "Archive")
       + (formats.empty() ? ".zip" : std::string(formats.front().suffix));
   auto root = std::make_unique<ArchiveDialog>(
-      compress, name, luciole::locationEditText(compress ? base : destination(source)),
+      compress, name, luciole::locationEditText(compress || batch ? base : destination(source)),
       [this, sources = std::move(sources), selected = std::move(selected), base, compress](
           const std::string& name, const std::string& path, luciole::ArchiveFormat format,
           luciole::ArchiveCompressionLevel level, const std::string& password
@@ -163,6 +245,10 @@ void ArchiveController::openDialog(
             ? m_page.jobs().create<luciole::ArchiveService>()->service<luciole::ArchiveService>().compress(
                   sources, destination, format, level, password
               )
+            : sources.size() > 1
+            ? m_page.jobs().create<luciole::ArchiveService>()->service<luciole::ArchiveService>().extractMany(
+                  sources, destination
+              )
             : extract(sources.front(), destination, selected);
         if (!started) {
           return "Could not start the archive operation.";
@@ -170,7 +256,7 @@ void ArchiveController::openDialog(
         m_page.dismissPopup();
         return {};
       },
-      [this] { m_page.dismissPopup(); }
+      [this] { m_page.dismissPopup(); }, archiveCount
   );
   auto* dialog = root.get();
   m_page.showDialog(std::move(root), DialogWidth::Medium);
@@ -250,6 +336,11 @@ void ArchiveController::deferClose() {
 
 void ArchiveController::close() {
   m_wanted = false;
+  m_pendingMember.reset();
+  for (const auto& frame : m_frames) {
+    frame.job->cancel();
+  }
+  m_restorePosition = false;
   if (!m_view) {
     return;
   }
@@ -280,20 +371,23 @@ void ArchiveController::sync() {
           }
         },
         [this](const std::string& path) {
-          if (m_browser) {
+          if (m_browser && !m_browser->service<luciole::ArchiveService>().busy()) {
+            m_frames.back().position = m_view->position();
             (void)m_browser->service<luciole::ArchiveService>().openMember(path);
           }
         },
         [this] {
-          if (m_source && m_browser) {
-            (void)m_browser->service<luciole::ArchiveService>().inspect(*m_source);
+          if (m_browser && !m_frames.empty()) {
+            const auto& frame = m_frames.back();
+            (void)m_browser->service<luciole::ArchiveService>().inspect(frame.source);
           }
         },
         [this] {
           if (auto* job = shown()) {
             job->cancel();
           }
-        }
+        },
+        [this](std::size_t index) { visit(index); }
     );
     m_view = root.get();
     root->setFill(colorSpecFromRole(ColorRole::Surface, static_cast<float>(m_page.settings().backgroundOpacity)));
@@ -305,10 +399,21 @@ void ArchiveController::sync() {
   }
   if (const auto* job = shown(); m_view && job) {
     const auto& archives = job->service<luciole::ArchiveService>();
+    std::vector<std::string> names;
+    names.reserve(m_frames.size());
+    for (const auto& frame : m_frames) {
+      names.push_back(frame.source.displayName().value_or("Archive"));
+    }
     m_view->sync(
         m_browser ? m_browser->service<luciole::ArchiveService>().catalog() : nullptr, archives.phase(),
-        archives.items(), archives.bytes(), archives.error()
+        archives.items(), archives.bytes(), archives.error(), names
     );
+    if (m_restorePosition && m_browser && m_browser->service<luciole::ArchiveService>().catalog()) {
+      if (m_frames.back().position) {
+        m_view->restore(*m_frames.back().position);
+      }
+      m_restorePosition = false;
+    }
     m_page.surface().requestLayout();
   }
 }
@@ -320,6 +425,10 @@ bool ArchiveController::key(const KeyboardEvent& event) {
   if (event.pressed && !event.preedit) {
     if (!event.repeat && luciole::keybindMatches(luciole::KeybindCommand::Cancel, event.sym, event.modifiers)) {
       deferClose();
+    } else if (!event.repeat && luciole::keybindMatches(luciole::KeybindCommand::Back, event.sym, event.modifiers)) {
+      if (m_frames.size() > 1) {
+        visit(m_frames.size() - 2);
+      }
     } else if (
         !event.repeat && luciole::keybindMatches(luciole::KeybindCommand::FocusNext, event.sym, event.modifiers)
     ) {

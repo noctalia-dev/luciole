@@ -65,7 +65,6 @@ std::vector<luciole::UserPlace> luciole::configuredUserPlaces() {
     }
   }
   result.push_back({{.label = "Trash", .location = Location::trash(), .iconName = {}}, "trash"});
-  result.push_back({{.label = "Network", .location = Location::network(), .iconName = {}}, "network"});
   return result;
 }
 
@@ -202,9 +201,6 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     if (std::ranges::none_of(result, [](const auto& pin) { return pin.location == Location::trash(); })) {
       result.push_back({"Trash", Location::trash(), {}});
     }
-    if (std::ranges::none_of(result, [](const auto& pin) { return pin.location == Location::network(); })) {
-      result.push_back({"Network", Location::network(), {}});
-    }
     return result;
   }
   static std::vector<Bookmark> combine(
@@ -213,7 +209,7 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     std::vector<Bookmark> result;
     std::vector<Bookmark> custom;
     for (const auto& pin : shared) {
-      if (!builtin(pin.location, places)) {
+      if (!builtin(pin.location, places) && pin.location != Location::network()) {
         auto& bookmark = custom.emplace_back(pin);
         if (const auto previous = std::ranges::find(local, pin.location, &Bookmark::location);
             previous != local.end()) {
@@ -223,6 +219,9 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
     }
     auto next = custom.begin();
     for (const auto& pin : local) {
+      if (pin.location == Location::network()) {
+        continue;
+      }
       if (builtin(pin.location, places)) {
         const auto external = std::ranges::find(shared, pin.location, &Bookmark::location);
         auto merged = external != shared.end() && !pin.location.isTrash() ? *external : pin;
@@ -384,6 +383,19 @@ struct luciole::PinService::State : std::enable_shared_from_this<State> {
                        })) {
                   published.push_back(pin);
                 }
+              }
+              // Preserve an explicit Network entry written to GTK bookmarks by another application.
+              if (const auto existing = std::ranges::find(shared.bookmarks(), Location::network(), &Bookmark::location);
+                  existing != shared.bookmarks().end()) {
+                auto insertAt = published.end();
+                for (auto it = std::next(existing); it != shared.bookmarks().end(); ++it) {
+                  if (const auto pos = std::ranges::find(published, it->location, &Bookmark::location);
+                      pos != published.end()) {
+                    insertAt = pos;
+                    break;
+                  }
+                }
+                published.insert(insertAt, *existing);
               }
               const auto written = shared.save(published);
               if (written.state == AtomicWriteState::NotCommitted) {
@@ -581,7 +593,8 @@ bool luciole::PinService::saveWindows(std::vector<SavedWindow> windows) {
 }
 bool luciole::PinService::add(std::vector<Bookmark> bookmarks, std::size_t before, bool belowSeparator) {
   if (!editable() || std::ranges::any_of(bookmarks, [](const auto& bookmark) {
-        return bookmark.location.isTrash() && bookmark.location != Location::trash();
+        return (bookmark.location.isTrash() && bookmark.location != Location::trash())
+            || bookmark.location == Location::network();
       })) {
     return false;
   }
@@ -690,35 +703,22 @@ bool luciole::PinService::setIcon(const Bookmark& expected, std::string iconName
   found->iconName = std::move(iconName);
   return save(std::move(proposed));
 }
-bool luciole::placeShown(const Bookmark& place, bool showNetwork) {
-  return showNetwork || place.location != Location::network();
-}
-luciole::SeparatorGaps::SeparatorGaps(const PinService& pins, bool showNetwork) : m_separators(pins.separators()) {
-  const auto& rows = pins.bookmarks();
-  for (std::size_t i = 0; i < rows.size(); ++i) {
-    if (placeShown(rows[i], showNetwork)) {
-      m_shown.push_back(i);
-    }
-  }
-}
+luciole::SeparatorGaps::SeparatorGaps(const PinService& pins)
+    : m_count(pins.bookmarks().size()), m_separators(pins.separators()) {}
 std::optional<std::size_t> luciole::SeparatorGaps::gap(std::size_t before) const {
-  // Nothing is above the first shown row to separate it from.
-  const auto row = std::ranges::lower_bound(m_shown, before);
-  if (row == m_shown.end() || row == m_shown.begin()) {
-    return std::nullopt;
-  }
-  return *row;
+  // Nothing is above the first row to separate it from.
+  return before > 0 && before < m_count ? std::optional(before) : std::nullopt;
 }
 std::optional<std::size_t> luciole::SeparatorGaps::separatorAbove(std::size_t row) const {
-  const auto found = std::ranges::find_if(m_separators, [&](std::size_t before) { return gap(before) == row; });
-  return found == m_separators.end() ? std::nullopt : std::optional(*found);
+  return gap(row) && std::ranges::contains(m_separators, row) ? std::optional(row) : std::nullopt;
 }
-bool luciole::SeparatorGaps::free(std::size_t row) const { return gap(row) == row && !separatorAbove(row); }
+bool luciole::SeparatorGaps::free(std::size_t row) const { return gap(row) && !separatorAbove(row); }
 std::optional<std::size_t> luciole::SeparatorGaps::nextShown(std::size_t row) const {
-  const auto next = std::ranges::upper_bound(m_shown, row);
-  return next == m_shown.end() ? std::nullopt : std::optional(*next);
+  return row + 1 < m_count ? std::optional(row + 1) : std::nullopt;
 }
 std::optional<std::size_t> luciole::SeparatorGaps::previousShown(std::size_t row) const {
-  const auto next = std::ranges::lower_bound(m_shown, row);
-  return next == m_shown.begin() ? std::nullopt : std::optional(*std::prev(next));
+  if (m_count == 0 || row == 0) {
+    return std::nullopt;
+  }
+  return std::min(row, m_count) - 1;
 }

@@ -19,15 +19,25 @@ Double-click, press `Enter` or choose **Open** on a supported local archive, or 
 - breadcrumbs for folders inside the archive
 - members with sortable **Name**, **Type**, **Size** and **Modified** columns
 
-**Open** on a member opens that file in its associated application. Members opened this way are limited to 128 MiB; use extraction for larger files. If another file operation is still finishing, Luciole says so instead of opening.
+Open a supported archive member to browse its contents inside Luciole. The breadcrumbs show the archive chain. `Alt+Left` returns to the outer archive with its folder, selection and scroll position restored; Up or `Backspace` at an archive's root also returns to its parent archive.
+
+Other members open in their associated application. Large members and nested archives stream into private temporary storage. Luciole checks available space when the output size is known and reports write failures if space runs out. There is no fixed member-size or member-count quota. Closing the archive view keeps externally opened files available. Temporary files can remain while the tab is available to reopen and are removed when Luciole exits. If another file operation is still finishing, Luciole says so instead of opening.
 
 ## Extract
 
-Use **Extract Here** or **Extract To**, or the **Extract…** and **Extract Here** buttons on the archive page. They act on the selected members, or on the whole archive when nothing is selected. Extraction uses the normal conflict dialog, see [file operations](file-operations.md#resolve-name-conflicts).
+Select one or more supported native archives and choose **Extract Here** or **Extract To**. **Extract Here** creates a separate folder beside each archive. For one archive, **Extract To** chooses its new output-folder path. For multiple archives, it chooses an existing parent folder and creates a separate output folder for each archive inside it. Matching archive names get numbered folders, such as `photos` and `photos (1)`.
+
+A batch runs in selection order and appears as one job in **File Operations**, with progress and a result for each archive. Passwords are requested separately when needed. If one archive fails, the remaining archives are still attempted. Cancel stops the current archive and the remaining queue; completed extractions stay in place.
+
+The **Extract…** and **Extract Here** buttons on an archive page act on its selected members, or on the whole archive when nothing is selected. Existing output folders use the normal conflict dialog, see [file operations](file-operations.md#resolve-name-conflicts).
 
 You can also drop one archive on a folder and choose **Extract Here** from the menu.
 
+For a nested archive, the default extraction destination is beside the original outer archive. **Extract Here** uses that folder too.
+
 Before extracting, Luciole checks that temporary storage and the destination have enough space. This is an estimate, so write errors are still reported. Archives that are unsafe or unsupported are refused with a message.
+
+Temporary storage follows `TMPDIR`, including private per-user folders configured through pam_tmpdir. Ancestors above the temporary and destination folders can allow search access while hiding directory listings.
 
 ## Supported inputs
 

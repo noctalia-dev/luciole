@@ -203,6 +203,7 @@ SettingsDialog::SettingsDialog(
   addBool(P::ContextMenuIcons, "Icons in Context Menus");
   addBool(P::ShowCloseButtons, "Show Close Buttons");
   addBool(P::ReduceAnimations, "Reduce Animations");
+  addToolbar();
   card("Sidebar");
   addBool(P::ShowSidebar, "Show Sidebar");
   addBool(P::SidebarTree, "Show Folder Tree");
@@ -432,6 +433,31 @@ void SettingsDialog::addChoice(
     select->setSelectedIndexSilently(static_cast<std::size_t>(found - choices.begin()));
   };
   addRow<T>(key, title, show, std::move(control), std::move(subtitle));
+}
+
+void SettingsDialog::addToolbar() {
+  using P = luciole::BrowserPreference;
+  card("Toolbar");
+  addBool(P::ShowSidebarButton, "Sidebar Button");
+  addBool(P::ShowParentButton, "Parent Folder Button");
+  addBool(P::ShowNewFolderButton, "New Folder Button");
+  addBool(P::ShowSortButton, "Sort Button");
+  addBool(P::ShowViewSwitch, "View Switch");
+  addChoice(
+      P::OperationsButton, "File Operations Button",
+      {{"Always", luciole::OperationsButton::Always},
+       {"While Busy", luciole::OperationsButton::Busy},
+       {"Never", luciole::OperationsButton::Never}}
+  );
+  auto orderLabel = ui::label({.fontSize = Style::fontSizeCaption, .maxWidth = 180.0F});
+  auto* orderText = orderLabel.get();
+  addRow<luciole::ToolbarOrder>(
+      P::ToolbarOrder, "Button Order",
+      [orderText](const auto& order) {
+        orderText->setText(order == luciole::kDefaultToolbarOrder ? "Default" : "Custom");
+      },
+      std::move(orderLabel), "Right-click a toolbar button to move it"
+  );
 }
 
 void SettingsDialog::addTerminal() {

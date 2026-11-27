@@ -23,6 +23,8 @@ std::unique_ptr<Button> SidebarController::buildToggle() {
        .glyph = "layout-sidebar",
        .glyphSize = Style::baseGlyphSize,
        .variant = ButtonVariant::Ghost,
+       .visible = m_showToggle,
+       .participatesInLayout = m_showToggle,
        .onClick = [this] {
          toggle();
          // A pointer click leaves no keyboard focus behind; give it to the file list so shortcuts like F2 work.

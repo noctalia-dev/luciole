@@ -25,9 +25,10 @@ private:
   luciole::FileIcon* m_image;
   Label *m_heading, *m_name, *m_status, *m_text;
   FileMetadataView* m_metadata;
-  Flex* m_details;
+  // The fixed preview box, the text page shown in it in place of the image, and the status badge on Details.
+  Flex *m_details, *m_stage, *m_page, *m_statusPill;
   Button *m_open, *m_openWith;
-  ScrollView* m_scroll;
+  ScrollView *m_scroll, *m_textScroll;
   std::string m_location;
   bool m_quick;
 };

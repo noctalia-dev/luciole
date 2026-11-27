@@ -84,6 +84,8 @@ void FileMetadataView::sync(std::span<const luciole::MetadataField> fields, floa
     row.key->setMinWidth(keyWidth);
     row.key->setMaxWidth(keyWidth);
     row.value->setText(metadataValue(field));
+    row.value->setMaxLines(field.singleLine ? 1 : 3);
+    row.value->setEllipsize(field.singleLine ? TextEllipsize::Middle : TextEllipsize::End);
     row.value->setMaxWidth(std::max(1.0F, width - keyWidth - Style::spaceSm));
   }
   for (std::size_t i = count; i < m_rows.size(); ++i) {

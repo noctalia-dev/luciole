@@ -15,6 +15,8 @@ namespace luciole::archive_work {
     void unchanged() const;
     Fd duplicateSingle() const;
     const std::string& fingerprint() const { return m_fingerprint; }
+    // All captured input paths, including every numbered ZIP part; no further I/O.
+    std::vector<std::filesystem::path> sourcePaths() const;
     bool split() const { return !m_prefix.empty(); }
 
   private:

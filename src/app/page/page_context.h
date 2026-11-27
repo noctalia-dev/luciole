@@ -4,6 +4,7 @@
 #include "browser/action_registry.h"
 #include "fs/location.h"
 #include "model/directory_options.h"
+#include "model/toolbar_layout.h"
 #include "render/scene/node.h"
 #include "ui/controls/context_menu.h"
 
@@ -135,6 +136,8 @@ public:
   virtual LayoutRect menuAnchor() const = 0;
   // The toolbar's parent folder button.
   virtual Node& upButton() = 0;
+  // True while the toolbar shows `item`.
+  virtual bool toolbarItemShown(luciole::ToolbarItem item) const = 0;
   // Syncs the page to its browser on the next frame.
   virtual void requestSync() = 0;
   // Last pointer position on the page surface.

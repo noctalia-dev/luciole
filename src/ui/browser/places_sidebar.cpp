@@ -464,7 +464,7 @@ std::optional<std::size_t> luciole::PlacesSidebar::separatorTarget(float y) cons
     }
   }
   // Its own gap has a separator too: the one being dragged.
-  return target && SeparatorGaps(m_pins, m_showNetwork).free(*target) ? target : std::nullopt;
+  return target && SeparatorGaps(m_pins).free(*target) ? target : std::nullopt;
 }
 void luciole::PlacesSidebar::showSeparatorIndicator(std::optional<std::size_t> target) {
   if (m_separatorIndicator == nullptr) {
@@ -674,11 +674,8 @@ void luciole::PlacesSidebar::rebuild() {
   m_separatorDrag.reset();
   content->addChild(makeListDropIndicator(1.0F, &m_separatorIndicator));
   const auto& pins = m_pins.bookmarks();
-  const SeparatorGaps gaps(m_pins, m_showNetwork);
+  const SeparatorGaps gaps(m_pins);
   for (std::size_t i = 0; i < pins.size(); ++i) {
-    if (!placeShown(pins[i], m_showNetwork)) {
-      continue;
-    }
     const auto separator = gaps.separatorAbove(i);
     const auto line = separator ? addSeparatorRow(*separator) : SeparatorRow{};
     const auto known = std::ranges::find_if(m_pins.userPlaces(), [&](const auto& place) {
@@ -696,12 +693,47 @@ void luciole::PlacesSidebar::rebuild() {
     m_rows.back().separatorButton = line.button;
     m_rows.back().separatorLine = line.line;
   }
-  if (m_showDrives && !m_drives.drives().empty()) {
+  const auto addSectionHeading = [&](const std::string& title) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));
-    heading("Drives");
+    heading(title);
+  };
+  const auto addDriveSection = [&](const std::string& title, DriveKind kind) {
+    bool added = false;
     for (const auto& drive : m_drives.drives()) {
+      if (drive.kind != kind) {
+        continue;
+      }
+      if (!added) {
+        addSectionHeading(title);
+        added = true;
+      }
       addDriveRow(drive);
     }
+  };
+  if (m_showDrives) {
+    addDriveSection("Drives", DriveKind::Local);
+    addDriveSection("Removable", DriveKind::Removable);
+  }
+  bool remoteHeading = false;
+  const auto ensureRemoteHeading = [&] {
+    if (!remoteHeading) {
+      addSectionHeading("Remote");
+      remoteHeading = true;
+    }
+  };
+  if (m_showNetwork) {
+    ensureRemoteHeading();
+    addRow({.label = "Network", .location = Location::network(), .iconName = {}}, "network", std::nullopt);
+  }
+  if (m_showDrives) {
+    for (const auto& drive : m_drives.drives()) {
+      if (drive.kind == DriveKind::Network) {
+        ensureRemoteHeading();
+        addDriveRow(drive);
+      }
+    }
+  }
+  if (!m_driveRows.empty()) {
     m_drives.refreshUsage();
   }
   sync(m_current);

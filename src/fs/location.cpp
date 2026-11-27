@@ -70,6 +70,12 @@ std::optional<std::string> luciole::Location::nativePath() const {
   return path ? std::optional<std::string>(path.get()) : std::nullopt;
 }
 
+std::optional<std::string> luciole::Location::nativeFileUri() const {
+  const auto path = nativePath();
+  const GString uri(path ? g_filename_to_uri(path->c_str(), nullptr, nullptr) : nullptr);
+  return uri ? std::optional<std::string>(uri.get()) : std::nullopt;
+}
+
 luciole::Location luciole::Location::trash() { return Location("trash:///"); }
 luciole::Location luciole::Location::network() { return Location("network:///"); }
 bool luciole::Location::isNetworkDiscovery() const {

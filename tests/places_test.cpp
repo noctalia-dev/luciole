@@ -170,31 +170,37 @@ namespace {
     Pump pump;
     const auto path = fixture.root / "network-layout/state.toml";
     const auto shared = fixture.root / "network-layout/bookmarks";
-    const auto pin = fixture.pin("existing");
+    const auto home = fixture.location("home");
+    const auto work = fixture.pin("work");
+    const auto extra = fixture.pin("extra");
+    const auto network = luciole::Location::network();
     write(
         path,
-        "schema_version = 1\nplaces_customized = true\nbookmarks = [{label='existing', uri='"
-            + pin.location.uri()
+        "schema_version = 1\nplaces_customized = true\nplace_separators = [2]\nbookmarks = [{label='Home', uri='"
+            + home.uri()
+            + "'}, {label='Network', uri='"
+            + network.uri()
+            + "'}, {label='Trash', uri='trash:///'}, {label='work', uri='"
+            + work.location.uri()
             + "'}]\n"
     );
-    write(shared, pin.location.uri() + " existing\n");
+    write(shared, work.location.uri() + " work\n" + network.uri() + " Network\n");
     luciole::PinService service(path, shared, {});
     service.reload();
     pump.ready(service);
-    const auto network = luciole::Location::network();
-    TEST_CHECK(service.bookmarks().front() == pin && service.bookmarks().back().location == network);
-    TEST_CHECK(service.move(network, 0));
+    // Legacy private Network slots drop without shifting later pins or separators.
+    TEST_CHECK(service.bookmarks().size() == 3);
+    TEST_CHECK(service.bookmarks()[0].location == home);
+    TEST_CHECK(service.bookmarks()[1].location == luciole::Location::trash());
+    TEST_CHECK(service.bookmarks()[2] == work);
+    TEST_CHECK((service.separators() == std::vector<std::size_t>{1}));
+    TEST_CHECK(!service.contains(network));
+    TEST_CHECK(!service.add({{"Network", network, {}}}, 0));
+    // An explicit GTK Network bookmark survives unrelated pin edits without entering Places.
+    TEST_CHECK(service.add({extra}, service.bookmarks().size()));
     pump.ready(service);
-    TEST_CHECK(read(shared) == pin.location.uri() + " existing\n");
-    luciole::PinService restarted(path, shared, {});
-    restarted.reload();
-    pump.ready(restarted);
-    TEST_CHECK(restarted.bookmarks().front().location == network);
-    // An existing shared Network bookmark must not create a second built-in row.
-    replace(shared, read(shared) + network.uri() + " Network\n");
-    restarted.reload();
-    pump.ready(restarted);
-    TEST_CHECK(std::ranges::count(restarted.bookmarks(), network, &luciole::Bookmark::location) == 1);
+    TEST_CHECK(!service.contains(network) && service.contains(extra.location));
+    TEST_CHECK(read(shared).contains(network.uri() + " Network\n"));
   }
   void testPlacesAndPins(const Fixture& fixture) {
     Pump pump;
@@ -215,9 +221,9 @@ namespace {
     TEST_CHECK(!service.contains(stale.location) && !fs::exists(sharedPath));
     const auto& places = service.userPlaces();
     TEST_CHECK(
-        places.size() == 8
+        places.size() == 7
         && places.front().bookmark.label == "Home"
-        && places.back().bookmark.location == luciole::Location::network()
+        && places.back().bookmark.location == luciole::Location::trash()
     );
     const auto documents = std::ranges::find_if(places, [](const auto& p) { return p.bookmark.label == "Documents"; });
     TEST_CHECK(documents != places.end() && documents->bookmark.location == fixture.location("home/My Documents"));
@@ -230,7 +236,8 @@ namespace {
         std::ranges::find(places, std::string("Downloads"), [](const auto& p) { return p.bookmark.label; })->bookmark;
     const luciole::Bookmark trash{"Trash", luciole::Location::trash(), {}};
     const luciole::Bookmark network{"Network", luciole::Location::network(), {}};
-    TEST_CHECK(service.contains(network.location));
+    TEST_CHECK(!service.contains(network.location));
+    TEST_CHECK(!service.add({network}, 0));
     TEST_CHECK(!service.remove(network.location) && !service.rename(network, "changed"));
     TEST_CHECK(!service.setIcon(network, "star"));
     const auto a = fixture.pin("a");
@@ -256,16 +263,6 @@ namespace {
     for (const auto& invalid :
          {std::string{}, std::string(257, 'x'), std::string("line\nbreak"), std::string(1, static_cast<char>(0xff))}) {
       TEST_CHECK(!service.rename(renamed, invalid));
-    }
-    const auto sharedBeforeMove = read(sharedPath);
-    TEST_CHECK(service.move(network.location, 0));
-    pump.ready(service);
-    TEST_CHECK(service.bookmarks().front() == network && read(sharedPath) == sharedBeforeMove);
-    {
-      luciole::PinService reloaded(path, sharedPath, {});
-      reloaded.reload();
-      pump.ready(reloaded);
-      TEST_CHECK(reloaded.bookmarks().front() == network);
     }
     TEST_CHECK(service.move(b.location, 0));
     pump.ready(service);
@@ -460,7 +457,6 @@ namespace {
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(!service.error().empty() && service.separators() == kept && read(path) == "schema_version = 999\n");
   }
-  // With Network hidden, a gap on screen spans two rows: separators are placed, moved and drawn per shown gap.
   void testSeparatorGaps(const Fixture& fixture) {
     Pump pump;
     const auto path = fixture.root / "gaps/state.toml";
@@ -470,23 +466,19 @@ namespace {
     luciole::PinService service(path, shared, {});
     service.reload();
     pump.ready(service);
-    const auto network = row(service, luciole::Location::network());
+    const auto trash = row(service, luciole::Location::trash());
     const auto after = row(service, a.location);
-    TEST_CHECK(network > 1 && after == network + 1);
+    TEST_CHECK(trash > 1 && after == trash + 1);
 
-    const luciole::SeparatorGaps shown(service, true);
-    TEST_CHECK(shown.gap(0) == std::nullopt && shown.gap(network) == network && shown.free(network));
-    const luciole::SeparatorGaps hidden(service, false);
-    // The gap under the row above Network is the one above the next shown row; Network's own gap is gone.
-    TEST_CHECK(hidden.nextShown(network - 1) == after && hidden.previousShown(after) == network - 1);
-    TEST_CHECK(!hidden.free(network) && hidden.free(after));
+    const luciole::SeparatorGaps gaps(service);
+    TEST_CHECK(gaps.gap(0) == std::nullopt && gaps.gap(trash) == trash && gaps.free(trash));
+    TEST_CHECK(gaps.nextShown(trash) == after && gaps.previousShown(after) == trash);
 
-    // A separator saved in front of the hidden row is drawn above the next shown one, which then takes no other.
-    TEST_CHECK(service.addSeparator(network));
+    TEST_CHECK(service.addSeparator(after));
     pump.ready(service);
-    const luciole::SeparatorGaps drawn(service, false);
-    TEST_CHECK(drawn.gap(network) == after && drawn.separatorAbove(after) == network && !drawn.free(after));
-    TEST_CHECK(luciole::SeparatorGaps(service, true).free(after));
+    const luciole::SeparatorGaps drawn(service);
+    TEST_CHECK(drawn.gap(after) == after && drawn.separatorAbove(after) == after && !drawn.free(after));
+    TEST_CHECK(drawn.free(trash));
   }
   // Pins dropped next to a separator land on the side of its line the drop line showed, and the separators stay with
   // the rows that don't move.

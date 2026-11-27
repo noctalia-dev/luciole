@@ -4,6 +4,7 @@
 #include "fs/location.h"
 #include "fs/trash_availability.h"
 #include "model/details_columns.h"
+#include "model/toolbar_layout.h"
 #include "render/scene/node.h"
 #include "ui/controls/context_menu.h"
 
@@ -56,6 +57,8 @@ public:
   // The menu of the separator line in front of Places row `before`.
   void openSeparatorMenu(std::size_t before, float x, float y);
   void openColumnsMenu(const LayoutRect& anchor, std::optional<luciole::DetailsColumn> column = std::nullopt);
+  // Moves `item` along the toolbar, shows or hides toolbar buttons, and resets the order.
+  void openToolbarMenu(const LayoutRect& anchor, luciole::ToolbarItem item);
   void openBreadcrumbMenu(const luciole::Location& target, LayoutRect anchor);
   void openMenu();
   void openSortMenu(std::optional<LayoutRect> anchor = std::nullopt);

@@ -36,6 +36,7 @@ private:
   void addChoice(
       luciole::PreferenceKey<T> key, const std::string& title, const Choices<T>& choices, std::string subtitle = {}
   );
+  void addToolbar();
   void addTerminal();
   void addKeybinds();
   void syncKeybinds();

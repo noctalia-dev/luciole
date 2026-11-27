@@ -134,10 +134,12 @@ private:
 ArchiveView::ArchiveView(
     luciole::FileIconCache& icons, std::function<std::uint32_t()> modifiers, std::function<void()> close,
     std::function<void(std::vector<std::string>)> extract, std::function<void(std::vector<std::string>)> extractHere,
-    std::function<void(const std::string&)> open, std::function<void()> reload, std::function<void()> cancel
+    std::function<void(const std::string&)> open, std::function<void()> reload, std::function<void()> cancel,
+    std::function<void(std::size_t)> archiveParent
 )
     : m_adapter(std::make_unique<Adapter>(*this, icons)), m_modifiers(std::move(modifiers)),
-      m_extract(std::move(extract)), m_extractHere(std::move(extractHere)), m_open(std::move(open)) {
+      m_extract(std::move(extract)), m_extractHere(std::move(extractHere)), m_open(std::move(open)),
+      m_archiveParent(std::move(archiveParent)) {
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
   setFill(colorSpecFromRole(ColorRole::Surface));
@@ -327,8 +329,17 @@ ArchiveView::ArchiveView(
 ArchiveView::~ArchiveView() { m_grid->setAdapter(nullptr); }
 void ArchiveView::sync(
     std::shared_ptr<const luciole::ArchiveCatalog> catalog, luciole::ArchivePhase phase, std::size_t items,
-    std::uint64_t bytes, const std::optional<luciole::FileError>& error
+    std::uint64_t bytes, const std::optional<luciole::FileError>& error, const std::vector<std::string>& archives
 ) {
+  const bool switched = m_archives != archives;
+  if (switched) {
+    m_archives = archives;
+    m_catalog.reset();
+    m_parent.clear();
+    m_selection.clear();
+    m_focus.reset();
+    m_anchor.reset();
+  }
   m_busy = phase != luciole::ArchivePhase::Idle;
   // A reload drops the catalog until it is read again; keep showing the old one meanwhile.
   if (catalog != m_catalog && (catalog || !m_busy)) {
@@ -347,6 +358,9 @@ void ArchiveView::sync(
     }
     m_focus.reset();
     m_anchor.reset();
+    rebuild();
+    syncInfo();
+  } else if (switched) {
     rebuild();
     syncInfo();
   }
@@ -404,7 +418,7 @@ void ArchiveView::rebuild() {
   if (!m_busy) {
     m_status->setText(statusText());
   }
-  m_up->setEnabled(!m_parent.empty());
+  m_up->setEnabled(!m_parent.empty() || m_archives.size() > 1);
   m_grid->setSelectedIndex(std::nullopt);
   m_grid->notifyDataChanged();
   m_grid->scrollView().requestScrollToOffset(0);
@@ -435,18 +449,38 @@ void ArchiveView::rebuildCrumbs() {
   while (!m_crumbs->children().empty()) {
     m_crumbs->removeChild(m_crumbs->children().back().get());
   }
-  if (!m_catalog) {
-    return;
+  const std::weak_ptr<int> lifetime = m_lifetime;
+  for (std::size_t i = 0; i + 1 < m_archives.size(); ++i) {
+    m_crumbs->addChild(
+        ui::button(
+            {.text = m_archives[i],
+             .controlHeight = Style::controlHeightSm,
+             .variant = ButtonVariant::Ghost,
+             .tooltip = m_archives[i],
+             .maxWidth = 160.0F,
+             .paddingH = Style::spaceSm,
+             .onClick =
+                 [this, lifetime, i] {
+                   DeferredCall::callLater([this, lifetime, i] {
+                     if (!lifetime.expired()) {
+                       m_archiveParent(i);
+                     }
+                   });
+                 },
+             .configure = [](Button& button) { button.label()->setUseMarkup(false); }}
+        )
+    );
+    m_crumbs->addChild(ui::label({.text = "/", .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}));
   }
-  std::vector<std::pair<std::string, std::string>> crumbs{
-      {m_catalog->source.displayName().value_or("Archive"), std::string()}
-  };
+  const auto name = !m_archives.empty() ? m_archives.back()
+      : m_catalog                       ? m_catalog->source.displayName().value_or("Archive")
+                                        : "Archive";
+  std::vector<std::pair<std::string, std::string>> crumbs{{name, std::string()}};
   for (std::size_t start = 0; start < m_parent.size();) {
     const auto slash = std::min(m_parent.find('/', start), m_parent.size());
     crumbs.emplace_back(m_parent.substr(start, slash - start), m_parent.substr(0, slash));
     start = slash + 1;
   }
-  const std::weak_ptr<int> lifetime = m_lifetime;
   for (std::size_t i = 0; i < crumbs.size(); ++i) {
     if (i != 0) {
       m_crumbs->addChild(ui::label({.text = "/", .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}));
@@ -475,6 +509,9 @@ void ArchiveView::rebuildCrumbs() {
   }
 }
 void ArchiveView::syncInfo() {
+  if (!m_archives.empty()) {
+    m_title->setText(m_archives.back());
+  }
   const bool single = m_catalog && m_catalog->single && m_catalog->entries.size() == 1;
   m_headerRow->setVisible(!single);
   m_headerRow->setParticipatesInLayout(!single);
@@ -482,6 +519,7 @@ void ArchiveView::syncInfo() {
   m_card->setParticipatesInLayout(single);
   if (!m_catalog) {
     m_info->setText("");
+    rebuildCrumbs();
     return;
   }
   m_title->setText(m_catalog->source.displayName().value_or(i18n::text("Archive")));
@@ -583,10 +621,26 @@ void ArchiveView::activate(std::size_t index) {
 }
 void ArchiveView::up() {
   if (m_parent.empty()) {
+    if (m_archives.size() > 1) {
+      m_archiveParent(m_archives.size() - 2);
+    }
     return;
   }
   const auto slash = m_parent.rfind('/');
   openFolder(slash == std::string::npos ? "" : m_parent.substr(0, slash));
+}
+ArchiveView::Position ArchiveView::position() const {
+  return {m_parent, m_selection, m_focus, m_anchor, m_grid->scrollView().scrollOffset(), m_sort, m_descending};
+}
+void ArchiveView::restore(Position position) {
+  m_parent = std::move(position.parent);
+  m_selection = std::move(position.selection);
+  m_focus = position.focus;
+  m_anchor = position.anchor;
+  sortBy(position.sort, position.descending);
+  m_grid->setSelectedIndex(m_focus);
+  m_grid->scrollView().requestScrollToOffset(position.scroll);
+  selectionChanged();
 }
 bool ArchiveView::key(std::uint32_t symbol, std::uint32_t modifiers) {
   if (luciole::keybindMatches(luciole::KeybindCommand::SelectAll, symbol, modifiers)) {

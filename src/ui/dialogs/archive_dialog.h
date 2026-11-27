@@ -20,7 +20,7 @@ public:
           const std::string&
       )>
           submit,
-      std::function<void()> cancel
+      std::function<void()> cancel, std::size_t archiveCount = 1
   );
   InputArea* focusArea() const;
   void reveal(const Node* node);
