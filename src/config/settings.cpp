@@ -481,6 +481,7 @@ namespace {
           {between<16, 8192>, "expected an integer from 16 to 8192"}
       ),
       describe(P::TerminalCommand, "terminal_command", [](S& s) -> auto& { return s.terminalCommand; }),
+      describe(P::Language, "language", [](S& s) -> auto& { return s.language; }),
       describe(P::Keybinds, "keybinds", [](S& s) -> auto& { return s.keybinds; }),
   };
   constexpr std::size_t kPreferenceCount = std::tuple_size_v<decltype(kPreferences)>;

@@ -3,6 +3,7 @@
 #include "app/operation_hub.h"
 #include "fs/filename.h"
 #include "fs/gio_ptr.h"
+#include "model/size_format.h"
 
 #include <algorithm>
 #include <array>
@@ -29,10 +30,8 @@ namespace {
     }
     return result;
   }
-  std::string sizeText(std::uint64_t bytes) {
-    const luciole::GString text(g_format_size_full(bytes, G_FORMAT_SIZE_IEC_UNITS));
-    return text.get();
-  }
+  // app-jobs cannot link the i18n catalog, so this snapshot keeps the English unit names.
+  std::string sizeText(std::uint64_t bytes) { return luciole::formatSizeWithUnits(bytes, {}); }
   std::string itemName(const luciole::Location& location) { return location.displayName().value_or("Item"); }
   struct Report {
     std::string text;

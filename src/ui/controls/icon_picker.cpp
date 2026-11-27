@@ -1,6 +1,7 @@
 #include "ui/controls/icon_picker.h"
 
 #include "cursor-shape-v1-client-protocol.h"
+#include "i18n/i18n.h"
 #include "system/icon_resolver.h"
 #include "thumbnails/file_icon_cache.h"
 #include "ui/browser/file_icon.h"
@@ -190,12 +191,13 @@ IconPicker::IconPicker(luciole::FileIconCache& icons, std::vector<ThemedIcon> na
   );
 
   m_adapter = std::make_unique<IconGridAdapter>(*m_icons, std::move(names));
-  m_scopeOptions.emplace_back("All Icons");
-  m_scopeOptions.emplace_back("Folders Only");
+  m_scopeOptions.emplace_back(i18n::text("All Icons"));
+  m_scopeOptions.emplace_back(i18n::text("Folders Only"));
   for (const auto& context : m_adapter->contexts()) {
-    m_scopeOptions.emplace_back(context);
+    m_scopeContexts.push_back(context);
+    m_scopeOptions.emplace_back(i18n::text(context));
   }
-  m_scopeOptions.emplace_back("Unthemed");
+  m_scopeOptions.emplace_back(i18n::text("Unthemed"));
   addChild(
       ui::row(
           {
@@ -204,7 +206,7 @@ IconPicker::IconPicker(luciole::FileIconCache& icons, std::vector<ThemedIcon> na
           },
           ui::input({
               .out = &m_searchInput,
-              .placeholder = "Search icons by name",
+              .placeholder = i18n::text("Search icons by name"),
               .clearButtonEnabled = true,
               .flexGrow = 1.0F,
               .onChange = [this](const std::string& value) { applyFilter(value); },
@@ -308,7 +310,7 @@ IconPicker::~IconPicker() {
 
 void IconPicker::setTitle(std::string_view title) {
   if (m_title != nullptr) {
-    m_title->setText(title.empty() ? "Choose Folder Icon" : std::string(title));
+    m_title->setText(title.empty() ? i18n::text("Choose Folder Icon") : std::string(title));
   }
 }
 
@@ -397,7 +399,7 @@ void IconPicker::applyFilter(const std::string& filter) {
     scope = IconGridAdapter::Scope::Unthemed;
   } else if (selected >= 2 && selected + 1 < options) {
     scope = IconGridAdapter::Scope::Context;
-    context = m_scopeOptions[selected];
+    context = m_scopeContexts[selected - 2];
   }
   const auto previousResult = currentResult();
   m_adapter->rebuildVisible(filter, scope, context);
@@ -419,7 +421,7 @@ void IconPicker::syncSelection() {
     m_applyButton->setEnabled(m_enabled && result.has_value());
   }
   if (m_selectedName != nullptr) {
-    m_selectedName->setText(result ? result->name : "Select an icon");
+    m_selectedName->setText(result ? result->name : i18n::text("Select an icon"));
     m_selectedName->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
   }
 }

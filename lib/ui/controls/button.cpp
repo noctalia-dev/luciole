@@ -1,6 +1,7 @@
 #include "ui/controls/button.h"
 
 #include "core/input/keybind_matcher.h"
+#include "i18n/i18n.h"
 #include "render/animation/animation_manager.h"
 #include "render/core/renderer.h"
 #include "render/scene/input_area.h"
@@ -274,7 +275,7 @@ void Button::setText(std::string_view text) {
     return;
   }
   ensureLabel();
-  m_label->setText(text);
+  m_label->setText(i18n::text(text));
   m_label->setVisible(!text.empty());
 }
 

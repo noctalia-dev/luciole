@@ -1,49 +1,51 @@
 #include "ui/browser/file_error_text.h"
 
+#include "i18n/i18n.h"
+
 std::string luciole::fileErrorText(const FileError& error) {
   if (!error.message.empty()) {
-    return error.message;
+    return i18n::text(error.message);
   }
   using Kind = FileErrorKind;
   switch (error.kind) {
   case Kind::Missing:
-    return "The item is no longer available.";
+    return i18n::text("The item is no longer available.");
   case Kind::Denied:
-    return "Permission denied.";
+    return i18n::text("Permission denied.");
   case Kind::NotDirectory:
-    return "Not a folder.";
+    return i18n::text("Not a folder.");
   case Kind::IsDirectory:
-    return "The item is a folder.";
+    return i18n::text("The item is a folder.");
   case Kind::Exists:
-    return "An item with that name already exists.";
+    return i18n::text("An item with that name already exists.");
   case Kind::NotEmpty:
-    return "The folder is not empty.";
+    return i18n::text("The folder is not empty.");
   case Kind::NameTooLong:
-    return "The name is too long.";
+    return i18n::text("The name is too long.");
   case Kind::NoSpace:
-    return "There is not enough space.";
+    return i18n::text("There is not enough space.");
   case Kind::ReadOnly:
-    return "The location is read-only.";
+    return i18n::text("The location is read-only.");
   case Kind::InvalidArgument:
-    return "The request is not valid.";
+    return i18n::text("The request is not valid.");
   case Kind::WouldRecurse:
-    return "A folder cannot be placed inside itself.";
+    return i18n::text("A folder cannot be placed inside itself.");
   case Kind::WouldMerge:
-    return "The folders would have to be merged.";
+    return i18n::text("The folders would have to be merged.");
   case Kind::NotMounted:
-    return "The location is not mounted.";
+    return i18n::text("The location is not mounted.");
   case Kind::Unavailable:
-    return "The location is unavailable.";
+    return i18n::text("The location is unavailable.");
   case Kind::Unsupported:
-    return "This operation is not supported here.";
+    return i18n::text("This operation is not supported here.");
   case Kind::Changed:
-    return "The item changed. Try again.";
+    return i18n::text("The item changed. Try again.");
   case Kind::Cancelled:
-    return "Cancelled.";
+    return i18n::text("Cancelled.");
   case Kind::Other:
     break;
   }
-  return "The operation failed.";
+  return i18n::text("The operation failed.");
 }
 
 std::string luciole::fileErrorText(const std::optional<FileError>& error) {
@@ -55,13 +57,13 @@ std::string luciole::nameErrorText(const FileError& error, std::string_view miss
   switch (error.kind) {
   case Kind::Exists:
   case Kind::NotEmpty:
-    return "An item with that name already exists.";
+    return i18n::text("An item with that name already exists.");
   case Kind::NameTooLong:
-    return "The name is too long for this folder.";
+    return i18n::text("The name is too long for this folder.");
   case Kind::Denied:
-    return "Permission denied.";
+    return i18n::text("Permission denied.");
   case Kind::Missing:
-    return std::string(missing);
+    return i18n::text(missing);
   default:
     return fileErrorText(error);
   }

@@ -1,5 +1,6 @@
 #include "ui/dialogs/settings_dialog.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
 #include "ui/controls/card_style.h"
@@ -145,6 +146,12 @@ SettingsDialog::SettingsDialog(
   );
   section("General", "adjustments-horizontal");
   card("Behavior");
+  Choices<std::string> languages{{i18n::tr("language.system"), {}}};
+  for (const auto& language : i18n::Service::instance().availableLanguages()) {
+    const auto translated = i18n::Service::instance().lookup("language." + language);
+    languages.emplace_back(translated.empty() ? language : std::string(translated), language);
+  }
+  addChoice(P::Language, "settings.Language", languages);
   addChoice(
       P::ActivationMode, "Open Items",
       {{"Single Click", luciole::ActivationMode::SingleClick}, {"Double Click", luciole::ActivationMode::DoubleClick}}
@@ -258,7 +265,7 @@ SettingsDialog::SettingsDialog(
   addRow<luciole::DetailsColumnOrder>(
       P::ColumnOrder, "Column Order",
       [orderText](const auto& order) {
-        orderText->setText(order == luciole::kDefaultDetailsColumnOrder ? "Default" : "Custom");
+        orderText->setText(order == luciole::kDefaultDetailsColumnOrder ? i18n::text("Default") : i18n::text("Custom"));
       },
       std::move(orderLabel)
   );
@@ -357,7 +364,7 @@ void SettingsDialog::section(const std::string& title, const std::string& glyph)
 void SettingsDialog::card(const std::string& title) { m_pages.back()->addChild(luciole::card(title, &m_section)); }
 void SettingsDialog::selectPage(std::size_t selected) {
   disarmReset();
-  m_title->setText(std::format("Settings - {}", m_pageTitles[selected]));
+  m_title->setText(i18n::tr("settings.title", "page", i18n::text(m_pageTitles[selected])));
   for (std::size_t index = 0; index < m_pages.size(); ++index) {
     m_pages[index]->setVisible(index == selected);
     m_pages[index]->setParticipatesInLayout(index == selected);
@@ -377,7 +384,8 @@ void SettingsDialog::addRow(
     luciole::PreferenceKey<T> key, const std::string& title, std::function<void(const T&)> show,
     std::unique_ptr<Node> control, std::string subtitle
 ) {
-  auto titleLabel = ui::label({.text = title, .fontWeight = FontWeight::SemiBold, .maxLines = 2, .flexGrow = 1.0F});
+  auto titleLabel =
+      ui::label({.text = i18n::text(title), .fontWeight = FontWeight::SemiBold, .maxLines = 2, .flexGrow = 1.0F});
   std::unique_ptr<Node> copy;
   if (subtitle.empty()) {
     copy = std::move(titleLabel);
@@ -431,7 +439,7 @@ void SettingsDialog::addTerminal() {
   auto* input = control.get();
   input->setMinLayoutWidth(180.0F);
   input->setSize(180.0F, Style::controlHeight);
-  input->setPlaceholder("Automatic");
+  input->setPlaceholder(i18n::text("Automatic"));
   const auto commit = [this, input] {
     const auto value = input->value();
     if (value != m_current.terminalCommand) {
@@ -492,8 +500,8 @@ void SettingsDialog::addKeybinds() {
             ui::keybindRecorder(
                 {.out = &recorder,
                  .scale = 1.0F,
-                 .unsetPlaceholder = "Add shortcut",
-                 .recordingPlaceholder = "Press keys…",
+                 .unsetPlaceholder = i18n::text("Add shortcut"),
+                 .recordingPlaceholder = i18n::text("Press keys…"),
                  .modifierPolicy = keybindModifierPolicy(command),
                  .onCommit =
                      [this, blockIndex, slot, command](KeyChord chord) {
@@ -508,7 +516,7 @@ void SettingsDialog::addKeybinds() {
                          target.recorder->setChord(fromKeybindChord(original));
                          m_pendingStatus = std::format(
                              "{} is already used by {}.", luciole::keybindChordLabel(keybindChord),
-                             luciole::keybindCommandLabel(*conflict)
+                             i18n::text(luciole::keybindCommandLabel(*conflict))
                          );
                          m_pendingStatusError = true;
                          setStatus(m_pendingStatus, true);
@@ -528,7 +536,7 @@ void SettingsDialog::addKeybinds() {
                        if (const auto other = crossScopeConflict(m_current.keybinds, command, keybindChord)) {
                          m_pendingStatus = std::format(
                              "{} is also used by {} in another scope.", luciole::keybindChordLabel(keybindChord),
-                             luciole::keybindCommandLabel(*other)
+                             i18n::text(luciole::keybindCommandLabel(*other))
                          );
                          setStatus(m_pendingStatus, false);
                        }
@@ -568,7 +576,7 @@ void SettingsDialog::addKeybinds() {
            .gap = Style::spaceMd,
            .paddingV = kRowPaddingV},
           ui::label(
-              {.text = std::string(luciole::keybindCommandLabel(command)),
+              {.text = i18n::text(luciole::keybindCommandLabel(command)),
                .fontSize = Style::fontSizeBody,
                .fontWeight = FontWeight::SemiBold,
                .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
@@ -714,7 +722,7 @@ void SettingsDialog::sync(
     const std::string& error, bool clearingThumbnails
 ) {
   m_clearThumbnails->setEnabled(!clearingThumbnails);
-  m_clearThumbnails->setText(clearingThumbnails ? "Clearing…" : "Clear Cache");
+  m_clearThumbnails->setText(clearingThumbnails ? i18n::text("Clearing…") : i18n::text("Clear Cache"));
   m_current = settings;
   m_inherited = inherited;
   for (const auto& [id, show] : m_rows) {
@@ -736,7 +744,7 @@ void SettingsDialog::setStatus(const std::string& text, bool error) {
 void SettingsDialog::onResetClicked() {
   if (!m_resetArmed) {
     m_resetArmed = true;
-    m_reset->setText("Confirm Reset");
+    m_reset->setText(i18n::text("Confirm Reset"));
     m_reset->setVariant(ButtonVariant::Destructive);
     return;
   }
@@ -747,7 +755,7 @@ void SettingsDialog::disarmReset() {
   if (!std::exchange(m_resetArmed, false)) {
     return;
   }
-  m_reset->setText("Reset All Settings");
+  m_reset->setText(i18n::text("Reset All Settings"));
   m_reset->setVariant(ButtonVariant::Ghost);
 }
 void SettingsDialog::reveal(const Node* node) {

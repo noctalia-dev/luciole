@@ -10,6 +10,7 @@
 #include "clipboard/text_clipboard.h"
 #include "core/ui_phase.h"
 #include "fs/filename.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
@@ -52,7 +53,7 @@ void CreateController::showDocumentMenu(
   const auto shortcut = luciole::actionShortcutLabel(luciole::BrowserAction::CreateFile);
   std::vector<ContextMenuControlEntry> entries{
       {.id = -1,
-       .label = std::string(emptyFile.label),
+       .label = i18n::tr(emptyFile.label),
        .glyph = std::string(emptyFile.glyph),
        .shortcut = shortcut.empty() ? std::nullopt : std::optional(shortcut)},
       {.label = "", .separator = true}

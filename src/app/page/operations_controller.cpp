@@ -4,6 +4,7 @@
 #include "app/page/active_popup.h"
 #include "app/page/page_context.h"
 #include "clipboard/text_clipboard.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/builders.h"
@@ -72,7 +73,9 @@ void OperationsController::onFrame() {
   const bool failed = std::ranges::any_of(activities, [](const auto& item) { return item.failed(); });
   m_button->setGlyph(active ? "progress" : failed ? "alert-circle" : "progress-check");
   m_button->setBadge(active ? std::to_string(active) : "");
-  m_button->setTooltip(active ? std::format("File operations · {} active", active) : "File operations");
+  m_button->setTooltip(
+      active ? std::format("{} · {} active", i18n::text("File operations"), active) : i18n::text("File operations")
+  );
   if (m_view) {
     m_count = activities.size();
     m_clear->setEnabled(std::ranges::any_of(activities, [](const auto& item) { return item.finished; }));

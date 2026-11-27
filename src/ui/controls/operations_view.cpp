@@ -1,5 +1,6 @@
 #include "ui/controls/operations_view.h"
 
+#include "i18n/i18n.h"
 #include "render/scene/input_area.h"
 #include "ui/builders.h"
 #include "ui/controls/scroll_view.h"
@@ -45,8 +46,8 @@ public:
     m_summary->setUseMarkup(false);
   }
   void bind(const luciole::JobActivity& activity) {
-    m_title->setText(activity.title);
-    m_summary->setText(activity.summary);
+    m_title->setText(i18n::text(activity.title));
+    m_summary->setText(i18n::text(activity.summary));
     m_summary->setColor(colorSpecFromRole(activity.failed() ? ColorRole::Error : ColorRole::OnSurfaceVariant));
     m_glyph->setGlyph(
         activity.failed()                                         ? "alert-circle"

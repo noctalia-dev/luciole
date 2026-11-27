@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace i18n {
 
@@ -24,6 +27,24 @@ namespace i18n {
 
   using Catalog = std::unordered_map<std::string, std::string, StringHash, StringEq>;
 
+  // Maps a catalog key (the English source text) to its translation so that
+  // lookup() can resolve bare identity keys regardless of which purpose
+  // section (menu, view, settings, ...) they live in.
+  using TextIndex = std::unordered_map<std::string, std::string, StringHash, StringEq>;
+
+  // A copy keeps both catalogs and their plural rules alive across language changes.
+  class Translations {
+  public:
+    std::string_view lookup(std::string_view key) const;
+    std::string_view lookupPlural(std::string_view key, std::uint64_t count) const;
+
+  private:
+    friend class Service;
+    struct Loaded;
+    std::shared_ptr<const Loaded> m_active;
+    std::shared_ptr<const Loaded> m_fallback;
+  };
+
   // Loads translation catalogs and resolves dotted keys against them.
   // English is always loaded as a fallback alongside the active language.
   class Service {
@@ -40,16 +61,17 @@ namespace i18n {
     std::string_view language() const noexcept { return m_language; }
     std::string_view requestedLanguage() const noexcept { return m_requestedLanguage; }
     bool rtl() const noexcept { return m_rtl; }
+    std::vector<std::string> availableLanguages() const;
 
     // Returns a view into the active or fallback catalog, or {} if the key
     // exists in neither.
-    std::string_view lookup(std::string_view dottedKey) const;
+    std::string_view lookup(std::string_view key) const { return m_translations.lookup(key); }
+    const Translations& translations() const noexcept { return m_translations; }
 
   private:
-    bool loadCatalog(std::string_view lang, Catalog& out) const;
+    std::shared_ptr<const Translations::Loaded> loadCatalog(std::string_view lang) const;
 
-    Catalog m_active;
-    Catalog m_fallback;
+    Translations m_translations;
     std::string m_language;
     std::string m_requestedLanguage;
     bool m_rtl = false;

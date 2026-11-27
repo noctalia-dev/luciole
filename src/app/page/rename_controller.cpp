@@ -9,6 +9,7 @@
 #include "core/ui_phase.h"
 #include "fs/filename.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "operations/rename_service.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
@@ -239,7 +240,7 @@ void RenameController::openSeparatorHeading(std::size_t before) {
   if (m_page.popupSurface() != nullptr) {
     m_page.activePopup().bind(ActivePopup::Kind::SeparatorHeading, [this] { m_headingEditor = nullptr; });
     m_headingEditor = control;
-    control->input()->setPlaceholder("Heading");
+    control->input()->setPlaceholder(i18n::text("Heading"));
     m_page.popupDispatcher().setFocus(control->input()->inputArea());
     control->input()->selectAll();
   }
@@ -264,7 +265,7 @@ void RenameController::openPlaceIconPicker(const luciole::Bookmark& bookmark) {
       popup->requestUpdate();
     }
   });
-  picker->setTitle("Choose Bookmark Icon");
+  picker->setTitle(i18n::text("Choose Bookmark Icon"));
   picker->setInitialGlyph(initialGlyph);
   auto* control = picker.get();
   picker->setOnCancel([this] { m_page.dismissPopup(); });

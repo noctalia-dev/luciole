@@ -2,6 +2,7 @@
 
 #include "app/page/active_popup.h"
 #include "app/page/page_context.h"
+#include "i18n/i18n.h"
 #include "platform/file_launcher.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/browser/file_icon.h"
@@ -106,7 +107,10 @@ void ApplicationChooserController::show(const std::vector<luciole::DirectoryEntr
                [this, session] {
                  if (current(session) && !session->submitting) {
                    session->other = !session->other;
-                   m_other->setText(session->other ? "Show Suggested Applications" : "Show Other Applications");
+                   m_other->setText(
+                       session->other ? i18n::text("Show Suggested Applications")
+                                      : i18n::text("Show Other Applications")
+                   );
                    load();
                  }
                }}

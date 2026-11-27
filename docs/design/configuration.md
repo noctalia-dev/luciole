@@ -81,3 +81,24 @@ Commands are grouped into three independent scopes: Controls (dialogs and lists)
 Saving from Settings writes only commands that differ from the inherited configuration, so restoring a built-in default still overrides a custom `config.toml`; Reset All Settings restores every default. Specs flagged as fallback (Open in Other Pane `Ctrl+Alt+Return`, Open in New Window `Shift+Return`, Copy Path `Ctrl+Alt+C`, Copy URI `Ctrl+Alt+U`) have exactly one default chord and stay unassigned while another File Browser command uses it; an explicit assignment, even one equal to the default, follows the normal same-scope conflict rule.
 
 The archive viewer follows `cancel`, `focus_next`, `focus_previous`, `move_up`, `move_down`, `move_first`, `move_last`, `move_page_up`, `move_page_down`, `select_all`, `parent_folder`, `up` and `open`. `quit` is handled globally, including while an archive or menu popup is open. `select_tab_9` always selects the last tab. Other Escape handlers (file list focus, location bar, search completion, menus, previews, dialogs) follow `cancel`; `clear_selection` still clears the file list selection. Chord names accept `Next` and `Prior` as aliases for `Page_Down` and `Page_Up`, and `Ctrl+,` and `Ctrl++` as shorthands for `Ctrl+comma` and `Ctrl+plus`. Except for `validate` and `quick_preview`, printable keys need Ctrl, Alt or another modifier.
+
+## Plural forms in translation catalogs
+
+Each language file in `assets/translations/` defines `pluralRules` for nonnegative integer counts. Rules run in array order. The first match supplies the suffix appended to the translation key. An empty suffix selects the base key. The last rule has only a suffix and matches every remaining count.
+
+For example, the Ukrainian catalog checks the last two digits for 11 through 14 before checking the last digit.
+
+```json
+{
+  "pluralRules": [
+    {"mod": 100, "range": [11, 14], "suffix": "-many"},
+    {"mod": 10, "range": [1, 1], "suffix": ""},
+    {"mod": 10, "range": [2, 4], "suffix": "-few"},
+    {"suffix": "-many"}
+  ]
+}
+```
+
+`range` includes both endpoints. With `mod`, the comparison uses the remainder after division by that positive integer. Without `mod`, the comparison uses the entire count. For each counted word or message, supply a translation for every suffix used by that language. For example, `file`, `file-few` and `file-many` supply the Ukrainian forms. Messages may include `{count}`.
+
+If a translation is missing, the English catalog applies its own rules to the original count. A catalog without `pluralRules` uses the legacy base key for 1 and `-plural` for other counts. An invalid rule rejects that catalog and allows the usual regional or English fallback.

@@ -10,6 +10,7 @@
 #include "core/ui_phase.h"
 #include "fs/file_query.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "operations/permission_service.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
@@ -26,6 +27,7 @@
 #include "ui/controls/scroll_view.h"
 #include "ui/dialogs/dialog_chrome.h"
 #include "ui/palette.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 #include "wayland/popup_surface.h"
 #include "wayland/wayland_seat.h"
@@ -64,7 +66,7 @@ namespace {
       const auto& entry = targets.front();
       icon->bind(luciole::iconSource(entry.icon), colorSpecFromRole(ColorRole::OnSurface));
       title = entry.displayName();
-      caption = luciole::fileTypeDescription(entry.type, entry.symlink, entry.contentType);
+      caption = i18n::text(luciole::fileTypeDescription(entry.type, entry.symlink, entry.contentType));
     } else {
       const auto folders = static_cast<std::size_t>(std::ranges::count_if(targets, isFolder));
       const auto files = targets.size() - folders;
@@ -125,7 +127,7 @@ void PropertiesController::showDetails(bool shown) {
   m_permissionResults->setParticipatesInLayout(shown);
   m_permissionScroll->setVisible(!shown);
   m_permissionScroll->setParticipatesInLayout(!shown);
-  m_permissionDetails->setText(shown ? "Back" : "Details…");
+  m_permissionDetails->setText(shown ? i18n::text("Back") : i18n::text("Details…"));
   m_permissionDetails->setGlyph(shown ? "chevron-left" : "");
   m_permissionReport->setVisible(shown);
   m_permissionReport->setParticipatesInLayout(shown);
@@ -301,7 +303,9 @@ void PropertiesController::sync() {
       m_bulkAclEditor->sync(snapshot);
     }
     m_permissionSave->setEnabled(canApply() && !m_page.operationsBusy());
-    m_permissionSave->setText(snapshot.phase == luciole::PermissionPhase::Saving ? "Saving…" : "Apply");
+    m_permissionSave->setText(
+        snapshot.phase == luciole::PermissionPhase::Saving ? i18n::text("Saving…") : i18n::text("Apply")
+    );
     if (m_permissionResults) {
       m_permissionResults->sync(snapshot.results);
       const bool saving = snapshot.phase == luciole::PermissionPhase::Saving;
@@ -407,8 +411,7 @@ PropertiesController::buildGeneral(const std::vector<luciole::DirectoryEntry>& t
       field("Deleted", trash.deletionDate.value_or("Unknown"));
     }
     if (entry.type != luciole::FileType::Directory) {
-      const luciole::GString size(entry.size ? g_format_size_full(*entry.size, G_FORMAT_SIZE_IEC_UNITS) : nullptr);
-      field("Size", size ? size.get() : "Unknown");
+      field("Size", entry.size ? luciole::formatSizeWithLocalizedUnits(*entry.size) : "Unknown");
     }
     if (m_driveRoot) {
       const std::string filesystem = m_driveFilesystemInfo ? m_driveFilesystemInfo->type : std::string{};
@@ -800,7 +803,7 @@ void PropertiesController::show(
   }
   if (m_metadataView) {
     if (multiple) {
-      m_selectionMetadata.show(targets);
+      m_selectionMetadata.show(targets, luciole::localizedSizeUnits());
     } else {
       m_metadata.show(targets.front(), m_page.settings().thumbnails);
     }

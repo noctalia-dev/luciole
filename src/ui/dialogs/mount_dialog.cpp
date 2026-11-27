@@ -1,5 +1,6 @@
 #include "ui/dialogs/mount_dialog.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/input.h"
 #include "ui/controls/scroll_view.h"
@@ -74,7 +75,7 @@ MountDialog::MountDialog(
 }
 void MountDialog::submit(bool guest) {
   if (!guest && m_user && m_user->value().empty()) {
-    m_error->setText("Enter a username or connect as a guest.");
+    m_error->setText(i18n::text("Enter a username or connect as a guest."));
     markLayoutDirty();
     return;
   }
@@ -82,7 +83,7 @@ void MountDialog::submit(bool guest) {
       m_user ? m_user->value() : "", m_domain ? m_domain->value() : "", m_password ? m_password->value() : "", guest
   };
   if (!m_submit(std::move(credentials))) {
-    m_error->setText("This request is no longer active.");
+    m_error->setText(i18n::text("This request is no longer active."));
     markLayoutDirty();
   }
 }

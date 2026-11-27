@@ -5,6 +5,7 @@
 #include "browser/action_registry.h"
 #include "config/keybinds.h"
 #include "config/settings.h"
+#include "i18n/i18n.h"
 #include "ui/browser/action_shortcuts.h"
 #include "ui/builders.h"
 #include "ui/controls/scroll_view.h"
@@ -84,7 +85,7 @@ namespace {
 
   std::unique_ptr<Label> plainLabel(std::string_view text, float size, ColorSpec color, float grow) {
     return ui::label(
-        {.text = std::string(text),
+        {.text = i18n::text(text),
          .fontSize = size,
          .color = color,
          .maxLines = 2,
@@ -127,19 +128,19 @@ void ShortcutsController::open() {
     );
   };
   const bool singleWindow = m_page.settings().singleWindow;
-  heading("Files and Folders");
+  heading(i18n::text("Files and Folders"));
   for (const auto& [text, keys] : fileShortcuts()) {
-    row(singleWindow && text == "Open folder in a new window" ? "Open folder in a new tab" : text, keys);
+    row(i18n::text(singleWindow && text == "Open folder in a new window" ? "Open folder in a new tab" : text), keys);
   }
-  heading("Tabs and Windows");
+  heading(i18n::text("Tabs and Windows"));
   for (const auto& [text, keys] : windowShortcuts()) {
-    row(singleWindow && text == "New tab / new window" ? "New tab" : text, keys);
+    row(i18n::text(singleWindow && text == "New tab / new window" ? "New tab" : text), keys);
   }
-  heading("Commands");
+  heading(i18n::text("Commands"));
   for (const auto& definition : luciole::ActionRegistry::definitions()) {
     const std::string keys = luciole::actionShortcutLabel(definition.action);
     if (!keys.empty()) {
-      row(definition.label, keys);
+      row(i18n::tr(definition.label), keys);
     }
   }
   auto root = ui::column(

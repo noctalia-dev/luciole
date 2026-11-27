@@ -1,10 +1,34 @@
 #include "ui/controls/file_metadata_view.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/label.h"
 #include "ui/style.h"
 
 #include <algorithm>
+#include <string_view>
+
+namespace {
+  std::string metadataValue(const luciole::MetadataField& field) {
+    if (field.label == "Color" || field.label == "Orientation") {
+      return i18n::text(field.value);
+    }
+    const std::string_view value(field.value);
+    const auto withUnit = [&](std::string_view suffix, std::string_view pattern) {
+      if (value.ends_with(suffix) && !i18n::Service::instance().lookup(pattern).empty()) {
+        return i18n::tr(pattern, "value", value.substr(0, value.size() - suffix.size()));
+      }
+      return field.value;
+    };
+    if (field.label == "Pixel size" || field.label == "Frame size") {
+      return withUnit(" px", "{value} px");
+    }
+    if (field.label == "Bit depth" || field.label == "Audio depth") {
+      return withUnit("-bit", "{value}-bit");
+    }
+    return field.value;
+  }
+} // namespace
 
 FileMetadataView::FileMetadataView() {
   setDirection(FlexDirection::Vertical);
@@ -56,10 +80,10 @@ void FileMetadataView::sync(std::span<const luciole::MetadataField> fields, floa
     auto& row = m_rows[count++];
     row.container->setVisible(true);
     row.container->setParticipatesInLayout(true);
-    row.key->setText(field.label);
+    row.key->setText(i18n::text(field.label));
     row.key->setMinWidth(keyWidth);
     row.key->setMaxWidth(keyWidth);
-    row.value->setText(field.value);
+    row.value->setText(metadataValue(field));
     row.value->setMaxWidth(std::max(1.0F, width - keyWidth - Style::spaceSm));
   }
   for (std::size_t i = count; i < m_rows.size(); ++i) {

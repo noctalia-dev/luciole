@@ -1,5 +1,6 @@
 #include "ui/builders.h"
 
+#include "i18n/i18n.h"
 #include "ui/controls/scroll_view.h"
 
 #include <utility>
@@ -159,7 +160,7 @@ namespace ui {
       control->setTextInputClient(props.textInputClient);
     }
     if (props.tooltip.has_value()) {
-      control->setTooltip(std::move(*props.tooltip));
+      control->setTooltip(i18n::text(*props.tooltip));
     }
     if (props.tooltipRows.has_value()) {
       control->setTooltip(std::move(*props.tooltipRows));
@@ -228,7 +229,7 @@ namespace ui {
       control->setValue(*props.value);
     }
     if (props.placeholder.has_value()) {
-      control->setPlaceholder(*props.placeholder);
+      control->setPlaceholder(i18n::text(*props.placeholder));
     }
     if (props.fontSize.has_value()) {
       control->setFontSize(*props.fontSize);
@@ -300,7 +301,7 @@ namespace ui {
   std::unique_ptr<Button> button(ButtonProps props) {
     auto control = std::make_unique<Button>();
     if (props.text.has_value()) {
-      control->setText(*props.text);
+      control->setText(i18n::text(*props.text));
     }
     if (props.glyph.has_value()) {
       control->setGlyph(*props.glyph);
@@ -360,7 +361,7 @@ namespace ui {
       control->setBadgeFontSize(*props.badgeFontSize);
     }
     if (props.tooltip.has_value()) {
-      control->setTooltip(*props.tooltip);
+      control->setTooltip(i18n::text(*props.tooltip));
     }
     if (props.minWidth.has_value()) {
       control->setMinWidth(*props.minWidth);
@@ -413,7 +414,7 @@ namespace ui {
   std::unique_ptr<Label> label(LabelProps props) {
     auto control = std::make_unique<Label>();
     if (props.text.has_value()) {
-      control->setText(*props.text);
+      control->setText(i18n::text(*props.text));
     }
     if (props.fontSize.has_value()) {
       control->setFontSize(*props.fontSize);
@@ -559,7 +560,7 @@ namespace ui {
       control->clearSelection();
     }
     if (props.placeholder.has_value()) {
-      control->setPlaceholder(*props.placeholder);
+      control->setPlaceholder(i18n::text(*props.placeholder));
     }
     if (props.fontSize.has_value()) {
       control->setFontSize(*props.fontSize);

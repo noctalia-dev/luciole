@@ -1,6 +1,7 @@
 #include "ui/controls/file_preview_view.h"
 
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "ui/browser/preview_layout.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
@@ -10,6 +11,7 @@
 #include "ui/controls/label.h"
 #include "ui/dialogs/dialog_chrome.h"
 #include "ui/palette.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 
 #include <algorithm>
@@ -162,12 +164,12 @@ void FilePreviewView::sync(
   // The quick preview titles itself with the file name; the docked pane names it in the body. The empty-state hint
   // reads as plain secondary text.
   if (m_quick) {
-    m_heading->setText(entry ? entry->displayName() : "Preview");
+    m_heading->setText(entry ? entry->displayName() : i18n::text("Preview"));
   }
   const bool showName = !m_quick || !entry;
   m_name->setVisible(showName);
   m_name->setParticipatesInLayout(showName);
-  m_name->setText(entry ? entry->displayName() : "Select an item to preview");
+  m_name->setText(entry ? entry->displayName() : i18n::text("Select an item to preview"));
   m_name->setFontWeight(entry ? FontWeight::SemiBold : FontWeight::Normal);
   m_name->setColor(colorSpecFromRole(entry ? ColorRole::OnSurface : ColorRole::OnSurfaceVariant));
   luciole::MetadataFields metadata;
@@ -176,10 +178,9 @@ void FilePreviewView::sync(
     const auto type = !typeLabel.empty()
         ? std::string(typeLabel)
         : luciole::fileTypeDescription(entry->type, entry->symlink, entry->contentType);
-    metadata.push_back({"Type", type});
+    metadata.push_back({"Type", i18n::text(type)});
     if (entry->size && entry->type != luciole::FileType::Directory) {
-      const luciole::GString size(g_format_size_full(*entry->size, G_FORMAT_SIZE_IEC_UNITS));
-      metadata.push_back({"File Size", size.get()});
+      metadata.push_back({"File Size", luciole::formatSizeWithLocalizedUnits(*entry->size)});
     }
     if (snapshot.totals.phase != luciole::FolderTotalsPhase::Idle) {
       metadata.push_back({"Contents", folderContentsLine(snapshot.totals)});

@@ -69,6 +69,8 @@ namespace luciole {
     DetailsColumnWidths columnWidths = kDefaultDetailsColumnWidths;
     ThumbnailOptions thumbnails;
     std::string terminalCommand;
+    // Empty selects the system language; supported explicit values include en and uk.
+    std::string language;
     KeybindConfig keybinds;
     bool operator==(const BrowserSettings&) const = default;
   };
@@ -168,6 +170,7 @@ namespace luciole {
     ThumbnailMaxFileMib,
     ThumbnailCacheMib,
     TerminalCommand,
+    Language,
     Keybinds,
     Count
   };
@@ -272,6 +275,7 @@ namespace luciole {
     static constexpr PreferenceKey<int> ThumbnailMaxFileMib{Id::ThumbnailMaxFileMib};
     static constexpr PreferenceKey<int> ThumbnailCacheMib{Id::ThumbnailCacheMib};
     static constexpr PreferenceKey<luciole::KeybindConfig> Keybinds{Id::Keybinds};
+    static constexpr PreferenceKey<std::string> Language{Id::Language};
   };
 
   // The BrowserSettings field a preference reads and writes.

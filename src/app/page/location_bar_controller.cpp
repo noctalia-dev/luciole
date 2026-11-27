@@ -9,6 +9,7 @@
 #include "config/keybinds.h"
 #include "config/settings.h"
 #include "core/input/key_symbols.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/builders.h"
@@ -125,7 +126,7 @@ std::unique_ptr<Flex> LocationBarController::buildSearchArea() {
                    m_page.browser().setSearchComposing(composing);
                  });
                  input.setClearButtonWidth(24.0F);
-                 input.inputArea()->setTooltip("Search names in this folder and all subfolders");
+                 input.inputArea()->setTooltip(i18n::text("Search names in this folder and all subfolders"));
                  input.setOnFocusGain([this] {
                    m_filterOpen = true;
                    m_page.requestSync();
@@ -342,12 +343,13 @@ void LocationBarController::sync() {
   const bool recursive = m_page.browser().searchRecursive();
   m_scopeButton->setGlyph(recursive ? "search" : "filter");
   m_scopeButton->setTooltip(
-      recursive ? "Searching subfolders: click to filter the current folder only"
-                : "Filtering the current folder: click to search subfolders"
+      recursive ? i18n::text("Searching subfolders: click to filter the current folder only")
+                : i18n::text("Filtering the current folder: click to search subfolders")
   );
-  m_filterInput->setPlaceholder(recursive ? "Search files…" : "Filter files…");
+  m_filterInput->setPlaceholder(recursive ? i18n::text("Search files…") : i18n::text("Filter files…"));
   m_filterInput->inputArea()->setTooltip(
-      recursive ? "Search names in this folder and all subfolders" : "Filter names in the current folder only"
+      recursive ? i18n::text("Search names in this folder and all subfolders")
+                : i18n::text("Filter names in the current folder only")
   );
   if (!m_filterInput->composing() && m_filterInput->value() != m_page.browser().searchQuery()) {
     m_filterInput->setValue(m_page.browser().searchQuery());
@@ -697,7 +699,7 @@ void LocationBarController::rebuildBreadcrumbs() {
            .glyphSize = Style::baseGlyphSize,
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Ghost,
-           .tooltip = "Parent folders",
+           .tooltip = i18n::text("Parent folders"),
            .paddingH = Style::spaceSm,
            .onClick = [this] { openBreadcrumbOverflow(); }}
       )
@@ -711,11 +713,11 @@ void LocationBarController::rebuildBreadcrumbs() {
     const auto target = crumbs[i].location;
     auto* partButton = static_cast<Button*>(m_breadcrumbs->addChild(
         ui::button(
-            {.text = crumbs[i].label,
+            {.text = i18n::text(crumbs[i].label),
              .controlHeight = Style::controlHeightSm,
              .contentAlign = ButtonContentAlign::Start,
              .variant = ButtonVariant::Ghost,
-             .tooltip = crumbs[i].label,
+             .tooltip = i18n::text(crumbs[i].label),
              .maxWidth = 160.0F,
              .paddingH = Style::spaceSm,
              .onClick = [this, target] { breadcrumbClick(target); },

@@ -4,6 +4,7 @@
 #include "core/input/key_symbols.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "fs/location.h"
+#include "i18n/i18n.h"
 #include "ui/browser/file_view_metrics.h"
 #include "ui/builders.h"
 
@@ -200,7 +201,7 @@ void MillerView::synchronize() {
     handle->setZIndex(5);
     handle->setFocusable(true);
     handle->setTabStop(true);
-    handle->setTooltip("Resize column; Left/Right adjusts, Home resets");
+    handle->setTooltip(i18n::text("Resize column; Left/Right adjusts, Home resets"));
     handle->setCursorShape(WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_COL_RESIZE);
     handle->setOnPress([this, id](const InputArea::PointerData& data) {
       const auto index = indexOf(id);

@@ -1,5 +1,6 @@
 #include "ui/controls/segmented.h"
 
+#include "i18n/i18n.h"
 #include "render/core/render_styles.h"
 #include "render/scene/input_area.h"
 #include "ui/controls/button.h"
@@ -200,7 +201,7 @@ Segmented::makeSegmentButton(std::string_view label, std::string_view glyph, std
     btn->setGlyphSize(effectiveFontSize());
   }
   if (!label.empty()) {
-    btn->setText(label);
+    btn->setText(i18n::text(label));
     btn->setFontSize(effectiveFontSize());
   }
   applyButtonMetrics(*btn);

@@ -1,5 +1,6 @@
 #include "ui/dialogs/archive_dialog.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/input.h"
 #include "ui/controls/label.h"
@@ -141,7 +142,7 @@ void ArchiveDialog::submit() {
       return;
     }
     if (password != m_confirmation->value()) {
-      m_error->setText("Passwords do not match.");
+      m_error->setText(i18n::text("Passwords do not match."));
       return;
     }
   }
@@ -210,13 +211,13 @@ ArchivePasswordDialog::ArchivePasswordDialog(
 void ArchivePasswordDialog::submit() {
   const auto& password = m_password->value();
   if (password.empty()) {
-    m_error->setText("Enter a password.");
+    m_error->setText(i18n::text("Enter a password."));
   } else if (const auto problem = luciole::archivePasswordProblem(password, m_format)) {
     m_error->setText(*problem);
   } else if (m_submit(password)) {
     m_password->setValue("");
   } else {
-    m_error->setText("This password request is no longer active.");
+    m_error->setText(i18n::text("This password request is no longer active."));
   }
   markLayoutDirty();
 }

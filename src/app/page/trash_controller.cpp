@@ -8,12 +8,14 @@
 #include "core/input/key_symbols.h"
 #include "core/ui_phase.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/browser/file_error_text.h"
 #include "ui/builders.h"
 #include "ui/dialogs/dialog_chrome.h"
 #include "ui/palette.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 #include "wayland/popup_surface.h"
 #include "wayland/wayland_seat.h"
@@ -66,9 +68,8 @@ void TrashController::restoreChanged(OperationJob& job) {
       return std::ranges::count(results, outcome, &luciole::RestoreResult::outcome);
     };
     const auto restored = count(luciole::RestoreOutcome::Restored);
-    std::string message = std::format(
-        "{} item{} {}", restored, restored == 1 ? "" : "s", restore.moving() ? "moved out of Trash" : "restored"
-    );
+    std::string message =
+        i18n::trp(restore.moving() ? "operations.moved-out-of-trash" : "operations.restored", restored);
     for (const auto& [outcome, label] :
          {std::pair{luciole::RestoreOutcome::Skipped, "skipped"}, std::pair{luciole::RestoreOutcome::Failed, "failed"},
           std::pair{luciole::RestoreOutcome::Cancelled, "cancelled"},
@@ -178,7 +179,7 @@ void TrashController::openEmptyTrash(std::optional<std::vector<luciole::Director
     if (!(outsideTrash    ? emptyTrash.prepareDeletion(std::move(*selection))
               : selection ? emptyTrash.prepareSelection(std::move(*selection))
                           : emptyTrash.prepare())) {
-      message->setText("Another deletion is still finishing.");
+      message->setText(i18n::text("Another deletion is still finishing."));
     }
   }
 }
@@ -231,7 +232,7 @@ void TrashController::emptyTrashChanged(OperationJob& job) {
       return std::ranges::count(snapshot.results, outcome, &luciole::EmptyTrashResult::outcome);
     };
     const auto done = count(luciole::EmptyTrashOutcome::Deleted);
-    std::string message = std::format("{} item{} permanently deleted", done, done == 1 ? "" : "s");
+    std::string message = i18n::trp("operations.deleted", done);
     for (const auto& [outcome, label] :
          {std::pair{luciole::EmptyTrashOutcome::Skipped, "skipped"},
           std::pair{luciole::EmptyTrashOutcome::Failed, "failed"},
@@ -269,18 +270,14 @@ void TrashController::syncEmptyTrash() {
   if (snapshot.status == luciole::EmptyTrashStatus::Ready) {
     const auto count = snapshot.results.size();
     if (count == 0) {
-      m_emptyTrashMessage->setText("Trash is already empty.");
+      m_emptyTrashMessage->setText(i18n::text("Trash is already empty."));
     } else if (snapshot.selection) {
       m_emptyTrashMessage->setText(
           count == 1 ? "This item will be permanently deleted. This cannot be undone."
                      : "These items will be permanently deleted. This cannot be undone."
       );
     } else {
-      m_emptyTrashMessage->setText(
-          std::format(
-              "Permanently delete {} item{} and their contents? This cannot be undone.", count, count == 1 ? "" : "s"
-          )
-      );
+      m_emptyTrashMessage->setText(i18n::trp("operations.confirm-delete", count));
     }
     m_emptyTrashConfirm->setEnabled(emptyTrash.canEmpty());
   } else if (snapshot.status == luciole::EmptyTrashStatus::Error) {
@@ -292,8 +289,9 @@ void TrashController::syncEmptyTrash() {
   }
   std::string sizeText = "Size: calculating…";
   if (snapshot.size) {
-    const luciole::GString value(g_format_size_full(*snapshot.size, G_FORMAT_SIZE_IEC_UNITS));
-    sizeText = std::format("Size: {}{}", snapshot.sizeIncomplete ? "at least " : "", value.get());
+    sizeText = std::format(
+        "Size: {}{}", snapshot.sizeIncomplete ? "at least " : "", luciole::formatSizeWithLocalizedUnits(*snapshot.size)
+    );
   } else if (!emptyTrash.busy()) {
     sizeText = "Size unavailable";
   }
@@ -319,7 +317,7 @@ void TrashController::trashChanged(OperationJob& job) {
         std::ranges::count(snapshot.results, luciole::TrashOutcome::Failed, &luciole::TrashResult::outcome);
     const auto cancelled =
         std::ranges::count(snapshot.results, luciole::TrashOutcome::Cancelled, &luciole::TrashResult::outcome);
-    std::string message = std::format("{} item{} moved to Trash", done, done == 1 ? "" : "s");
+    std::string message = i18n::trp("operations.trashed", done);
     if (failed != 0) {
       message += std::format(" · {} failed", failed);
     }

@@ -1,8 +1,11 @@
 #pragma once
 
 #include "fs/directory_session.h"
+#include "model/size_format.h"
 
+#include <array>
 #include <span>
+#include <string>
 #include <utility>
 
 namespace luciole {
@@ -15,7 +18,7 @@ namespace luciole {
     ~SelectionDetailsService();
     SelectionDetailsService(const SelectionDetailsService&) = delete;
     SelectionDetailsService& operator=(const SelectionDetailsService&) = delete;
-    void show(std::span<const DirectoryEntry> entries);
+    void show(std::span<const DirectoryEntry> entries, const SizeUnits& units = {});
     void clear();
     void setChangedCallback(std::function<void()> changed);
     const SelectionFacts& fields() const;

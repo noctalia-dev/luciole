@@ -1,6 +1,7 @@
 #include "ui/controls/glyph_picker.h"
 
 #include "cursor-shape-v1-client-protocol.h"
+#include "i18n/i18n.h"
 #include "render/text/glyph_registry.h"
 #include "ui/builders.h"
 #include "ui/controls/tooltip_presenter.h"
@@ -160,9 +161,13 @@ GlyphPicker::GlyphPicker(std::function<void()> requestTooltipUpdate) {
   );
 
   m_adapter = std::make_unique<GlyphGridAdapter>();
-  m_categoryOptions.reserve(m_adapter->categories().size() + 1);
-  m_categoryOptions.emplace_back("All Categories");
-  m_categoryOptions.insert(m_categoryOptions.end(), m_adapter->categories().begin(), m_adapter->categories().end());
+  const auto& categories = m_adapter->categories();
+  m_categoryOptions.reserve(categories.size() + 1);
+  m_categoryContexts = categories;
+  m_categoryOptions.emplace_back(i18n::text("All Categories"));
+  for (const auto& category : categories) {
+    m_categoryOptions.emplace_back(i18n::text(category));
+  }
   addChild(
       ui::row(
           {
@@ -171,7 +176,7 @@ GlyphPicker::GlyphPicker(std::function<void()> requestTooltipUpdate) {
           },
           ui::input({
               .out = &m_searchInput,
-              .placeholder = "Search icons by name",
+              .placeholder = i18n::text("Search icons by name"),
               .clearButtonEnabled = true,
               .flexGrow = 1.0F,
               .onChange = [this](const std::string& value) { applyFilter(value); },
@@ -279,7 +284,7 @@ GlyphPicker::~GlyphPicker() {
 
 void GlyphPicker::setTitle(std::string_view title) {
   if (m_title != nullptr) {
-    m_title->setText(title.empty() ? "Choose Icon" : std::string(title));
+    m_title->setText(title.empty() ? i18n::text("Choose Icon") : std::string(title));
   }
 }
 
@@ -378,7 +383,7 @@ void GlyphPicker::applyFilter(const std::string& filter) {
     return;
   }
   const std::string category = m_categorySelect != nullptr && m_categorySelect->selectedIndex() > 0
-      ? m_categoryOptions[m_categorySelect->selectedIndex()]
+      ? m_categoryContexts[m_categorySelect->selectedIndex() - 1]
       : std::string{};
   const auto previousResult = currentResult();
   m_adapter->rebuildVisible(filter, category);
@@ -400,7 +405,7 @@ void GlyphPicker::syncSelection() {
     m_applyButton->setEnabled(m_enabled && result.has_value());
   }
   if (m_selectedName != nullptr) {
-    m_selectedName->setText(result ? result->name : "Select an icon");
+    m_selectedName->setText(result ? result->name : i18n::text("Select an icon"));
     m_selectedName->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
   }
 }

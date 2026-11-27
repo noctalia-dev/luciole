@@ -2,6 +2,8 @@
 
 #include "fs/file_query.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
+#include "ui/size_format.h"
 
 #include <format>
 #include <utility>
@@ -98,18 +100,24 @@ std::vector<TooltipRow> luciole::FileTooltipData::rows() const {
   if (!state.target) {
     return {};
   }
-  std::vector<TooltipRow> rows{{"Name", state.details.displayName.value_or(state.target->entry.displayName())}};
+  std::vector<TooltipRow> rows{
+      {i18n::text("Name"), state.details.displayName.value_or(state.target->entry.displayName())}
+  };
   if (!state.error.empty()) {
-    rows.push_back({"Status", state.error});
+    rows.push_back({i18n::text("Status"), i18n::text(state.error)});
     return rows;
   }
-  rows.push_back({"Type", state.details.typeDescription.value_or("Unknown")});
+  rows.push_back({i18n::text("Type"), i18n::text(state.details.typeDescription.value_or("Unknown"))});
   if (state.details.type != FileType::Directory) {
-    rows.push_back({"Size", state.details.size ? std::format("{} bytes", *state.details.size) : "Unknown"});
+    rows.push_back(
+        {i18n::text("Size"),
+         state.details.size ? luciole::formatByteCount(*state.details.size, luciole::localizedSizeUnits())
+                            : i18n::text("Unknown")}
+    );
   }
-  rows.push_back({"Modified", modified(state.details.modifiedSeconds)});
+  rows.push_back({i18n::text("Modified"), modified(state.details.modifiedSeconds)});
   if (state.details.linkTarget) {
-    rows.push_back({"Target", *state.details.linkTarget, TextEllipsize::Middle});
+    rows.push_back({i18n::text("Target"), *state.details.linkTarget, TextEllipsize::Middle});
   }
   return rows;
 }

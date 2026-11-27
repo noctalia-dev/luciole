@@ -1,6 +1,7 @@
 #include "ui/controls/context_menu.h"
 
 #include "core/ui_phase.h"
+#include "i18n/i18n.h"
 #include "render/scene/input_area.h"
 #include "ui/builders.h"
 #include "ui/controls/box.h"
@@ -120,6 +121,11 @@ namespace {
 ContextMenuControl::ContextMenuControl() : Node(NodeType::Base) {}
 
 void ContextMenuControl::setEntries(std::vector<ContextMenuControlEntry> entries) {
+  for (auto& entry : entries) {
+    if (!entry.label.empty()) {
+      entry.label = i18n::text(entry.label);
+    }
+  }
   m_entries = std::move(entries);
   m_highlightedIndex = firstInteractiveIndex();
   m_needsRebuild = true;

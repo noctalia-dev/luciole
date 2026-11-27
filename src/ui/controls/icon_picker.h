@@ -73,6 +73,9 @@ private:
 
   Select* m_scopeSelect = nullptr;
   std::vector<std::string> m_scopeOptions;
+  // Raw theme-context names, one per m_scopeOptions entry between "Folders Only" and "Unthemed";
+  // the dropdown shows translated labels, filtering compares against these.
+  std::vector<std::string> m_scopeContexts;
   std::optional<std::string> m_pendingInitialIcon;
   bool m_pendingInitialApplied = false;
   bool m_enabled = true;

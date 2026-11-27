@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <format>
 #include <span>
 #include <string>
@@ -19,7 +20,8 @@
 //
 // Trailing arguments are alternating name/value pairs. Values may be any type
 // formattable by std::format; names must be convertible to string_view.
-// A missing key renders as "!!key!!" so untranslated strings are visible.
+// Missing keys fall back to their identifier so production UI never exposes
+// diagnostic markers such as "!!key!!".
 
 namespace i18n {
 
@@ -46,6 +48,24 @@ namespace i18n {
       }
     }
 
+    template <typename... Args>
+    std::string formatTranslation(std::string_view key, std::string_view raw, Args&&... args) {
+      static_assert(
+          sizeof...(Args) % 2 == 0, "i18n::tr() requires an even number of trailing args (name, value pairs)"
+      );
+      if (raw.empty()) {
+        return std::string(key);
+      }
+      if constexpr (sizeof...(Args) == 0) {
+        return std::string(raw);
+      } else {
+        constexpr std::size_t kPairs = sizeof...(Args) / 2;
+        std::array<detail::Pair, kPairs> pairs;
+        detail::fillPairs(pairs.data(), 0, std::forward<Args>(args)...);
+        return detail::interpolate(raw, std::span<const detail::Pair>(pairs.data(), pairs.size()));
+      }
+    }
+
   } // namespace detail
 
   // Convert a snake_case config/wire identifier into the dash-case segment used
@@ -57,28 +77,20 @@ namespace i18n {
   }
 
   template <typename... Args> std::string tr(std::string_view key, Args&&... args) {
-    static_assert(sizeof...(Args) % 2 == 0, "i18n::tr() requires an even number of trailing args (name, value pairs)");
-    auto raw = Service::instance().lookup(key);
-    if (raw.empty()) {
-      return std::format("!!{}!!", key);
-    }
-    if constexpr (sizeof...(Args) == 0) {
-      return std::string(raw);
-    } else {
-      constexpr std::size_t kPairs = sizeof...(Args) / 2;
-      std::array<detail::Pair, kPairs> pairs;
-      detail::fillPairs(pairs.data(), 0, std::forward<Args>(args)...);
-      return detail::interpolate(raw, std::span<const detail::Pair>(pairs.data(), pairs.size()));
-    }
+    return detail::formatTranslation(key, Service::instance().lookup(key), std::forward<Args>(args)...);
   }
 
-  template <typename... Args> std::string trp(std::string_view key, long count, Args&&... args) {
-    if (count == 1) {
-      return tr(key, "count", count, std::forward<Args>(args)...);
-    }
-    std::string realKey(key);
-    realKey += "-plural";
-    return tr(std::string_view(realKey), "count", count, std::forward<Args>(args)...);
+  // Translates a user-facing English message when a catalog entry exists and
+  // otherwise preserves the original text. This is useful for messages that
+  // are assembled by lower-level services and must remain safe to display.
+  inline std::string text(std::string_view original) {
+    const auto translated = Service::instance().lookup(original);
+    return translated.empty() ? std::string(original) : std::string(translated);
+  }
+
+  template <typename... Args> std::string trp(std::string_view key, std::uint64_t count, Args&&... args) {
+    const auto raw = Service::instance().translations().lookupPlural(key, count);
+    return detail::formatTranslation(key, raw, "count", count, std::forward<Args>(args)...);
   }
 
 } // namespace i18n

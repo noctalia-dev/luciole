@@ -1,5 +1,6 @@
 #include "ui/dialogs/dialog_chrome.h"
 
+#include "i18n/i18n.h"
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
 #include "ui/builders.h"
@@ -23,7 +24,7 @@ namespace luciole {
         ui::glyph({.glyph = glyph, .color = colorSpecFromRole(ColorRole::Primary)}),
         ui::label(
             {.out = titleOut,
-             .text = title,
+             .text = i18n::text(title),
              .fontSize = Style::fontSizeTitle,
              .fontWeight = FontWeight::SemiBold,
              .maxLines = 1,
@@ -40,7 +41,7 @@ namespace luciole {
              .glyphSize = Style::baseGlyphSize,
              .controlHeight = 24.0F,
              .variant = ButtonVariant::Ghost,
-             .tooltip = "Close",
+             .tooltip = i18n::text("Close"),
              .followsCloseButtons = true,
              .padding = Style::spaceXs,
              .width = 24.0F,

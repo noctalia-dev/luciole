@@ -6,12 +6,14 @@
 #include "core/log.h"
 #include "fs/entry_access.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "model/details_columns.h"
 #include "render/animation/animation_manager.h"
 #include "ui/browser/file_icon.h"
 #include "ui/browser/file_view_metrics.h"
 #include "ui/builders.h"
 #include "ui/controls/selection_contour.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 
 #include <algorithm>
@@ -41,20 +43,10 @@ namespace {
   }
 
   std::string fileSize(const luciole::DirectoryEntry& entry) {
-    std::string size;
-    if (entry.type != luciole::FileType::Directory && entry.size) {
-      constexpr const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
-      auto value = static_cast<double>(*entry.size);
-      std::size_t unit = 0;
-      while (value >= 1024 && unit + 1 < std::size(units)) {
-        value /= 1024;
-        ++unit;
-      }
-      size = unit == 0 ? std::format("{} B", *entry.size) : std::format("{:.1f} {}", value, units[unit]);
-    } else if (entry.type != luciole::FileType::Directory) {
-      size = "Unknown";
+    if (entry.type == luciole::FileType::Directory) {
+      return {};
     }
-    return size;
+    return entry.size ? luciole::formatSizeWithLocalizedUnits(*entry.size) : "Unknown";
   }
   // Adapted from Noctalia's FileEntryRow, with URI-backed entries and model selection.
   class FileRow final : public InputArea {
@@ -143,7 +135,8 @@ namespace {
         const bool folderSizeCell = directory && !entry.symlink && column == luciole::DetailsColumn::Size;
         label->setText(
             columns.visible(column)
-                ? (folderSizeCell ? std::string(folderSize) : luciole::entryColumnText(entry, column, typeLabel))
+                ? (folderSizeCell ? std::string(folderSize)
+                                  : luciole::entryColumnText(entry, column, typeLabel, luciole::localizedSizeUnits()))
                 : ""
         );
         label->setOpacity(entry.hidden && !selected ? kHiddenTextOpacity : 1.0F);
@@ -430,7 +423,8 @@ std::string luciole::FileViewAdapter::itemTooltip(std::size_t index) const {
   }
   const auto id = model.rows()[index];
   const auto* entry = model.entry(id);
-  return entry != nullptr ? std::format("{}\n{}", entry->displayName(), model.typeLabel(id)) : std::string{};
+  return entry != nullptr ? std::format("{}\n{}", entry->displayName(), i18n::text(model.typeLabel(id)))
+                          : std::string{};
 }
 
 void luciole::FileViewAdapter::setTileVisible(Node& tile, bool visible) {
@@ -507,10 +501,11 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
     // The keyboard cursor stays visible inside a multi-selection; a lone selected item shows only its fill.
     const auto& selection = model.selection();
     const bool ring = m_focused() && selection.focused == id && (!selected || selection.selected.size() != 1);
+    const auto typeLabel = i18n::text(model.typeLabel(id));
     if (m_mode == ViewMode::Grid) {
       static_cast<FileTile&>(tile).bind(
-          *entry, model.typeLabel(id), selected, ring, hovered, m_gridIconSize, m_cut && m_cut(entry->location()),
-          m_presentation, readOnly
+          *entry, typeLabel, selected, ring, hovered, m_gridIconSize, m_cut && m_cut(entry->location()), m_presentation,
+          readOnly
       );
     } else {
       std::string folderSize;
@@ -518,12 +513,12 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
       if (entry->type == luciole::FileType::Directory && !entry->symlink && m_folderSizes && sizeColumnVisible) {
         m_browser.requestFolderSize(id);
         if (const auto* totals = m_browser.folderSize(id)) {
-          folderSize = entryFolderSizeText(*totals);
+          folderSize = luciole::entryFolderSizeText(*totals, luciole::localizedSizeUnits());
         }
       }
       static_cast<FileRow&>(tile).bind(
-          *entry, model.typeLabel(id), selected, ring, hovered, m_columns, m_columnOrder,
-          m_cut && m_cut(entry->location()), m_pathEntry == id && !m_columnActive,
+          *entry, typeLabel, selected, ring, hovered, m_columns, m_columnOrder, m_cut && m_cut(entry->location()),
+          m_pathEntry == id && !m_columnActive,
           m_mode == ViewMode::Miller ? millerRowIconSize(m_presentation, m_rowIconSize)
                                      : fileRowIconSize(m_rowIconSize),
           m_presentation, readOnly, m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}, folderSize

@@ -69,6 +69,9 @@ private:
 
   Select* m_categorySelect = nullptr;
   std::vector<std::string> m_categoryOptions;
+  // Raw category names, one per m_categoryOptions entry after "All Categories";
+  // the dropdown shows translated labels, filtering compares against these.
+  std::vector<std::string> m_categoryContexts;
   std::optional<std::string> m_pendingInitialGlyph;
   bool m_pendingInitialApplied = false;
   bool m_enabled = true;

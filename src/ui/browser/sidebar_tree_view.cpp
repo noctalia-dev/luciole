@@ -2,6 +2,7 @@
 
 #include "browser/location_presentation.h"
 #include "config/keybinds.h"
+#include "i18n/i18n.h"
 #include "ui/browser/drive_glyph.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
@@ -231,7 +232,7 @@ void luciole::SidebarTreeView::setRoots(
         .size = {},
         .modifiedSeconds = {},
     };
-    entry.setDisplayName(pin.label);
+    entry.setDisplayName(i18n::text(pin.label));
     entries.push_back(std::move(entry));
   }
   for (const auto& drive : drives) {

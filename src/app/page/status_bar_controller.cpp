@@ -7,10 +7,12 @@
 #include "browser/browser_controller.h"
 #include "browser/places.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/animation/animation_manager.h"
 #include "ui/builders.h"
 #include "ui/palette.h"
+#include "ui/size_format.h"
 
 #include <algorithm>
 #include <cmath>
@@ -33,6 +35,7 @@ StatusBarController::StatusBarController(
 StatusBarController::~StatusBarController() { m_animations.cancelForOwner(this); }
 
 void StatusBarController::setMessage(std::string message) {
+  message = i18n::text(message);
   m_actionError = std::move(message);
   if (m_actionError.empty()) {
     m_messageTimer.stop();
@@ -150,10 +153,10 @@ void StatusBarController::sync(bool miller) {
   if (!m_actionError.empty()) {
     message = m_actionError;
   } else if (!m_pins.sessionError().empty()) {
-    message = std::format("Could not save session: {}", m_pins.sessionError());
+    message = std::format("{}: {}", i18n::text("Could not save session"), m_pins.sessionError());
     role = ColorRole::Error;
   } else if (!m_pins.error().empty()) {
-    message = std::format("Could not update pins: {}", m_pins.error());
+    message = std::format("{}: {}", i18n::text("Could not update pins"), m_pins.error());
     role = ColorRole::Error;
   } else if (!m_settings.error().empty()) {
     message = m_settings.error();
@@ -165,20 +168,21 @@ void StatusBarController::sync(bool miller) {
     role = ColorRole::Error;
   } else if (!m_page.browser().searchQuery().empty()) {
     status = std::format(
-        "{}{} results",
-        loading                                                      ? "Searching… · "
-            : snapshot.status == luciole::DirectoryStatus::Cancelled ? "Search stopped · "
+        "{}{} {}",
+        loading                                                      ? i18n::text("Searching… · ")
+            : snapshot.status == luciole::DirectoryStatus::Cancelled ? i18n::text("Search stopped · ")
                                                                      : "",
-        model.rows().size()
+        model.rows().size(), i18n::trp("result", model.rows().size())
     );
     if (m_page.browser().skippedSearchFolders() != 0) {
-      status += std::format(" · {} folders could not be searched", m_page.browser().skippedSearchFolders());
+      status +=
+          std::format(" · {} {}", m_page.browser().skippedSearchFolders(), i18n::text("folders could not be searched"));
     }
   } else if (loading) {
-    status =
-        snapshot.location && snapshot.location->isNetworkDiscovery() ? "Finding network locations…" : "Loading folder…";
+    status = snapshot.location && snapshot.location->isNetworkDiscovery() ? i18n::text("Finding network locations…")
+                                                                          : i18n::text("Loading folder…");
   } else if (snapshot.status == luciole::DirectoryStatus::Cancelled) {
-    status = "Loading stopped.";
+    status = i18n::text("Loading stopped.");
   } else {
     needed = alwaysShow;
     std::size_t hidden = 0;
@@ -187,17 +191,17 @@ void StatusBarController::sync(bool miller) {
         hidden += snapshot.entries.brief(i).hidden;
       }
     }
-    status = std::format("{} items", model.rows().size());
+    status = std::format("{} {}", model.rows().size(), i18n::trp("item", model.rows().size()));
     if (hidden > 0) {
-      status += std::format(" · {} hidden", hidden);
+      status += std::format(" · {} {}", hidden, i18n::text("hidden"));
     }
   }
   if (snapshot.location && snapshot.location->isTrash() && !snapshot.error && !refreshing) {
-    append("Refresh to update");
+    append(i18n::text("Refresh to update"));
   }
   if (!model.selection().selected.empty()) {
     needed = true;
-    append(std::format("{} selected", model.selection().selected.size()));
+    append(std::format("{} {}", model.selection().selected.size(), i18n::text("selected")));
     const auto summary = model.selectionSummary();
     if (summary.pendingSizes != 0) {
       append("reading file sizes…");
@@ -206,10 +210,10 @@ void StatusBarController::sync(bool miller) {
     } else if (summary.files != 0 && summary.unknownSizes == summary.files) {
       append("file size unknown");
     } else if (summary.files != 0) {
-      const luciole::GString size(g_format_size_full(summary.bytes, G_FORMAT_SIZE_IEC_UNITS));
       append(
           std::format(
-              "{}{}{}", summary.unknownSizes == 0 ? "" : "at least ", size.get(),
+              "{}{}{}", summary.unknownSizes == 0 ? "" : "at least ",
+              luciole::formatSizeWithLocalizedUnits(summary.bytes),
               summary.folders != 0 || summary.others != 0 ? " in files" : ""
           )
       );
@@ -240,8 +244,7 @@ void StatusBarController::sync(bool miller) {
   m_freeSpaceAvailable =
       freeBytes && !snapshot.filesystemError && !snapshot.error && snapshot.location && !snapshot.location->isTrash();
   if (m_freeSpaceAvailable) {
-    const luciole::GString size(g_format_size_full(*freeBytes, G_FORMAT_SIZE_IEC_UNITS));
-    m_freeSpace->setText(std::format("{} free", size.get()));
+    m_freeSpace->setText(std::format("{} {}", luciole::formatSizeWithLocalizedUnits(*freeBytes), i18n::text("free")));
   }
   if (std::exchange(m_needed, needed) != needed) {
     reveal();
@@ -255,8 +258,8 @@ void StatusBarController::sync(bool miller) {
     if (snapshot.error) {
       return {
           "alert-triangle",
-          snapshot.location && snapshot.location->isNetworkDiscovery() ? "Network browsing unavailable"
-                                                                       : "Could not open this folder",
+          snapshot.location && snapshot.location->isNetworkDiscovery() ? i18n::text("Network browsing unavailable")
+                                                                       : i18n::text("Could not open this folder"),
           status
       };
     }
@@ -269,25 +272,28 @@ void StatusBarController::sync(bool miller) {
       return {"alert-triangle", status, {}};
     }
     if (const auto& query = m_page.browser().searchQuery(); !query.empty()) {
-      return {"search", "No results", std::format("No files or folders match “{}”.", query)};
+      return {
+          "search", i18n::text("No results"), std::format("{} “{}”.", i18n::text("No files or folders match"), query)
+      };
     }
     if (snapshot.entries.empty()) {
       if (snapshot.location && snapshot.location->isNetworkDiscovery()) {
         return {
-            "network", "No network locations found",
-            "You can still connect by entering a server address in the location bar."
+            "network", i18n::text("No network locations found"),
+            i18n::text("You can still connect by entering a server address in the location bar.")
         };
       }
       if (snapshot.location && snapshot.location->isDeviceRoot()) {
         return {
-            "device-mobile", "Device locked or transfer disabled",
-            "Unlock your phone and select “File transfer” (MTP) in the USB settings."
+            "device-mobile", i18n::text("Device locked or transfer disabled"),
+            i18n::text("Unlock your phone and select “File transfer” (MTP) in the USB settings.")
         };
       }
-      return snapshot.location == luciole::Location::trash() ? Notice{"trash", "Trash is empty", {}}
-                                                             : Notice{"folder-open", "This folder is empty", {}};
+      return snapshot.location == luciole::Location::trash()
+          ? Notice{"trash", i18n::text("Trash is empty"), {}}
+          : Notice{"folder-open", i18n::text("This folder is empty"), {}};
     }
-    return {"eye-off", "No visible items", "Hidden and backup files are not shown."};
+    return {"eye-off", i18n::text("No visible items"), i18n::text("Hidden and backup files are not shown.")};
   }();
   m_noticeGlyph->setGlyph(notice.glyph);
   m_notice->setText(notice.title);

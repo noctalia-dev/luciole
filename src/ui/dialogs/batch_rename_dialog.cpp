@@ -1,5 +1,6 @@
 #include "ui/dialogs/batch_rename_dialog.h"
 
+#include "i18n/i18n.h"
 #include "ui/browser/file_error_text.h"
 #include "ui/builders.h"
 #include "ui/controls/input.h"
@@ -116,7 +117,7 @@ BatchRenameDialog::BatchRenameDialog(
   setDirection(FlexDirection::Vertical);
   setAlign(FlexAlign::Stretch);
   luciole::applyDialogStyle(*this);
-  addChild(luciole::dialogHeader(std::format("Rename {} Items", count), "forms", std::move(close)));
+  addChild(luciole::dialogHeader(i18n::trp("rename.items", count), "forms", std::move(close)));
   auto scroll =
       ui::scrollView({.out = &m_scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .flexGrow = 1.0F});
   scroll->content()->setAlign(FlexAlign::Stretch);

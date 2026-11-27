@@ -22,6 +22,7 @@
 #include "core/deferred_call.h"
 #include "fs/archive_type.h"
 #include "fs/entry_access.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "platform/terminal_launcher.h"
 #include "render/scene/input_dispatcher.h"
@@ -89,7 +90,7 @@ MenuController::actionEntry(Action action, const luciole::ActionRequest& request
       .label = std::string(
           action == Action::Undo       ? m_page.jobs().historyLabel(false)
               : action == Action::Redo ? m_page.jobs().historyLabel(true)
-                                       : definition.label
+                                       : i18n::tr(definition.label)
       ),
       .enabled = state.enabled,
       .checkmark = !radio && state.checked != -1,

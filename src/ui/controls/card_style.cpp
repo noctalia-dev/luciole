@@ -1,5 +1,6 @@
 #include "ui/controls/card_style.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 
 std::unique_ptr<Flex> luciole::card(const std::string& title, Flex** body, std::unique_ptr<Node> trailing) {
@@ -13,7 +14,7 @@ std::unique_ptr<Flex> luciole::card(const std::string& title, Flex** body, std::
     auto heading = ui::row(
         {.align = FlexAlign::Center, .gap = Style::spaceSm},
         ui::label(
-            {.text = title,
+            {.text = i18n::text(title),
              .fontSize = Style::fontSizeTitle,
              .fontWeight = FontWeight::Bold,
              .color = colorSpecFromRole(ColorRole::OnSurface),

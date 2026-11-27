@@ -5,11 +5,13 @@
 #include "core/deferred_call.h"
 #include "core/input/key_modifiers.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "ui/browser/file_error_text.h"
 #include "ui/browser/file_icon.h"
 #include "ui/builders.h"
 #include "ui/controls/scroll_view.h"
 #include "ui/controls/virtual_grid_view.h"
+#include "ui/size_format.h"
 
 #include <algorithm>
 #include <array>
@@ -25,10 +27,7 @@ namespace {
   constexpr float kModifiedWidth = luciole::kDefaultDetailsColumnWidths[3];
   constexpr float kRowPadding = 12;
   constexpr float kRowGap = 10;
-  std::string sizeText(std::uint64_t bytes) {
-    const luciole::GString value(g_format_size_full(bytes, G_FORMAT_SIZE_IEC_UNITS));
-    return value.get();
-  }
+  std::string sizeText(std::uint64_t bytes) { return luciole::formatSizeWithLocalizedUnits(bytes); }
   class ArchiveRow final : public Flex {
   public:
     explicit ArchiveRow(luciole::FileIconCache& icons) {
@@ -351,10 +350,10 @@ void ArchiveView::sync(
     rebuild();
     syncInfo();
   }
-  const luciole::GString size(g_format_size_full(bytes, G_FORMAT_SIZE_IEC_UNITS));
+  const std::string size = luciole::formatSizeWithLocalizedUnits(bytes);
   m_status->setText(
       error        ? luciole::fileErrorText(*error)
-          : m_busy ? std::format("Processing {} entries · {}", items, size.get())
+          : m_busy ? std::format("Processing {} entries · {}", items, size)
                    : statusText()
   );
   m_status->setColor(colorSpecFromRole(error ? ColorRole::Error : ColorRole::OnSurfaceVariant));
@@ -423,7 +422,7 @@ void ArchiveView::sortBy(SortColumn column, bool descending) {
   rebuild();
 }
 std::string ArchiveView::statusText() const {
-  return std::format("{} item{}", m_rows.size(), m_rows.size() == 1 ? "" : "s");
+  return std::format("{} {}", m_rows.size(), i18n::trp("item", m_rows.size()));
 }
 void ArchiveView::openFolder(const std::string& path) {
   m_parent = path;
@@ -485,7 +484,7 @@ void ArchiveView::syncInfo() {
     m_info->setText("");
     return;
   }
-  m_title->setText(m_catalog->source.displayName().value_or("Archive"));
+  m_title->setText(m_catalog->source.displayName().value_or(i18n::text("Archive")));
   std::vector<std::string> parts;
   if (single) {
     const auto& entry = m_catalog->entries.front();
@@ -507,9 +506,9 @@ void ArchiveView::syncInfo() {
     const auto folders =
         std::ranges::count(m_catalog->entries, luciole::ArchiveEntryKind::Directory, &luciole::ArchiveEntry::kind);
     const auto files = static_cast<std::ptrdiff_t>(m_catalog->entries.size()) - folders;
-    parts.push_back(std::format("{} file{}", files, files == 1 ? "" : "s"));
+    parts.push_back(std::format("{} {}", files, i18n::trp("file", files)));
     if (folders > 0) {
-      parts.push_back(std::format("{} folder{}", folders, folders == 1 ? "" : "s"));
+      parts.push_back(std::format("{} {}", folders, i18n::trp("folder", folders)));
     }
     parts.push_back(std::format("{} unpacked", sizeText(m_catalog->expandedBytes)));
   }
@@ -533,8 +532,8 @@ std::vector<std::string> ArchiveView::selected() const {
 }
 void ArchiveView::selectionChanged() {
   const bool whole = m_selection.empty() || (m_catalog && m_catalog->single);
-  m_extractTo->setText(whole ? "Extract…" : "Extract Selected…");
-  m_extractHereButton->setText(whole ? "Extract Here" : "Extract Selected Here");
+  m_extractTo->setText(whole ? i18n::text("Extract…") : i18n::text("Extract Selected…"));
+  m_extractHereButton->setText(whole ? i18n::text("Extract Here") : i18n::text("Extract Selected Here"));
   m_extractTo->setEnabled(m_catalog && !m_busy);
   m_extractHereButton->setEnabled(m_catalog && !m_busy);
   bool canOpen = false;

@@ -1,6 +1,7 @@
 #include "ui/browser/action_shortcuts.h"
 
 #include "config/keybinds.h"
+#include "i18n/i18n.h"
 
 #include <format>
 #include <string>
@@ -28,10 +29,12 @@ std::string luciole::actionShortcutLabel(BrowserAction action) {
 
 std::string luciole::shortcutTooltip(std::string_view text, BrowserAction action) {
   const std::string shortcut = actionShortcutLabel(action);
-  return shortcut.empty() ? std::string(text) : std::format("{} ({})", text, shortcut);
+  const auto translated = i18n::text(text);
+  return shortcut.empty() ? translated : std::format("{} ({})", translated, shortcut);
 }
 
 std::string luciole::shortcutTooltip(std::string_view text, KeybindCommand command) {
   const std::string shortcut = keybindShortcutLabel(command);
-  return shortcut.empty() ? std::string(text) : std::format("{} ({})", text, shortcut);
+  const auto translated = i18n::text(text);
+  return shortcut.empty() ? translated : std::format("{} ({})", translated, shortcut);
 }

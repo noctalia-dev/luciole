@@ -1,9 +1,11 @@
 #include "ui/controls/folder_totals_view.h"
 
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
 #include "ui/controls/label.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 
 #include <algorithm>
@@ -20,7 +22,7 @@ FolderTotalsView::FolderTotalsView(
       ui::row(
           {.align = FlexAlign::Center, .gap = Style::spaceSm},
           ui::label(
-              {.text = "Contents",
+              {.text = i18n::text("Contents"),
                .fontSize = Style::fontSizeTitle,
                .fontWeight = FontWeight::Bold,
                .color = colorSpecFromRole(ColorRole::OnSurface),
@@ -28,10 +30,10 @@ FolderTotalsView::FolderTotalsView(
           ),
           ui::button(
               {.out = &m_stop,
-               .text = "Stop",
+               .text = i18n::text("Stop"),
                .controlHeight = Style::controlHeightSm,
                .variant = ButtonVariant::Ghost,
-               .tooltip = "Stop calculating folder contents",
+               .tooltip = i18n::text("Stop calculating folder contents"),
                .onClick = [this, requestSync] {
                  m_service.cancel();
                  requestSync();
@@ -42,7 +44,7 @@ FolderTotalsView::FolderTotalsView(
   addChild(
       ui::label(
           {.out = &m_status,
-           .text = "Calculating…",
+           .text = i18n::text("Calculating…"),
            .fontSize = Style::fontSizeCaption,
            .maxLines = 3,
            .configure = literal}
@@ -67,25 +69,25 @@ FolderTotalsView::FolderTotalsView(
 
 std::string folderTotalsSizeText(const luciole::FolderTotalsSnapshot& value) {
   if (value.overflow) {
-    return "Size overflow";
+    return std::string(i18n::text("Size overflow"));
   }
   if (value.bytes == 0 && value.partial()) {
-    return "Size unknown";
+    return std::string(i18n::text("Size unknown"));
   }
-  const luciole::GString size(g_format_size_full(value.bytes, G_FORMAT_SIZE_IEC_UNITS));
-  return value.bytes < 1024 ? std::string(size.get()) : std::format("{} ({} bytes)", size.get(), value.bytes);
+  const auto units = luciole::localizedSizeUnits();
+  const std::string size = luciole::formatSizeWithUnits(value.bytes, units);
+  return value.bytes < 1024 ? size : std::format("{} ({})", size, luciole::formatByteCount(value.bytes, units));
 }
 
 std::string folderTotalsCountsText(const luciole::FolderTotalsSnapshot& value) {
   std::string counts = std::format(
-      "{} {} · {} {}", value.files, value.files == 1 ? "file" : "files", value.folders,
-      value.folders == 1 ? "folder" : "folders"
+      "{} {} · {} {}", value.files, i18n::trp("file", value.files), value.folders, i18n::trp("folder", value.folders)
   );
   if (value.links) {
-    counts += std::format(" · {} {}", value.links, value.links == 1 ? "link" : "links");
+    counts += std::format(" · {} {}", value.links, i18n::trp("link", value.links));
   }
   if (value.other) {
-    counts += std::format(" · {} other", value.other);
+    counts += std::format(" · {} {}", value.other, i18n::text("other"));
   }
   return counts;
 }
@@ -97,9 +99,9 @@ void FolderTotalsView::sync(float width) {
       : value.phase == luciole::FolderTotalsPhase::Cancelled ? "Stopped · partial result"
       : value.partial()                                      ? "Partial result"
                                                              : "Calculated";
-  m_status->setText(std::format("{} · {}", phase, folderTotalsSizeText(value)));
+  m_status->setText(std::format("{} · {}", i18n::text(phase), folderTotalsSizeText(value)));
   m_counts->setText(folderTotalsCountsText(value));
-  std::string note = "Includes hidden items and subfolders. Links are not followed.";
+  std::string note = i18n::text("Includes hidden items and subfolders. Links are not followed.");
   if (value.unavailable) {
     note += std::format("\n{} unreadable, missing or repeated folders/items.", value.unavailable);
   }

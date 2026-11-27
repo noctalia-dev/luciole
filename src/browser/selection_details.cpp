@@ -5,6 +5,7 @@
 #include "fs/background_job.h"
 #include "fs/file_query.h"
 #include "fs/gio_ptr.h"
+#include "model/size_format.h"
 
 #include <algorithm>
 #include <format>
@@ -54,8 +55,10 @@ namespace {
       return unknown ? value + " (some unknown)" : value;
     }
   };
-  luciole::SelectionFacts
-  inspect(const std::vector<luciole::DirectoryEntry>& entries, std::size_t total, const luciole::CancelToken& token) {
+  luciole::SelectionFacts inspect(
+      const std::vector<luciole::DirectoryEntry>& entries, std::size_t total, const luciole::CancelToken& token,
+      const luciole::SizeUnits& units
+  ) {
     Common owner, group, mode, location;
     TimeRange modified, accessed, created;
     std::uint64_t bytes = 0;
@@ -115,7 +118,7 @@ namespace {
       owner.unknown = group.unknown = mode.unknown = location.unknown = true;
       modified.unknown = accessed.unknown = created.unknown = true;
     }
-    const luciole::GString size(g_format_size_full(bytes, G_FORMAT_SIZE_IEC_UNITS));
+    const std::string size = luciole::formatSizeWithUnits(bytes, units);
     const bool partial = limited || unavailable || unknownSizes;
     luciole::SelectionFacts fields{
         {"Inspected", std::format("{} of {} items", entries.size() - unavailable, total)},
@@ -123,7 +126,7 @@ namespace {
         {"Folders", std::to_string(folders)},
         {"Links", std::to_string(links)},
         {"Other", std::to_string(other)},
-        {"File/Link Size", overflow ? "Too large to total" : (partial ? "At least " : "") + std::string(size.get())},
+        {"File/Link Size", overflow ? "Too large to total" : (partial ? "At least " : "") + size},
         {"Owner", owner.text()},
         {"Group", group.text()},
         {"Permissions", mode.text()},
@@ -151,6 +154,7 @@ namespace {
 struct luciole::SelectionDetailsService::State : std::enable_shared_from_this<State> {
   std::vector<DirectoryEntry> entries;
   std::size_t total = 0;
+  luciole::SizeUnits units = {};
   SelectionFacts fields;
   CancelToken cancel;
   std::function<void()> changed;
@@ -164,7 +168,10 @@ struct luciole::SelectionDetailsService::State : std::enable_shared_from_this<St
     running = true;
     cancel = CancelToken{};
     runJob<SelectionFacts>(
-        cancel, [entries = entries, total = total, token = cancel] { return inspect(entries, total, token); },
+        cancel,
+        [entries = entries, total = total, units = units, token = cancel] {
+          return inspect(entries, total, token, units);
+        },
         [self = shared_from_this(), serial = serial](auto reply) {
           self->running = false;
           if (self->alive && serial == self->serial) {
@@ -191,9 +198,10 @@ void luciole::SelectionDetailsService::clear() {
   m_state->entries.clear();
   m_state->fields.clear();
 }
-void luciole::SelectionDetailsService::show(std::span<const DirectoryEntry> entries) {
+void luciole::SelectionDetailsService::show(std::span<const DirectoryEntry> entries, const luciole::SizeUnits& units) {
   clear();
   m_state->total = entries.size();
+  m_state->units = units;
   m_state->entries.assign(entries.begin(), entries.begin() + std::min<std::size_t>(4096, entries.size()));
   m_state->fields = {{"Status", "Reading selected items…"}};
   m_state->pending = true;

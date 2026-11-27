@@ -7,6 +7,7 @@
 #include "config/keybinds.h"
 #include "fs/background_job.h"
 #include "fs/folder_icon.h"
+#include "i18n/i18n.h"
 #include "render/scene/input_dispatcher.h"
 #include "system/icon_resolver.h"
 #include "thumbnails/file_icon_cache.h"
@@ -53,7 +54,7 @@ void FolderIconController::showPicker(LoadResult result, std::uint64_t generatio
     return;
   }
   auto picker = std::make_unique<IconPicker>(m_icons, std::move(result.names));
-  picker->setTitle("Choose Folder Icon");
+  picker->setTitle(i18n::text("Choose Folder Icon"));
   picker->setInitialIcon(std::move(result.current));
   auto* control = picker.get();
   picker->setOnCancel([this] { cancelPicker(); });

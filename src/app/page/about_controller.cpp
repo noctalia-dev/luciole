@@ -2,6 +2,7 @@
 
 #include "app/page/active_popup.h"
 #include "app/page/page_context.h"
+#include "i18n/i18n.h"
 #include "imaging/image_limits.h"
 #include "imaging/svg_rasterizer.h"
 #include "luciole_app_icon.h"
@@ -138,7 +139,7 @@ void AboutController::layoutDialog() {
 
 void AboutController::launcherChanged(const std::string& error) {
   if (m_message) {
-    m_message->setText(error.empty() ? "" : std::format("Could not open the link: {}", error));
+    m_message->setText(error.empty() ? "" : std::format("{}: {}", i18n::text("Could not open the link"), error));
     m_message->setVisible(!error.empty());
     m_message->setParticipatesInLayout(!error.empty());
     m_page.popupSurface()->requestLayout();

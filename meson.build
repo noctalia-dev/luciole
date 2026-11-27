@@ -495,6 +495,7 @@ endif
 
 install_data('LICENSE', install_dir: get_option('datadir') / 'licenses/luciole')
 install_subdir(noctalia_ui_assets_dir / 'fonts', install_dir: get_option('datadir') / 'luciole/assets')
+install_subdir('assets/translations', install_dir: get_option('datadir') / 'luciole/assets')
 install_data('assets/completions/luciole.bash',
   install_dir: get_option('datadir') / 'bash-completion/completions',
   rename: 'luciole',

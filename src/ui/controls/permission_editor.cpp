@@ -1,5 +1,6 @@
 #include "ui/controls/permission_editor.h"
 
+#include "i18n/i18n.h"
 #include "ui/browser/file_error_text.h"
 #include "ui/builders.h"
 #include "ui/controls/card_style.h"
@@ -24,7 +25,7 @@ namespace {
          .minWidth = width > 0.0F ? std::optional(width) : std::nullopt,
          .maxWidth = width > 0.0F ? std::optional(width) : std::nullopt,
          .flexGrow = width > 0.0F ? 0.0F : 1.0F},
-        ui::label({.text = text, .fontWeight = FontWeight::SemiBold})
+        ui::label({.text = i18n::text(text), .fontWeight = FontWeight::SemiBold})
     );
     if (caption != nullptr) {
       copy->addChild(
@@ -43,9 +44,9 @@ namespace {
         {.out = out,
          .options =
              std::vector<ui::SegmentedOption>{
-                 {.label = "Keep", .glyph = {}, .tooltip = {}},
-                 {.label = "Allow", .glyph = {}, .tooltip = {}},
-                 {.label = "Deny", .glyph = {}, .tooltip = {}}
+                 {.label = i18n::text("Keep"), .glyph = {}, .tooltip = {}},
+                 {.label = i18n::text("Allow"), .glyph = {}, .tooltip = {}},
+                 {.label = i18n::text("Deny"), .glyph = {}, .tooltip = {}}
              },
          .equalSegmentWidths = true,
          .flexGrow = 1.0F,
@@ -88,9 +89,9 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
             {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
             ui::column(
                 {.align = FlexAlign::Stretch, .gap = 2.0F, .flexGrow = 1.0F},
-                ui::label({.text = "Include Folder Contents", .fontWeight = FontWeight::SemiBold}),
+                ui::label({.text = i18n::text("Include Folder Contents"), .fontWeight = FontWeight::SemiBold}),
                 ui::label(
-                    {.text = "Change every file and folder inside, per kind.",
+                    {.text = i18n::text("Change every file and folder inside, per kind."),
                      .fontSize = Style::fontSizeCaption,
                      .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
                 )
@@ -143,7 +144,7 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
           ->addChild(
               ui::row(
                   {.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F},
-                  ui::label({.text = names[i], .minWidth = 112.0F, .maxWidth = 112.0F}),
+                  ui::label({.text = i18n::text(names[i]), .minWidth = 112.0F, .maxWidth = 112.0F}),
                   choice(&m_choices[i], onChanged),
                   ui::label(
                       {.out = &m_current[i], .fontSize = Style::fontSizeCaption, .minWidth = 64.0F, .maxWidth = 64.0F}
@@ -159,7 +160,7 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
           ui::column(
               {.align = FlexAlign::Center, .flexGrow = 1.0F},
               ui::label(
-                  {.text = text,
+                  {.text = i18n::text(text),
                    .fontSize = Style::fontSizeCaption,
                    .color = colorSpecFromRole(ColorRole::OnSurfaceVariant)}
               )
@@ -172,7 +173,10 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
       auto controls = ui::row({.align = FlexAlign::Center, .gap = Style::spaceSm, .paddingV = 2.0F});
       controls->addChild(
           ui::label(
-              {.text = names[row], .fontWeight = FontWeight::SemiBold, .minWidth = labelWidth, .maxWidth = labelWidth}
+              {.text = i18n::text(names[row]),
+               .fontWeight = FontWeight::SemiBold,
+               .minWidth = labelWidth,
+               .maxWidth = labelWidth}
           )
       );
       for (std::size_t column = 0; column < 3; ++column) {
@@ -198,7 +202,7 @@ PermissionEditor::PermissionEditor(std::function<void()> edited, bool multiple, 
               ui::toggle({.out = &m_bits[i + 9], .onChange = [this](bool) { changed(); }})
           )
       );
-      hint->setText(hints[i]);
+      hint->setText(i18n::text(hints[i]));
     }
   }
   direct->addChild(std::move(specialCard));
@@ -356,8 +360,8 @@ void PermissionEditor::sync(const luciole::PermissionSnapshot& snapshot) {
     };
     m_ownerId->setText(id(snapshot.mixedOwner, snapshot.info ? snapshot.info->owner : 0, "UID"));
     m_groupId->setText(id(snapshot.mixedGroup, snapshot.info ? snapshot.info->group : 0, "GID"));
-    m_owner->setPlaceholder("Keep current owner (name or ID to change)");
-    m_group->setPlaceholder("Keep current group (name or ID to change)");
+    m_owner->setPlaceholder(i18n::text("Keep current owner (name or ID to change)"));
+    m_group->setPlaceholder(i18n::text("Keep current group (name or ID to change)"));
   } else {
     m_ownerId->setText(snapshot.info ? std::format("UID {}", snapshot.info->owner) : "");
     m_groupId->setText(snapshot.info ? std::format("GID {}", snapshot.info->group) : "");

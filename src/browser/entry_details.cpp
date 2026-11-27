@@ -33,7 +33,9 @@ std::uint8_t luciole::entryColumnDetails(DetailsColumn column) {
   }
 }
 
-std::string luciole::entryColumnText(const DirectoryEntry& entry, DetailsColumn column, std::string_view typeLabel) {
+std::string luciole::entryColumnText(
+    const DirectoryEntry& entry, DetailsColumn column, std::string_view typeLabel, const SizeUnits& units
+) {
   const auto details = entryColumnDetails(column);
   if (column != DetailsColumn::Location && (entry.metadataPending || (entry.queriedDetails & details) != details)) {
     return "Reading…";
@@ -45,8 +47,10 @@ std::string luciole::entryColumnText(const DirectoryEntry& entry, DetailsColumn 
     if (entry.type == FileType::Directory) {
       return {};
     }
-    const GString size(entry.size ? g_format_size_full(*entry.size, G_FORMAT_SIZE_IEC_UNITS) : nullptr);
-    return size ? size.get() : "Unknown";
+    if (!entry.size) {
+      return "Unknown";
+    }
+    return formatSizeWithUnits(*entry.size, units);
   }
   case DetailsColumn::Modified:
     return metadataTime(entry.modifiedSeconds);
@@ -68,18 +72,15 @@ std::string luciole::entryColumnText(const DirectoryEntry& entry, DetailsColumn 
   return "Unknown";
 }
 
-std::string luciole::entryFolderSizeText(const FolderTotalsSnapshot& totals) {
+std::string luciole::entryFolderSizeText(const FolderTotalsSnapshot& totals, const SizeUnits& units) {
   if (totals.phase != FolderTotalsPhase::Complete) {
     return {};
   }
-  const GString size(g_format_size_full(totals.bytes, G_FORMAT_SIZE_IEC_UNITS));
-  if (!size) {
-    return {};
-  }
+  const std::string size = formatSizeWithUnits(totals.bytes, units);
   if (totals.partial()) {
-    return std::format("≥ {}", size.get());
+    return std::format("≥ {}", size);
   }
-  return size.get();
+  return size;
 }
 
 std::optional<std::uint64_t> luciole::entrySortNumber(const DirectoryEntry& entry, SortField field) {

@@ -3,6 +3,7 @@
 #include "core/input/keybind_matcher.h"
 #include "core/ui_strings.h"
 #include "cursor-shape-v1-client-protocol.h"
+#include "i18n/i18n.h"
 #include "render/animation/animation_manager.h"
 #include "render/core/render_styles.h"
 #include "render/scene/input_area.h"
@@ -405,7 +406,7 @@ void Select::syncTriggerText() {
   if (m_triggerLabel == nullptr) {
     return;
   }
-  m_triggerLabel->setText(selectedText().empty() ? m_placeholder : std::string(selectedText()));
+  m_triggerLabel->setText(selectedText().empty() ? m_placeholder : i18n::text(selectedText()));
   m_triggerLabel->setFontSize(m_fontSize);
 }
 
@@ -452,6 +453,11 @@ void Select::openPopupDropdown() {
   const float menuWidth = std::max(minWidth(), triggerWidth);
   const float maxMenuWidth = std::max(menuWidth, Style::menuAutoMaxWidth * (m_fontSize / Style::fontSizeBody));
 
+  std::vector<std::string> translatedOptions;
+  translatedOptions.reserve(m_options.size());
+  for (const auto& option : m_options) {
+    translatedOptions.push_back(i18n::text(option));
+  }
   SelectPopupContext::DropdownRequest request{
       .anchorX = static_cast<std::int32_t>(std::round(absLeft)),
       .anchorY = static_cast<std::int32_t>(std::round(absTop)),
@@ -460,7 +466,7 @@ void Select::openPopupDropdown() {
       .menuWidth = menuWidth,
       .maxMenuWidth = maxMenuWidth,
       .fontSize = m_fontSize,
-      .options = m_options,
+      .options = std::move(translatedOptions),
       .indicatorColors = m_indicatorColors,
       .optionSwatchPreviews = m_optionSwatchPreviews,
       .selectedIndex = m_selectedIndex,

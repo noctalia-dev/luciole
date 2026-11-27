@@ -1,5 +1,6 @@
 #include "ui/controls/acl_editor.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/button.h"
 #include "ui/controls/card_style.h"
@@ -45,7 +46,7 @@ AclEditor::AclEditor(std::function<void()> changed) : m_changed(std::move(change
 }
 void AclEditor::changed(bool layout) {
   m_draft = m_actual && (m_access != m_actual->access || m_defaults != m_actual->defaults);
-  m_status->setText(m_draft ? "Unsaved access control changes." : "");
+  m_status->setText(m_draft ? i18n::text("Unsaved access control changes.") : "");
   m_status->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
   m_rebuild |= layout;
   if (!layout) {
@@ -69,7 +70,10 @@ void AclEditor::sync(const luciole::PermissionSnapshot& snapshot) {
     m_editable = editable;
     m_rebuild = true;
   }
-  m_reason->setText(actual ? actual->message : "ACL inspection is available for one native regular file or folder.");
+  m_reason->setText(
+      actual ? i18n::text(actual->message)
+             : i18n::text("ACL inspection is available for one native regular file or folder.")
+  );
   const auto message = snapshot.aclOperation ? permissionStatusText(snapshot) : "";
   m_status->setText(
       snapshot.aclOperation && snapshot.phase == luciole::PermissionPhase::Saving ? "Saving access control…" : message
@@ -104,7 +108,7 @@ void AclEditor::updateEffective() {
         ? row.permissions & mask->permissions
         : row.permissions;
     // Only rights the mask actually cuts are worth a note.
-    label->setText("Effective " + permissions(effective));
+    label->setText(i18n::text("Effective") + " " + permissions(effective));
     label->setVisible(effective != row.permissions);
     label->setParticipatesInLayout(effective != row.permissions);
   }

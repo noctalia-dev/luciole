@@ -20,6 +20,7 @@
 #include "fs/background_job.h"
 #include "fs/gio_ptr.h"
 #include "fs/link_target.h"
+#include "i18n/i18n.h"
 #include "model/details_columns.h"
 #include "operations/archive_service.h"
 #include "operations/batch_rename_service.h"
@@ -108,6 +109,7 @@ BrowserPage::BrowserPage(
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
+  i18n::Service::instance().setLanguage(m_savedSettings.language);
   m_gridZoom = static_cast<std::size_t>(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );
@@ -1794,7 +1796,7 @@ void BrowserPage::openPatternSelection(const luciole::ActionRequest& request) {
       [this] { dismissPopup(); }, "Select", "Selecting…"
   );
   auto* control = editor.get();
-  control->input()->setPlaceholder("Pattern");
+  control->input()->setPlaceholder(i18n::text("Pattern"));
   showDialog(std::move(editor), DialogWidth::Small);
   if (m_popupSurface) {
     m_activePopup.bind(ActivePopup::Kind::PatternSelection, [this] { m_patternEditor = nullptr; });
@@ -1805,6 +1807,7 @@ void BrowserPage::openPatternSelection(const luciole::ActionRequest& request) {
 }
 
 void BrowserPage::actionError(std::string message) {
+  message = i18n::text(message);
   m_statusBar.setMessage(std::move(message));
   m_browserDirty = true;
   m_surface->requestUpdate();
@@ -1932,6 +1935,9 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
   m_terminal.setCommand(settings.terminalCommand);
   m_launcher.setTerminalCommand(settings.terminalCommand);
   const auto before = m_savedSettings;
+  if (force || before.language != settings.language) {
+    i18n::Service::instance().setLanguage(settings.language);
+  }
   if (!force && before == settings) {
     return;
   }
@@ -2336,7 +2342,7 @@ void BrowserPage::syncBrowser() {
     button->setEnabled(state.enabled);
     const auto& definition = luciole::ActionRegistry::definition(action);
     const auto shortcut = luciole::actionShortcutLabel(action);
-    std::string tooltip(definition.label);
+    std::string tooltip(i18n::tr(definition.label));
     if (!shortcut.empty()) {
       tooltip += std::format(" ({})", shortcut);
     }
@@ -2353,7 +2359,7 @@ void BrowserPage::syncBrowser() {
   m_emptyTrashButton->setVisible(showEmptyTrash);
   m_emptyTrashButton->setParticipatesInLayout(showEmptyTrash);
   const auto emptyTrashState = actionState(Action::EmptyTrash, request);
-  const std::string emptyTrashLabel(luciole::ActionRegistry::definition(Action::EmptyTrash).label);
+  const std::string emptyTrashLabel(i18n::tr(luciole::ActionRegistry::definition(Action::EmptyTrash).label));
   m_emptyTrashButton->setEnabled(emptyTrashState.enabled);
   m_emptyTrashButton->setTooltip(
       emptyTrashState.enabled ? emptyTrashLabel : emptyTrashLabel + "\n" + std::string(emptyTrashState.reason)

@@ -17,6 +17,7 @@
 #include "fs/directory_entries.h"
 #include "fs/drive_monitor.h"
 #include "fs/file_metadata.h"
+#include "i18n/i18n.h"
 #include "platform/desktop_integration.h"
 #include "render/animation/animation_manager.h"
 #include "ui/browser/action_shortcuts.h"
@@ -347,7 +348,7 @@ std::unique_ptr<Node> SidebarController::buildResizeHandle() {
        .cursorShape = WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_COL_RESIZE,
        .focusable = true,
        .tabStop = true,
-       .tooltip = "Resize Places; Left/Right adjusts, Home resets",
+       .tooltip = i18n::text("Resize Places; Left/Right adjusts, Home resets"),
        .width = kHandleWidth,
        .onEnter = [this](const auto&) { m_page.surface().requestUpdate(); },
        .onLeave = [this] { m_page.surface().requestUpdate(); },

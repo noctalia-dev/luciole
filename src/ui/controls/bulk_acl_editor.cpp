@@ -1,5 +1,6 @@
 #include "ui/controls/bulk_acl_editor.h"
 
+#include "i18n/i18n.h"
 #include "ui/builders.h"
 #include "ui/controls/card_style.h"
 #include "ui/controls/input.h"
@@ -56,7 +57,7 @@ BulkAclEditor::BulkAclEditor(std::function<void()> changed) : m_changed(std::mov
 }
 void BulkAclEditor::changed(bool rebuild) {
   m_rebuild |= rebuild;
-  m_status->setText(canApply() ? "Unsaved ACL changes. Unrelated rules will be preserved." : "");
+  m_status->setText(canApply() ? i18n::text("Unsaved ACL changes. Unrelated rules will be preserved.") : "");
   m_status->setColor(colorSpecFromRole(ColorRole::OnSurfaceVariant));
   m_changed();
 }

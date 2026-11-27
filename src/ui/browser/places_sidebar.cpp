@@ -3,6 +3,7 @@
 #include "browser/location_presentation.h"
 #include "config/keybinds.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "model/directory_options.h"
 #include "ui/browser/drive_glyph.h"
 #include "ui/browser/sidebar_tree_view.h"
@@ -10,6 +11,7 @@
 #include "ui/controls/box.h"
 #include "ui/controls/list_drag.h"
 #include "ui/controls/side_list_metrics.h"
+#include "ui/size_format.h"
 
 #include <algorithm>
 #include <cmath>
@@ -42,7 +44,7 @@ namespace {
   // refresh lands. The row already shows the name.
   std::string driveTooltip(const luciole::Drive& drive) {
     if (!drive.root) {
-      return "Not mounted";
+      return i18n::text("Not mounted");
     }
     // Edit text covers both native paths and URIs, so network mounts keep an address line.
     std::string text = luciole::locationEditText(*drive.root);
@@ -72,12 +74,10 @@ std::string_view luciole::driveRemovalLabel(DriveRemoval removal) {
 
 std::string luciole::driveSpaceText(const DriveUsage& usage) {
   const auto used = std::min(usage.used, usage.size);
-  const GString freeText(g_format_size_full(usage.size - used, G_FORMAT_SIZE_IEC_UNITS));
-  const GString sizeText(g_format_size_full(usage.size, G_FORMAT_SIZE_IEC_UNITS));
+  const std::string freeText = luciole::formatSizeWithLocalizedUnits(usage.size - used);
+  const std::string sizeText = luciole::formatSizeWithLocalizedUnits(usage.size);
   const auto percent = std::llround(100.0 * static_cast<double>(used) / static_cast<double>(usage.size));
-  return std::format(
-      "{} free of {} ({}% used)", freeText ? freeText.get() : "?", sizeText ? sizeText.get() : "?", percent
-  );
+  return std::format("{} {} {} ({}% {})", freeText, i18n::text("free"), sizeText, percent, i18n::text("used"));
 }
 
 luciole::PlacesSidebar::PlacesSidebar(PinService& pins, DriveMonitor& drives) : m_pins(pins), m_drives(drives) {
@@ -379,7 +379,7 @@ luciole::PlacesSidebar::SeparatorRow luciole::PlacesSidebar::addSeparatorRow(std
   auto* raw = button.get();
   raw->setDirection(heading.empty() ? FlexDirection::Horizontal : FlexDirection::Vertical);
   raw->setAlign(heading.empty() ? FlexAlign::Center : FlexAlign::Stretch);
-  raw->setTooltip("Drag to move, or right-click for options");
+  raw->setTooltip(i18n::text("Drag to move, or right-click for options"));
   Node* line = nullptr;
   if (heading.empty()) {
     auto rule = ui::separator({.orientation = SeparatorOrientation::HorizontalRule, .flexGrow = 1.0F});
@@ -661,7 +661,7 @@ void luciole::PlacesSidebar::rebuild() {
     content->addChild(
         ui::label(
             {.out = out,
-             .text = text,
+             .text = i18n::text(text),
              .fontSize = Style::fontSizeCaption,
              .fontWeight = FontWeight::SemiBold,
              .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),

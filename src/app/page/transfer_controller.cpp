@@ -10,6 +10,7 @@
 #include "fs/archive_type.h"
 #include "fs/filename.h"
 #include "fs/gio_ptr.h"
+#include "i18n/i18n.h"
 #include "operations/archive_service.h"
 #include "operations/create_service.h"
 #include "operations/trash_item.h"
@@ -22,6 +23,7 @@
 #include "ui/dialogs/dialog_chrome.h"
 #include "ui/dialogs/name_dialog.h"
 #include "ui/palette.h"
+#include "ui/size_format.h"
 #include "ui/style.h"
 #include "wayland/popup_surface.h"
 
@@ -588,17 +590,15 @@ void TransferController::transferChanged(OperationJob& job) {
   }
   const auto& results = transfers.results();
   const auto done = std::ranges::count_if(results, arrived);
-  std::string message = std::format(
-      "{} item{} {}", done, done == 1 ? "" : "s",
-      transfers.action() == luciole::TransferAction::Copy       ? "copied"
-          : transfers.action() == luciole::TransferAction::Link ? "linked"
-                                                                : "moved"
-  );
+  const char* messageKey = "operations.moved";
   if (job.historyReplay() != HistoryReplay::None) {
-    message = std::format(
-        "{} item{} {}.", done, done == 1 ? "" : "s", job.historyReplay() == HistoryReplay::Undo ? "undone" : "redone"
-    );
+    messageKey = job.historyReplay() == HistoryReplay::Undo ? "operations.undone" : "operations.redone";
+  } else if (transfers.action() == luciole::TransferAction::Copy) {
+    messageKey = "operations.copied";
+  } else if (transfers.action() == luciole::TransferAction::Link) {
+    messageKey = "operations.linked";
   }
+  std::string message = i18n::trp(messageKey, done);
   if (const auto error = std::ranges::find_if(results, [](const auto& item) { return item.error.has_value(); });
       error != results.end()) {
     message +=
@@ -638,8 +638,7 @@ void TransferController::syncConflict() {
                    std::optional<std::uint64_t> modified) {
     std::string description = folder ? "Folder" : "File";
     if (!folder && bytes) {
-      const luciole::GString size(g_format_size_full(*bytes, G_FORMAT_SIZE_IEC_UNITS));
-      description += " · " + std::string(size.get());
+      description += " · " + luciole::formatSizeWithLocalizedUnits(*bytes);
     }
     std::string date = "Modification time unknown";
     if (modified && *modified <= static_cast<std::uint64_t>(G_MAXINT64)) {

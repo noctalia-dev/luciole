@@ -55,7 +55,7 @@ build m=mode: (_ensure-configured m)
 
 [arg("m", pattern="debug|release|asan")]
 run m=mode: (build m)
-    LUCIOLE_ASSETS_DIR="$PWD/lib/assets" ./build-$1/luciole
+    LUCIOLE_ASSETS_DIR="$PWD/assets" ./build-$1/luciole
 
 [arg("m", pattern="debug|release|asan")]
 test m=mode *args: (_ensure-configured m)
@@ -98,6 +98,7 @@ _files kind:
         ".idea",
         ".vscode",
         "__pycache__",
+        "build",
         "node_modules",
         "result",
     }
