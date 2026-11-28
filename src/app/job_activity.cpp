@@ -294,11 +294,15 @@ namespace {
         activity.summary = "Writing to device…";
         return;
       }
+      activity.canPause = service.canPause();
+      activity.paused = service.paused();
       activity.meters = transferMetersText(measured);
-      activity.state = measured.bytes || measured.completed ? ActivityState::Working : ActivityState::Preparing;
-      activity.summary = std::format(
-          "{} transferred · {} of {} source items", sizeText(measured.bytes), measured.completed, measured.total
-      );
+      activity.state = service.paused()
+          ? ActivityState::Paused
+          : (measured.bytes || measured.completed ? ActivityState::Working : ActivityState::Preparing);
+      activity.summary = (service.paused() ? "Paused · " : "")
+          + std::format("{} transferred · {} of {} source items", sizeText(measured.bytes), measured.completed,
+                        measured.total);
       // A measured byte total divides the job far more finely than item counts, but a fraction only
       // appears once bytes have actually moved.
       if (measured.bytes && measured.bytesTotal && *measured.bytesTotal) {

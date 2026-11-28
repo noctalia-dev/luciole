@@ -411,9 +411,38 @@ namespace luciole::transfer {
     }
   }
 
+  void waitIfPaused(const std::shared_ptr<PauseState>& pause, const CancelToken& token) {
+    if (!pause || !pause->paused.load(std::memory_order_relaxed)) {
+      return;
+    }
+    std::unique_lock<std::mutex> lock(pause->mutex);
+    pause->changed.wait(lock, [&] { return !pause->paused.load(std::memory_order_relaxed) || token.cancelled(); });
+  }
+
+  void wakePaused(const std::shared_ptr<PauseState>& pause) {
+    if (!pause) {
+      return;
+    }
+    // Holding the park's mutex serializes the wake against waiters entering their wait.
+    const std::scoped_lock lock(pause->mutex);
+    pause->changed.notify_all();
+  }
+
   void CopyWork::check() const {
-    if (token.cancelled() || stopCopies.load(std::memory_order_relaxed)) {
-      throw TransferCancelled();
+    for (;;) {
+      if (token.cancelled() || stopCopies.load(std::memory_order_relaxed)) {
+        throw TransferCancelled();
+      }
+      if (!pause || !pause->paused.load(std::memory_order_relaxed)) {
+        return;
+      }
+      // Parked until resumed, cancelled or the parallel pool stops.
+      std::unique_lock<std::mutex> lock(pause->mutex);
+      pause->changed.wait(lock, [&] {
+        return !pause->paused.load(std::memory_order_relaxed)
+            || token.cancelled()
+            || stopCopies.load(std::memory_order_relaxed);
+      });
     }
   }
 
@@ -474,6 +503,8 @@ namespace luciole::transfer {
     std::exception_ptr abandon() noexcept {
       std::unique_lock lock(m_mutex);
       m_work.stopCopies = true;
+      // Parked copy threads leave the park and observe the stopped flag.
+      wakePaused(m_work.pause);
       m_queue.clear();
       m_room.wait(lock, [&] { return m_running == 0; });
       m_work.stopCopies = false;
@@ -513,6 +544,8 @@ namespace luciole::transfer {
             m_error = std::current_exception();
           }
           m_work.stopCopies = true;
+          // A parked walker must observe the failure instead of waiting out the pause.
+          wakePaused(m_work.pause);
         }
         {
           const std::scoped_lock lock(m_mutex);

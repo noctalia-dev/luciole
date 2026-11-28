@@ -75,9 +75,10 @@ Choose **Regex** to replace every match of an ECMAScript regular expression. In 
 
 ## File Operations popover
 
-The toolbar **File Operations** button shows the number of active jobs. Open it, or use **File Operations** in the main menu, to see every tab and window of this Luciole: progress, bytes transferred, transfer speed, file counts, remaining time and the item being worked on, pending decisions and results. A local copy measures its sources first, so a large folder starts with a total that keeps growing while the measurement runs and only then transfers. A move that stays on the same drive renames the folder instead of copying it, and a job whose size cannot be measured, such as creating links or working in a remote location, keeps an indeterminate bar until it finishes. Jobs cannot be paused.
+The toolbar **File Operations** button shows the number of active jobs. Open it, or use **File Operations** in the main menu, to see every tab and window of this Luciole: progress, bytes transferred, transfer speed, file counts, remaining time and the item being worked on, pending decisions and results. A local copy measures its sources first, so a large folder starts with a total that keeps growing while the measurement runs and only then transfers. A move that stays on the same drive renames the folder instead of copying it, and a job whose size cannot be measured, such as creating links or working in a remote location, keeps an indeterminate bar until it finishes.
 
 - **Cancel** stops remaining work; finished effects remain. Closing the popover does not cancel.
+- **Pause** parks a local copy or move at its next chunk, item or measurement boundary; **Resume** continues the same job. Data already handed to the filesystem still lands. Remote jobs, link creation and history replay have no pause point. A paused job can still be cancelled.
 - **Review** returns to the page waiting for your decision.
 - **Details** shows the job's progress and every measured field, plus the report once the job has one; **Copy Report** copies it. A finished transfer also shows how long it took.
 - **Retry Failed** appears while retry information lasts and skips finished items.

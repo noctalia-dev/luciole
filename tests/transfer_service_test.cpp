@@ -102,6 +102,16 @@ namespace {
         m_source.dispatch(fds, first);
       }
     }
+    // Drives the loop for a fixed span, used to observe a parked worker.
+    void pumpFor(std::chrono::milliseconds span) {
+      const auto end = std::chrono::steady_clock::now() + span;
+      while (std::chrono::steady_clock::now() < end) {
+        std::vector<pollfd> fds;
+        const auto first = m_source.addPollFds(fds);
+        TEST_CHECK(::poll(fds.data(), fds.size(), 1) >= 0);
+        m_source.dispatch(fds, first);
+      }
+    }
     void
     run(luciole::TransferService& service, std::vector<luciole::Location> sources, const fs::path& destination,
         TransferAction action, std::function<TransferConflictChoice(const luciole::TransferConflict&)> choose = {}) {
@@ -177,6 +187,57 @@ namespace {
     TEST_CHECK(!renamed.bytesTotal && !renamed.filesTotal && !renamed.estimating);
     TEST_CHECK(renamed.completed == 1 && renamed.total == 1 && renamed.bytes == 0);
     TEST_CHECK(fs::exists(fixture.destination("later")) && !fs::exists(fixture.source("later")));
+  }
+  void testPause(Pump& pump) {
+    Fixture fixture;
+    // A wide tree passes scan and copy checkpoints constantly, so a pause parks the worker early.
+    fs::create_directory(fixture.source("tree"));
+    for (int i = 0; i < 4000; ++i) {
+      write(fixture.source(std::format("tree/leaf{}", i)), "x");
+    }
+    luciole::TransferService service;
+    TEST_CHECK(
+        service.start({{location(fixture.source("tree"))}, location(fixture.destination("")), TransferAction::Copy})
+    );
+    TEST_CHECK(service.canPause());
+    service.pause();
+    TEST_CHECK(service.paused() && service.canPause());
+    pump.pumpFor(std::chrono::seconds(2));
+    TEST_CHECK(service.busy());
+    const auto frozen = service.progress();
+    pump.pumpFor(std::chrono::milliseconds(500));
+    const auto parked = service.progress();
+    TEST_CHECK(service.busy() && parked.bytes == frozen.bytes && parked.completed == frozen.completed);
+    // Any park position qualifies: measuring, measured with a pending copy, or bytes already moved.
+    TEST_CHECK(parked.estimating || parked.bytes > 0 || parked.total > 0);
+    // A paused job still cancels: the park releases and nothing unpublished lands.
+    service.cancel();
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.results().size() == 1 && service.results().front().outcome == TransferOutcome::Cancelled);
+    TEST_CHECK(fs::is_empty(fixture.destination("")));
+    // Resume continues the same job to completion.
+    luciole::TransferService resuming;
+    TEST_CHECK(
+        resuming.start({{location(fixture.source("tree"))}, location(fixture.destination("")), TransferAction::Copy})
+    );
+    resuming.pause();
+    pump.pumpFor(std::chrono::milliseconds(500));
+    TEST_CHECK(resuming.busy());
+    resuming.resume();
+    TEST_CHECK(!resuming.paused());
+    pump.until([&] { return !resuming.busy(); });
+    TEST_CHECK(fs::exists(fixture.destination("tree/leaf3999")));
+    TEST_CHECK(!resuming.canPause() && !resuming.paused());
+    // A link transfer has nothing to pause between, so pause is refused.
+    fs::create_directory(fixture.root / "linkdest");
+    luciole::TransferService links;
+    TEST_CHECK(
+        links.start({{location(fixture.source("tree"))}, location(fixture.root / "linkdest"), TransferAction::Link})
+    );
+    TEST_CHECK(!links.canPause());
+    links.pause();
+    TEST_CHECK(!links.paused());
+    pump.until([&] { return !links.busy(); });
   }
   void testWriteback(Pump& pump) {
     Fixture fixture;
@@ -6100,6 +6161,7 @@ int main(int argc, char** argv) {
     testSymbolicLinkDrops(pump);
     testRemovableDevices();
     testProgress(pump);
+    testPause(pump);
     testWriteback(pump);
     testWritebackPacing(pump);
     testCopyHistory(pump);

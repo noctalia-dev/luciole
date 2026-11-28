@@ -66,6 +66,11 @@ namespace luciole {
     bool replay(const std::shared_ptr<const MoveReceipt>& receipt);
     bool replayCopy(const std::shared_ptr<const CopyReceipt>& receipt);
     void cancel();
+    // Native copy and move jobs park their worker at the next checkpoint; other jobs refuse pause.
+    bool canPause() const;
+    void pause();
+    void resume();
+    bool paused() const;
     // Cancels worker work unconditionally during service or application teardown, including post-flush history capture.
     void shutdown();
     bool busy() const;

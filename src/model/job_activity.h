@@ -8,7 +8,7 @@
 #include <string>
 
 namespace luciole {
-  enum class ActivityState { Preparing, Working, Waiting, Succeeded, Failed, Partial, Cancelled };
+  enum class ActivityState { Preparing, Working, Waiting, Paused, Succeeded, Failed, Partial, Cancelled };
   struct JobActivity {
     std::uint64_t id = 0;
     std::string title, summary;
@@ -18,6 +18,8 @@ namespace luciole {
     // Transfer only: the row's live meters line, and every measured field for the details dialog.
     std::string meters, info;
     bool finished = false, canCancel = false, canRetry = false, canReview = false;
+    // True while the job offers pause (native transfers), and while it is currently parked.
+    bool canPause = false, paused = false;
     bool failed() const { return state == ActivityState::Failed || state == ActivityState::Partial; }
   };
 

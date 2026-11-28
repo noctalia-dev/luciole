@@ -5,12 +5,14 @@
 #include "fs/posix_fd.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <utility>
@@ -41,11 +43,25 @@ namespace luciole::transfer {
   std::vector<std::string> children(int fd, std::size_t limit = std::numeric_limits<std::size_t>::max());
   bool hasAncestor(int fd, const struct stat& ancestor);
 
+  // Pause control for one job: workers park at their next checkpoint and leave the park on resume or cancellation.
+  struct PauseState {
+    std::atomic<bool> paused{false};
+    std::mutex mutex;
+    std::condition_variable changed;
+  };
+
+  // Blocks while `pause` is paused, returning once resumed or cancelled; a null handle never blocks.
+  void waitIfPaused(const std::shared_ptr<PauseState>& pause, const CancelToken& token);
+  // Wakes parked workers; takes the pause mutex so a wake cannot be lost in a park's check-to-sleep gap.
+  void wakePaused(const std::shared_ptr<PauseState>& pause);
+
   // Per-job copy state shared by every item of one run.
   struct CopyWork {
     CopyWork(CancelToken cancel, std::atomic<std::uint64_t>& copied);
     ~CopyWork();
     CancelToken token;
+    // Null unless the owning service offers pause; checkpoints park while it is paused.
+    std::shared_ptr<PauseState> pause;
     std::atomic<std::uint64_t>& bytes;
     // Metadata of items this job renamed or unlinked, so later checks accept the job's own changes.
     std::map<std::pair<dev_t, ino_t>, struct stat> changedLinks;
