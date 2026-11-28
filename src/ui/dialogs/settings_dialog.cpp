@@ -205,6 +205,8 @@ SettingsDialog::SettingsDialog(
   addBool(P::SidebarTree, "Show Folder Tree");
   addBool(P::ShowDrives, "Show Drives");
   addBool(P::ShowNetwork, "Show Network");
+  addBool(P::ShowRecent, "Show Recent");
+  addBool(P::RememberRecent, "Remember Opened Files");
   addNumber(P::SidebarWidth, "Sidebar Width", widths(luciole::kMinSidebarWidth, luciole::kMaxSidebarWidth));
   card("Preview");
   addBool(P::ShowPreview, "Show Preview");

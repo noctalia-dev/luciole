@@ -102,7 +102,7 @@ BrowserPage::BrowserPage(
     const luciole::BrowserSettings& settings, luciole::WaylandTextClipboard& clipboard, luciole::WindowSurface& surface,
     InputDispatcher& dispatcher, AnimationManager& animations, luciole::PinService& pins, luciole::DriveMonitor& drives,
     luciole::FileIconCache& icons, luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-    luciole::FolderViewService* folderViews, OperationHub& hub, luciole::TabId id
+    luciole::FolderViewService* folderViews, luciole::RecentFiles& recentFiles, OperationHub& hub, luciole::TabId id
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
@@ -118,7 +118,8 @@ BrowserPage::BrowserPage(
           [this] { return m_fileKeys.keyboardFocus() && m_list != nullptr && m_list->focusArea()->focused(); }
       ),
       m_preferences(preferences), m_savedSettings(settings), m_pins(pins), m_folderViews(folderViews), m_drives(drives),
-      m_hub(hub), m_jobs(hub, id), m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
+      m_hub(hub), m_jobs(hub, id), m_recentController(*this, recentFiles, settings.rememberRecent),
+      m_viewMode(settings.viewMode), m_clipboard(clipboard), m_workspaceId(id) {
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
@@ -1465,6 +1466,7 @@ luciole::ActionContext BrowserPage::actionContext() const {
       .pinsEditable = m_pins.editable(),
       .pinsBusy = m_pins.busy(),
       .canEmptyTrash = !m_jobs.busy(),
+      .canEditRecent = !m_recentController.busy(),
       .pinned = [this](const auto& location) { return m_pins.contains(location); },
       .viewMode = m_viewMode,
       .showSidebar = m_sidebar.visible(),
@@ -1566,7 +1568,8 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
   if (!m_renameController.editingFile()) {
     m_renameController.cancelPendingResume();
   }
-  const bool selectionAction = luciole::ActionRegistry::definition(action).scope == luciole::ActionScope::Selection;
+  const auto& definition = luciole::ActionRegistry::definition(action);
+  const bool selectionAction = definition.scope == luciole::ActionScope::Selection;
   if (selectionAction) {
     if (m_miller.enabled()) {
       m_miller.interact(m_miller.focused());
@@ -1575,9 +1578,14 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
     m_list->cancelPointerGesture();
   }
   std::vector<luciole::DirectoryEntry> targets;
+  // Recent items stand for files elsewhere; actions other than editing the list work on those files.
+  const bool recentFiles = request.folder
+      && request.folder->isRecent()
+      && definition.scope == luciole::ActionScope::Targets
+      && action != Action::RemoveFromRecent;
   for (const auto& target : request.targets) {
     if (const auto* entry = browser().model().entry(target.id)) {
-      targets.push_back(*entry);
+      targets.push_back(recentFiles && entry->recentTarget() ? entry->atRecentTarget() : *entry);
     }
   }
   runAction(action, request, targets);
@@ -1712,6 +1720,9 @@ void BrowserPage::runAction(
       {Action::UnpinCurrent, [](BrowserPage& page, const Call& call) { page.m_pins.remove(*call.request.folder); }},
       {Action::ReloadPins, [](BrowserPage& page, const Call&) { page.m_pins.reload(); }},
       {Action::EmptyTrash, [](BrowserPage& page, const Call&) { page.m_trashController.openEmptyTrash(); }},
+      {Action::RemoveFromRecent,
+       [](BrowserPage& page, const Call& call) { page.m_recentController.remove(call.targets); }},
+      {Action::ClearRecent, [](BrowserPage& page, const Call&) { page.m_recentController.openClear(); }},
       {Action::SelectAll, [](BrowserPage& page, const Call&) { page.browser().model().selectAll(); }},
       {Action::InvertSelection, [](BrowserPage& page, const Call&) { (void)page.browser().model().invertSelection(); }},
       {Action::SelectPattern, [](BrowserPage& page, const Call& call) { page.openPatternSelection(call.request); }},
@@ -1826,6 +1837,18 @@ void BrowserPage::sortAction(Action action) {
   changeSort(options);
 }
 
+void BrowserPage::recordUse(const luciole::DirectoryEntry& file) {
+  if (file.type == luciole::FileType::Regular && !file.symlink) {
+    m_recentController.recordUse(file.location(), file.contentType ? *file.contentType : std::string{});
+  }
+}
+
+void BrowserPage::rememberChosen(const std::vector<luciole::Location>& files) {
+  for (const auto& file : files) {
+    m_recentController.recordUse(file);
+  }
+}
+
 void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& targets) {
   if (choosing()) {
     if (targets.size() == 1
@@ -1854,6 +1877,7 @@ void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& target
   ) {
     m_programs.open(requestFor(targets), [this, target = targets.front()] {
       if (target.type == luciole::FileType::Regular && !target.symlink) {
+        recordUse(target);
         m_launcher.open(target.location());
       } else {
         browser().activate(target.id);
@@ -1863,6 +1887,7 @@ void BrowserPage::openTargets(const std::vector<luciole::DirectoryEntry>& target
     std::vector<luciole::Location> files;
     for (const auto& target : targets) {
       if (target.type == luciole::FileType::Regular) {
+        recordUse(target);
         files.push_back(target.location());
       } else {
         browser().activate(target.id);
@@ -2211,6 +2236,7 @@ void BrowserPage::applySettings(const luciole::BrowserSettings& settings, bool f
   }
   m_operations.setButtonMode(settings.operationsButton);
   m_sidebar.applySettings(before, settings, force);
+  m_recentController.setRemember(settings.rememberRecent);
   if (m_settingsController.open()) {
     m_detailsHeader.applySettings(before, settings, force);
   }
@@ -2281,7 +2307,22 @@ void BrowserPage::changeSort(luciole::SortOptions options) {
   if (options == browser().model().sort()) {
     return;
   }
-  if (!m_folderView.saveSort(options)) {
+  const auto& folder = browser().model().snapshot().location;
+  if (m_folderView.saveSort(options)) {
+    dispatcher().setFocus(m_list->focusArea());
+    return;
+  }
+  if (folder && folder->isRecent()) {
+    // Re-sorting Recent leaves the default for folders alone.
+    const auto before = browser().model().sort();
+    m_browser.setRecentSort(options);
+    for (const auto& column : m_miller.columns()) {
+      column->browser->setRecentSort(options);
+    }
+    if (browser().model().sort() != before) {
+      sortChanged();
+    }
+  } else {
     applySort(options);
     if (choosing()) {
       m_preferences.submit({
@@ -2363,8 +2404,8 @@ void BrowserPage::applyViewMode() {
 
 float BrowserPage::gridHeight() const {
   const auto& location = browser().model().snapshot().location;
-  const bool context =
-      (browser().searchRecursive() && !browser().searchQuery().empty()) || (location && location->isTrash());
+  const bool context = (browser().searchRecursive() && !browser().searchQuery().empty())
+      || (location && (location->isTrash() || location->isRecent()));
   return m_viewMode == luciole::ViewMode::Grid
       ? luciole::gridMetrics(gridIconSize(), m_savedSettings.presentation, context).height
       : luciole::fileRowHeight(m_savedSettings.presentation, context, rowIconSize());

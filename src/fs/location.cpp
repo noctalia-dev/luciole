@@ -85,6 +85,7 @@ std::optional<std::string> luciole::Location::nativeFileUri() const {
 
 luciole::Location luciole::Location::trash() { return Location("trash:///"); }
 luciole::Location luciole::Location::network() { return Location("network:///"); }
+luciole::Location luciole::Location::recent() { return Location("recent:///"); }
 bool luciole::Location::isNetworkDiscovery() const {
   return m_uri.starts_with("network:") || m_uri.starts_with("dns-sd:") || m_uri.starts_with("wsdd:");
 }
@@ -92,6 +93,7 @@ bool luciole::Location::isDeviceRoot() const {
   return (m_uri.starts_with("mtp:") || m_uri.starts_with("gphoto2:")) && !parent();
 }
 bool luciole::Location::isTrash() const { return trashUri(m_uri); }
+bool luciole::Location::isRecent() const { return g_ascii_strncasecmp(m_uri.c_str(), "recent:", 7) == 0; }
 bool luciole::Location::isNative() const { return g_file_is_native(gioFile(*this).get()) != FALSE; }
 
 bool luciole::Location::isAdmin() const {

@@ -21,6 +21,7 @@
 #include "app/page/preview_controller.h"
 #include "app/page/program_controller.h"
 #include "app/page/properties_controller.h"
+#include "app/page/recent_controller.h"
 #include "app/page/rename_controller.h"
 #include "app/page/settings_controller.h"
 #include "app/page/shortcuts_controller.h"
@@ -91,7 +92,7 @@ public:
       luciole::WindowSurface& surface, InputDispatcher& dispatcher, AnimationManager& animations,
       luciole::PinService& pins, luciole::DriveMonitor& drives, luciole::FileIconCache& icons,
       luciole::ThumbnailService& thumbnails, luciole::ViewPreferenceWriter& preferences,
-      luciole::FolderViewService* folderViews, OperationHub& hub, luciole::TabId id
+      luciole::FolderViewService* folderViews, luciole::RecentFiles& recentFiles, OperationHub& hub, luciole::TabId id
   );
 
   luciole::BrowserController& browser() override;
@@ -104,6 +105,8 @@ public:
     std::function<void()> cancel;
   };
   void setChooser(ChooserHooks hooks);
+  // Adds files a file picker returned to the shared recent list, as GTK's picker does.
+  void rememberChosen(const std::vector<luciole::Location>& files);
   bool choosing() const override;
 
   ~BrowserPage();
@@ -243,6 +246,7 @@ private:
   void openTerminal(const luciole::Location& target);
   void sortAction(Action action);
   void openTargets(const std::vector<luciole::DirectoryEntry>& targets);
+  void recordUse(const luciole::DirectoryEntry& file);
   void pinTargets(const std::vector<luciole::DirectoryEntry>& targets);
   void unpinTargets(const std::vector<luciole::DirectoryEntry>& targets);
   void openPatternSelection(const luciole::ActionRequest& request);
@@ -432,6 +436,7 @@ private:
   PageJobs m_jobs;
   DialogDropdown m_dialogDropdown{*this, m_connection, m_renderer};
   TrashController m_trashController{*this};
+  RecentController m_recentController;
   FolderViewController m_folderView{*this, m_folderViews, m_browser, m_miller};
   RenameController m_renameController{*this, m_pins};
   FolderIconController m_folderIconController{*this, m_icons};

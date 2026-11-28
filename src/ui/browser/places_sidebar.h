@@ -22,6 +22,8 @@ namespace luciole {
     void setShowHidden(bool showHidden);
     void setShowDrives(bool showDrives);
     void setShowNetwork(bool showNetwork);
+    // Hidden also when GVfs serves no recent:// files.
+    void setShowRecent(bool showRecent);
     void setChangedCallback(std::function<void()> callback) { m_changed = std::move(callback); }
     void invalidate();
     void releaseLocation(const Location& root);
@@ -101,6 +103,8 @@ namespace luciole {
     DriveMonitor& m_drives;
     SidebarTreeView* m_tree = nullptr;
     bool m_treeEnabled = false, m_showHidden = false, m_showDrives = true, m_showNetwork = true;
+    // Off until the owner knows GVfs serves recent://.
+    bool m_showRecent = false;
     std::function<void()> m_changed;
     ScrollView* m_scroll = nullptr;
     Label* m_heading = nullptr;

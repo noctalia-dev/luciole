@@ -45,6 +45,7 @@ test_table = [
   {'name': 'empty-trash-service', 'deps': [operations_dep, event_loop_dep], 'env': gio_env},
   {'name': 'restore-service', 'deps': [operations_dep, event_loop_dep], 'env': gio_env},
   {'name': 'trash-browse', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
+  {'name': 'recent-files', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'trash-service', 'deps': [operations_dep, browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'create-service', 'deps': [operations_dep, browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'rename-service', 'deps': [operations_dep, browser_dep, event_loop_dep], 'env': gio_env},

@@ -38,7 +38,10 @@ void PreviewController::sync() {
   }
   auto& model = m_page.browser().model();
   const auto selected = model.selectedIds();
-  const auto* entry = selected.size() == 1 && model.selectionAvailable() ? model.entry(selected.front()) : nullptr;
+  const auto* item = selected.size() == 1 && model.selectionAvailable() ? model.entry(selected.front()) : nullptr;
+  // A Recent item previews the file it stands for.
+  const auto file = item && item->recentTarget() ? std::optional(item->atRecentTarget()) : std::nullopt;
+  const auto* entry = file ? &*file : item;
   if (entry && (entry->metadataPending || entry->metadataFailed)) {
     m_preview.clear();
     return;

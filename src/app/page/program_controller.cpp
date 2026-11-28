@@ -32,6 +32,12 @@ bool ProgramController::current(const luciole::ActionRequest& request) const {
   return m_page.visible() && m_page.requestCurrent(request, luciole::ActionScope::Targets);
 }
 
+luciole::Location ProgramController::fileOf(const luciole::ActionTarget& target) const {
+  const auto* entry = m_page.browser().model().entry(target.id);
+  const auto* file = entry != nullptr ? entry->recentTarget() : nullptr;
+  return file != nullptr ? *file : target.location;
+}
+
 void ProgramController::open(const luciole::ActionRequest& request, std::function<void()> openDocument) {
   if (!current(request) || request.targets.size() != 1 || busy()) {
     return;
@@ -71,7 +77,7 @@ void ProgramController::run(const luciole::ActionRequest& request, bool terminal
   ++m_pending;
   const std::weak_ptr<int> lifetime = m_lifetime;
   luciole::runJob<luciole::PreparedProgram>(
-      token, [location = request.targets.front().location, token] { return luciole::prepareProgram(location, token); },
+      token, [location = fileOf(request.targets.front()), token] { return luciole::prepareProgram(location, token); },
       [this, lifetime, request, terminal, token](auto result) {
         if (lifetime.expired()) {
           return;
@@ -144,12 +150,13 @@ void ProgramController::launch(
   }
   m_launch = luciole::CancelToken{};
   const auto token = m_launch;
-  const auto folder = request.folder ? *request.folder : *request.targets.front().location.parent();
+  const auto folder =
+      request.folder && !request.folder->isRecent() ? *request.folder : *fileOf(request.targets.front()).parent();
   std::vector<luciole::Location> arguments;
   arguments.reserve(script ? request.targets.size() : 0);
   if (script) {
     for (const auto& target : request.targets) {
-      arguments.push_back(target.location);
+      arguments.push_back(fileOf(target));
     }
   }
   ++m_pending;

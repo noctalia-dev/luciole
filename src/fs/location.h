@@ -13,6 +13,7 @@ namespace luciole {
     static Location fromCanonicalNativeUri(std::string uri);
     static Location trash();
     static Location network();
+    static Location recent();
     bool isNetworkDiscovery() const;
     // MTP or PTP device root; GVFS lists it empty while the device is locked or not in file transfer mode.
     bool isDeviceRoot() const;
@@ -22,6 +23,8 @@ namespace luciole {
     // file:// URI of nativePath() built without GVfs, which would map a FUSE path back to its remote URI.
     std::optional<std::string> nativeFileUri() const;
     bool isTrash() const;
+    // GVfs's list of recently used files, shared with other applications; its items stand for files elsewhere.
+    bool isRecent() const;
     bool isNative() const;
     // Local GVfs administrator namespace, with no authority, credentials, query or fragment.
     bool isAdmin() const;

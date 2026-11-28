@@ -450,6 +450,100 @@ namespace {
     model.applySnapshot(data);
     TEST_CHECK(!R::state(A::DeletePermanently, context, R::capture(context)).enabled);
   }
+  // Recent items stand for files elsewhere: actions open, copy or show that file, or edit the list, and never change
+  // the file as if Recent were its folder.
+  void testRecentActions() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    data.location = luciole::Location::recent();
+    test::editEntries(data, [&](auto& entries) {
+      entries.erase(entries.begin() + 2, entries.end());
+      entries[0].place = luciole::Location::fromUri("recent:///a1");
+      entries[0].setShortcutTarget(luciole::Location::fromPath("/tmp/elsewhere/alpha.txt"));
+      entries[1].place = luciole::Location::fromUri("recent:///b2");
+    });
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    luciole::ActionContext context{.model = model, .context = 34, .query = {}, .pinned = {}};
+    context.clipboardAvailable = true;
+    auto request = R::capture(context);
+    for (const auto action :
+         {A::Open, A::OpenWith, A::CopyFiles, A::ContainingFolder, A::CopyTargetPath, A::CopyTargetUri, A::Properties,
+          A::QuickPreview, A::RemoveFromRecent, A::ClearRecent}) {
+      TEST_CHECK(R::state(action, context, request).enabled);
+    }
+    for (const auto action :
+         {A::CutFiles, A::Rename, A::Trash, A::DeletePermanently, A::Pin, A::CreateLink, A::CreateFolder, A::PasteFiles,
+          A::PinCurrent, A::Terminal}) {
+      TEST_CHECK(!R::state(action, context, request).enabled);
+    }
+    // A plain file offers no archive actions, but can be compressed beside itself.
+    TEST_CHECK(!R::state(A::ExtractHere, context, request).enabled && R::state(A::Compress, context, request).enabled);
+    TEST_CHECK(R::openAction(context, request) == A::Open);
+    // Actions run on the file a Recent item stands for, so a request naming that file stays current.
+    auto standIn = request;
+    standIn.targets.front().location = luciole::Location::fromPath("/tmp/elsewhere/alpha.txt");
+    TEST_CHECK(R::current(context, standIn, luciole::ActionScope::Targets));
+    standIn.targets.front().location = luciole::Location::fromPath("/tmp/elsewhere/other.txt");
+    TEST_CHECK(!R::current(context, standIn, luciole::ActionScope::Targets));
+    // An archive extracts and browses as in its own folder, and opening it browses it.
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].setShortcutTarget(luciole::Location::fromPath("/tmp/elsewhere/photos.zip"));
+      entries[0].contentType = "application/zip";
+    });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    request = R::capture(context);
+    for (const auto action : {A::ExtractHere, A::ExtractTo, A::BrowseArchive}) {
+      TEST_CHECK(R::state(action, context, request).enabled);
+    }
+    TEST_CHECK(R::openAction(context, request) == A::BrowseArchive);
+    // A program runs as the file it stands for; scripts work on a folder, so they stay in the file's own one.
+    test::editEntries(data, [&](auto& entries) {
+      entries[0].setShortcutTarget(luciole::Location::fromPath("/tmp/elsewhere/tool.sh"));
+      entries[0].contentType = "application/x-shellscript";
+      entries[0].access.execute = true;
+    });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    request = R::capture(context);
+    context.terminalAvailable = true;
+    TEST_CHECK(
+        R::state(A::RunProgram, context, request).enabled && R::state(A::RunInTerminal, context, request).enabled
+    );
+    TEST_CHECK(!R::state(A::Scripts, context, request).enabled);
+    test::editEntries(data, [&](auto& entries) { entries[0].access.execute = false; });
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    request = R::capture(context);
+    TEST_CHECK(!R::state(A::RunProgram, context, request).enabled);
+    context.operationsBusy = true;
+    TEST_CHECK(!R::state(A::ExtractHere, context, request).enabled);
+    context.operationsBusy = false;
+    // One write at a time: list edits wait for the previous one.
+    context.canEditRecent = false;
+    TEST_CHECK(!R::state(A::RemoveFromRecent, context, request).enabled);
+    TEST_CHECK(!R::state(A::ClearRecent, context, request).enabled);
+    context.canEditRecent = true;
+    // An item whose provider named no file can be neither opened nor forgotten.
+    TEST_CHECK(model.select(2));
+    request = R::capture(context);
+    TEST_CHECK(!R::state(A::Open, context, request).enabled);
+    TEST_CHECK(!R::state(A::RemoveFromRecent, context, request).enabled);
+    // Outside Recent the list cannot be edited, even with the same entries.
+    data.location = luciole::Location::fromPath("/tmp/action-fixture");
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(model.select(1));
+    request = R::capture(context);
+    TEST_CHECK(!R::state(A::RemoveFromRecent, context, request).enabled);
+    TEST_CHECK(!R::state(A::ClearRecent, context, request).enabled);
+    // Every action is either offered or refused in Recent.
+    TEST_CHECK(luciole::recentAction(A::Open) && !luciole::recentAction(A::Rename));
+  }
   void testPermanentDeletionMenuEntries() {
     TEST_CHECK((luciole::itemMenuDeletionActions(false, false) == std::vector{A::Trash}));
     TEST_CHECK((luciole::itemMenuDeletionActions(false, true) == std::vector{A::Trash, A::DeletePermanently}));
@@ -1299,6 +1393,7 @@ int main() {
     testCompressedArchiveActions();
     testExecutionActions();
     testTrashActions();
+    testRecentActions();
     testPermanentDeletionMenuEntries();
     testEmptyTrashAvailability();
     testLinkActions();

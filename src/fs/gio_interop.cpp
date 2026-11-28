@@ -64,6 +64,16 @@ luciole::FileError luciole::fileError(const GError& error) {
   return {.kind = kind, .message = error.message};
 }
 
+bool luciole::uriSchemeSupported(const char* scheme) {
+  const auto* schemes = g_vfs_get_supported_uri_schemes(g_vfs_get_default());
+  for (const auto* current = schemes; current && *current; ++current) {
+    if (g_ascii_strcasecmp(*current, scheme) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 luciole::FileError luciole::directoryOpenError(const Location& location, FileError error) {
   if (error.kind != FileErrorKind::Unsupported || location.isNative() || location.isTrash()) {
     return error;
@@ -72,11 +82,8 @@ luciole::FileError luciole::directoryOpenError(const Location& location, FileErr
   if (!scheme) {
     return error;
   }
-  const auto* schemes = g_vfs_get_supported_uri_schemes(g_vfs_get_default());
-  for (const auto* current = schemes; current && *current; ++current) {
-    if (g_ascii_strcasecmp(*current, scheme.get()) == 0) {
-      return error;
-    }
+  if (uriSchemeSupported(scheme.get())) {
+    return error;
   }
   if (location.isAdmin()) {
     error.message = "Administrator access is unavailable. Install or enable the GVfs admin backend, Polkit and "

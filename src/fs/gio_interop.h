@@ -23,6 +23,8 @@ namespace luciole {
   FileError fileError(const GError& error);
   // May synchronously query installed GIO providers; call on a worker.
   FileError directoryOpenError(const Location& location, FileError error);
+  // Whether this session's GIO backends serve URIs of `scheme`, such as "recent".
+  bool uriSchemeSupported(const char* scheme);
   FileType fileType(GFileType type);
   // Providers may omit the separate boolean when their type already describes the item.
   bool readIsSymlink(GFileInfo* info);

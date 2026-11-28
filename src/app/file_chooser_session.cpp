@@ -703,6 +703,9 @@ void FileChooserSession::apply(const luciole::ChooserDecision& decision) {
     }
     result.choices = m_choices;
     kLog.debug("accepting {} item(s)", result.uris.size());
+    if (!mode().directory) {
+      m_page->rememberChosen(decision.locations);
+    }
     if (auto folder = m_page->location()) {
       // Remembered for chooser_start_folder = "last"; a lost write only costs the next picker's start folder.
       luciole::runJob<bool>(

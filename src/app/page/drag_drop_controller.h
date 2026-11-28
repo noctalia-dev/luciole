@@ -97,6 +97,8 @@ private:
     std::vector<luciole::Bookmark> bookmarks;
     std::optional<luciole::Location> sourcePin;
     bool foldersOnly = false;
+    // Files from Recent: a drop copies them, never moving or trashing the original.
+    bool copyOnly = false;
   };
   struct DropTarget {
     luciole::Location location;

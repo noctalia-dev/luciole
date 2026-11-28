@@ -175,16 +175,25 @@ namespace {
     }
     return {};
   }
-  bool extractableArchives(const C& c, const R& r) {
-    return !r.targets.empty() && all(c, r, [](const DirectoryEntry& entry) {
-      return entry.type == FileType::Regular
-          && !entry.symlink
-          && entry.location().nativePath().has_value()
-          && entry.access.read.value_or(true)
-          && luciole::isSupportedArchive(entry.location(), entry.contentType.value_or(""));
-    });
+  bool extractableArchive(const DirectoryEntry& entry) {
+    return entry.type == FileType::Regular
+        && !entry.symlink
+        && entry.location().nativePath().has_value()
+        && entry.access.read.value_or(true)
+        && luciole::isSupportedArchive(entry.location(), entry.contentType.value_or(""));
   }
-  bool browsableArchive(const C& c, const R& r) { return single(r) && extractableArchives(c, r); }
+  bool compressible(const DirectoryEntry& entry) {
+    return entry.location().nativePath().has_value()
+        && entry.access.read.value_or(true)
+        && (entry.type == FileType::Regular || entry.type == FileType::Directory || entry.symlink);
+  }
+  bool extractableArchives(const C& c, const R& r) { return !r.targets.empty() && all(c, r, extractableArchive); }
+  // A Recent item counts as the archive it stands for, so opening one browses it as in its own folder.
+  bool browsableArchive(const C& c, const R& r) {
+    return single(r) && all(c, r, [](const DirectoryEntry& entry) {
+             return extractableArchive(entry.recentTarget() ? entry.atRecentTarget() : entry);
+           });
+  }
   State archive(const C& c, const R& r, bool compress) {
     if (c.operationsBusy) {
       return unavailable("Another file operation is still finishing.");
@@ -224,7 +233,10 @@ namespace {
     if (!single(r) || c.operationsBusy) {
       return unavailable("Select one program and wait for file operations to finish.");
     }
-    const auto* entry = c.model.entry(r.targets.front().id);
+    const auto* item = c.model.entry(r.targets.front().id);
+    // A Recent item runs the file it stands for.
+    const auto standIn = item->recentTarget() ? std::optional(item->atRecentTarget()) : std::nullopt;
+    const auto* entry = standIn ? &*standIn : item;
     const auto location = entry->location();
     if (!location.isNative() || location.isTrash() || (entry->type != FileType::Regular && !entry->symlink)) {
       return unavailable("Run requires a native program outside Trash.");
@@ -344,6 +356,93 @@ namespace {
             ),
         "Select readable files or folders."
     );
+  }
+  State recentList(const C& c, const R& r) {
+    if (!r.folder || *r.folder != luciole::Location::recent()) {
+      return unavailable("Open Recent first.");
+    }
+    return require(c.canEditRecent, "The recent list is still being updated.");
+  }
+  State removeFromRecent(const C& c, const R& r) {
+    if (const auto state = recentList(c, r); !state.enabled) {
+      return state;
+    }
+    return require(
+        r.query.empty() && all(c, r, [](const DirectoryEntry& entry) { return entry.recentTarget() != nullptr; }),
+        "Select recent items."
+    );
+  }
+  State clearRecent(const C& c, const R& r) {
+    if (const auto state = recentList(c, r); !state.enabled) {
+      return state;
+    }
+    return require(!c.model.snapshot().entries.empty(), "Recent is already empty.");
+  }
+  // In Recent, archive actions judge each item's file, which is what they then read and write beside.
+  State recentArchive(A action, const C& c, const R& r) {
+    if (c.operationsBusy) {
+      return unavailable("Another file operation is still finishing.");
+    }
+    const auto files = [&](bool (*predicate)(const DirectoryEntry&)) {
+      return all(c, r, [&](const DirectoryEntry& entry) { return predicate(entry.atRecentTarget()); });
+    };
+    if (action == A::Compress) {
+      return require(files(compressible), "Archives require readable native items.");
+    }
+    if (action == A::BrowseArchive && !single(r)) {
+      return unavailable("Select one archive to browse.");
+    }
+    return require(files(extractableArchive), "Select readable native archives.");
+  }
+  // Recent lists files kept elsewhere: these actions work on each item's file, and the rest would act on the list.
+  State recentFiles(A action, const C& c, const R& r) {
+    if (!all(c, r, [](const DirectoryEntry& entry) { return entry.recentTarget() != nullptr; })) {
+      return unavailable("This recent item no longer names a file.");
+    }
+    const auto files = [&](auto predicate) {
+      return all(c, r, [&](const DirectoryEntry& entry) { return predicate(*entry.recentTarget(), entry); });
+    };
+    switch (action) {
+    case A::Open:
+      return open(c, r);
+    case A::OpenWith:
+      return openWith(c, r);
+    case A::ContainingFolder:
+      return containing(c, r);
+    case A::CopyFiles:
+      if (!c.clipboardAvailable) {
+        return unavailable("The application clipboard is unavailable.");
+      }
+      return require(
+          files([](const luciole::Location& file, const DirectoryEntry& entry) {
+            return transferLocationSupported(file)
+                && (entry.type == FileType::Directory || entry.type == FileType::Regular);
+          }),
+          "Select local or supported remote files or folders."
+      );
+    case A::CopyTargetPath:
+    case A::CopyTargetUri:
+      return clipboard(c, r);
+    case A::Compress:
+    case A::ExtractHere:
+    case A::ExtractTo:
+    case A::BrowseArchive:
+      return recentArchive(action, c, r);
+    case A::RunProgram:
+      return runProgram(c, r);
+    case A::RunInTerminal:
+      if (const auto state = runProgram(c, r); !state.enabled) {
+        return state;
+      }
+      return require(
+          c.terminalAvailable && !files([](const luciole::Location& file, const DirectoryEntry&) {
+            return file.basename().value_or("").ends_with(".desktop");
+          }),
+          "Run in Terminal requires xdg-terminal-exec and a program or script."
+      );
+    default:
+      return {};
+    }
   }
   bool sortField(const C& c, luciole::SortField field) { return c.model.sort().field == field; }
 
@@ -619,6 +718,17 @@ namespace {
        .glyph = "refresh",
        .rule = [](const C& c, const R&) { return require(!c.pinsBusy, "Pins are being saved."); }},
       {.action = A::EmptyTrash, .label = "Empty Trash…", .glyph = "trash-x", .destructive = true, .rule = emptyTrash},
+      {.action = A::RemoveFromRecent,
+       .label = "Remove from Recent",
+       .glyph = "eraser",
+       .scope = S::Targets,
+       .rule = removeFromRecent},
+      {.action = A::ClearRecent,
+       .label = "Clear Recent…",
+       .glyph = "clear-all",
+       .scope = S::Location,
+       .destructive = true,
+       .rule = clearRecent},
       {.action = A::SelectAll,
        .label = "Select All",
        .glyph = "select-all",
@@ -794,8 +904,13 @@ bool luciole::ActionRegistry::current(const ActionContext& context, const Action
       || request.query != context.query) {
     return false;
   }
+  // A Recent item's actions name the file it stands for.
   return scope != ActionScope::Targets || std::ranges::all_of(request.targets, [&](const auto& target) {
-           return context.model.location(target.id) == target.location && context.model.visible(target.id);
+           const auto* entry = context.model.entry(target.id);
+           const auto* file = entry != nullptr ? entry->recentTarget() : nullptr;
+           return (context.model.location(target.id) == target.location
+                   || (file != nullptr && *file == target.location))
+               && context.model.visible(target.id);
          });
 }
 luciole::BrowserAction luciole::ActionRegistry::openAction(const ActionContext& context, const ActionRequest& request) {
@@ -873,6 +988,8 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::UnpinCurrent:
   case A::ReloadPins:
   case A::EmptyTrash:
+  case A::RemoveFromRecent:
+  case A::ClearRecent:
   case A::Settings:
   case A::About:
   case A::MenuBack:
@@ -889,6 +1006,100 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::OpenAdmin:
   case A::OpenCurrentAdmin:
   case A::LeaveAdmin:
+    return false;
+  }
+  return false;
+}
+
+bool luciole::recentAction(BrowserAction action) {
+  switch (action) {
+  case A::Back:
+  case A::Forward:
+  case A::Up:
+  case A::Home:
+  case A::Root:
+  case A::Refresh:
+  case A::Stop:
+  case A::EditLocation:
+  case A::Search:
+  case A::Grid:
+  case A::List:
+  case A::Miller:
+  case A::ShowHidden:
+  case A::ShowSidebar:
+  case A::ShowPreview:
+  case A::QuickPreview:
+  case A::OpenWith:
+  case A::SortName:
+  case A::SortType:
+  case A::SortSize:
+  case A::SortModified:
+  case A::SortAccessed:
+  case A::SortCreated:
+  case A::SortOwner:
+  case A::SortGroup:
+  case A::SortPermissions:
+  case A::SortLocation:
+  case A::Ascending:
+  case A::Descending:
+  case A::FoldersFirst:
+  case A::HiddenLast:
+  case A::ResetFolderView:
+  case A::Open:
+  case A::ContainingFolder:
+  case A::CopyFiles:
+  case A::Properties:
+  case A::ReloadPins:
+  case A::EmptyTrash:
+  case A::RemoveFromRecent:
+  case A::ClearRecent:
+  case A::SelectAll:
+  case A::InvertSelection:
+  case A::SelectPattern:
+  case A::ClearSelection:
+  case A::Settings:
+  case A::About:
+  case A::MenuBack:
+  case A::SortMenu:
+  case A::SelectionMenu:
+  case A::CopyPath:
+  case A::CopyUri:
+  case A::CopyTargetPath:
+  case A::CopyTargetUri:
+  case A::Undo:
+  case A::Redo:
+  case A::Operations:
+  case A::LeaveAdmin:
+  case A::KeyboardShortcuts:
+  // These read the file and write beside it or run from its folder, never in Recent.
+  case A::RunProgram:
+  case A::RunInTerminal:
+  case A::Compress:
+  case A::ExtractHere:
+  case A::ExtractTo:
+  case A::BrowseArchive:
+    return true;
+  case A::OriginalLocation:
+  case A::ShowLinkTarget:
+  case A::Pin:
+  case A::Unpin:
+  case A::CutFiles:
+  case A::PasteFiles:
+  case A::Rename:
+  case A::CreateLink:
+  case A::Trash:
+  case A::Restore:
+  case A::DeletePermanently:
+  case A::CreateFolder:
+  case A::CreateFile:
+  case A::NewDocument:
+  case A::PinCurrent:
+  case A::UnpinCurrent:
+  case A::Terminal:
+  case A::Scripts:
+  case A::TargetTerminal:
+  case A::OpenAdmin:
+  case A::OpenCurrentAdmin:
     return false;
   }
   return false;
@@ -929,6 +1140,14 @@ luciole::ActionRegistry::state(BrowserAction action, const ActionContext& c, con
   }
   if ((row.scope == ActionScope::Targets || row.scope == ActionScope::Selection) && !c.model.selectionAvailable()) {
     return unavailable("The listing is not available for selection.");
+  }
+  if (r.folder && r.folder->isRecent()) {
+    if (!recentAction(action)) {
+      return unavailable("Recent only lists files. Show one in its folder to change it.");
+    }
+    if (row.scope == ActionScope::Targets && action != A::RemoveFromRecent && action != A::QuickPreview) {
+      return recentFiles(action, c, r);
+    }
   }
   return row.rule != nullptr ? row.rule(c, r) : ActionState{};
 }

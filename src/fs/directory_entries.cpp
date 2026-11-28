@@ -69,8 +69,24 @@ void luciole::DirectoryEntry::setLinksToDirectory(bool leadsToFolder) {
     icon = shown;
   }
 }
+const luciole::Location* luciole::DirectoryEntry::recentTarget() const {
+  const auto* folder = place.folder();
+  return (folder ? folder->isRecent() : location().isRecent()) ? shortcutTarget() : nullptr;
+}
+luciole::DirectoryEntry luciole::DirectoryEntry::atRecentTarget() const {
+  const auto* target = recentTarget();
+  if (target == nullptr) {
+    throw std::logic_error("not a Recent item");
+  }
+  auto file = *this;
+  file.place = EntryPlace(*target);
+  file.name = target->basename().value_or(name);
+  file.setShortcutTarget(std::nullopt);
+  file.setParentDisplayName({});
+  return file;
+}
 luciole::Location luciole::DirectoryEntry::navigationLocation() const {
-  const auto* target = type == FileType::Shortcut ? shortcutTarget() : nullptr;
+  const auto* target = type == FileType::Shortcut ? shortcutTarget() : recentTarget();
   return target ? *target : location();
 }
 void luciole::DirectoryEntry::setShortcutTarget(std::optional<Location> target) {

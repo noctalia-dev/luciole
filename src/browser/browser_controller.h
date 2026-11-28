@@ -60,6 +60,8 @@ namespace luciole {
     // The sort of folders without their own; setting it re-sorts the current folder unless that has its own.
     void setDefaultSort(SortOptions sort);
     const SortOptions& defaultSort() const { return m_defaultSort; }
+    // Recent's sort when it has none of its own: last used first until changed, and kept apart from the default.
+    void setRecentSort(SortOptions sort);
     // Per-folder settings looked up on every visit; nullptr or a disabled service means the defaults everywhere.
     // The service must outlive this controller.
     void setFolderViews(const FolderViewService* views) { m_folderViews = views; }
@@ -201,7 +203,13 @@ namespace luciole {
     std::optional<Reference> reference(std::optional<EntryId> id) const;
     std::vector<Visit> m_history;
     BrowseViewport m_defaults;
+    // The sort of the current location when it has none of its own.
+    const SortOptions& fallbackSort() const;
     SortOptions m_defaultSort;
+    bool m_sortedForRecent = false;
+    SortOptions m_recentSort{
+        .field = SortField::Accessed, .descending = true, .directoriesFirst = false, .hiddenLast = false
+    };
     const FolderViewService* m_folderViews = nullptr;
     BrowseViewport m_viewport;
     std::optional<BrowseViewport> m_restoredViewport;

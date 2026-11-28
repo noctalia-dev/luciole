@@ -57,6 +57,21 @@ luciole::FileType luciole::chosenType(const DirectoryEntry& entry) {
 luciole::ChooserDecision luciole::chooserDecision(
     ChooserMode mode, const std::optional<Location>& folder, std::span<const DirectoryEntry> entries
 ) {
+  // Recent lists files kept elsewhere, so choosing an item chooses its file.
+  if (folder && folder->isRecent()) {
+    std::vector<DirectoryEntry> files;
+    files.reserve(entries.size());
+    for (const auto& entry : entries) {
+      if (entry.recentTarget() == nullptr) {
+        return unavailable("This recent item no longer names a file.");
+      }
+      files.push_back(entry.atRecentTarget());
+    }
+    if (files.empty()) {
+      return unavailable(mode.directory ? "Choose a folder." : "");
+    }
+    return chooserDecision(mode, files.front().location().parent(), files);
+  }
   // As GTK's local-only chooser: remote GVfs locations count when gvfsd-fuse gives them a path.
   if (!folder || !folder->nativePath() || std::ranges::any_of(entries, [](const DirectoryEntry& entry) {
         return !entry.location().nativePath();

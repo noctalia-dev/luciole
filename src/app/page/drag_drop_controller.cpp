@@ -345,6 +345,9 @@ bool DragDropController::dragCurrent() const {
 }
 
 bool DragDropController::validDropFolder(const luciole::Location& destination) const {
+  if (!m_externalHover && m_drag && m_drag->copyOnly && destination.isTrash()) {
+    return false;
+  }
   const auto* payload = m_externalHover ? m_page.clipboard().dragFiles() : nullptr;
   const bool fromTrash = payload
       ? std::ranges::any_of(payload->locations, [](const auto& source) { return source.isTrash(); })
@@ -516,6 +519,7 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
   }
   Drag drag;
   drag.foldersOnly = true;
+  bool fromRecent = false;
   for (const auto id : ids) {
     const auto* entry = m_page.browser().model().entry(id);
     if (entry == nullptr
@@ -527,6 +531,15 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
       return;
     }
     auto location = entry->location();
+    // A Recent item drags its file.
+    if (location.isRecent()) {
+      const auto* target = entry->recentTarget();
+      if (target == nullptr) {
+        return;
+      }
+      location = *target;
+      fromRecent = true;
+    }
     if (location.isTrash()
         && (!luciole::isTopLevelTrashItem(location)
             || !entry->identity()
@@ -551,6 +564,7 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
       );
     }
   }
+  drag.copyOnly = fromRecent;
   m_drag = std::move(drag);
   luciole::FilePayload payload;
   for (const auto& target : m_drag->entries) {
@@ -567,7 +581,9 @@ void DragDropController::startFileDrag(const std::vector<luciole::EntryId>& ids)
           cancelDrag();
         }
       },
-      m_drag->entries.front().location.isTrash()                    ? std::optional(luciole::DragAction::Move)
+      // Recent only lists files, so dragging one out copies it rather than moving the original.
+      fromRecent                                                    ? std::optional(luciole::DragAction::Copy)
+          : m_drag->entries.front().location.isTrash()              ? std::optional(luciole::DragAction::Move)
           : (m_connection.keyboardModifiers() & KeyMod::Alt) != 0   ? std::optional(luciole::DragAction::Ask)
           : (m_connection.keyboardModifiers() & KeyMod::Ctrl) != 0  ? std::optional(luciole::DragAction::Copy)
           : (m_connection.keyboardModifiers() & KeyMod::Shift) != 0 ? std::optional(luciole::DragAction::Move)
@@ -774,10 +790,11 @@ void DragDropController::layout(Renderer& renderer) {
   const bool fromTrash = !m_drag->entries.empty() && m_drag->entries.front().location.isTrash();
   std::optional<luciole::DragAction> action;
   if (m_lastDropTarget) {
-    action = resolveDropAction(
-        m_connection.keyboardModifiers(), m_lastDropTarget->location, fromTrash, remoteSource,
-        m_page.settings().dropAction
-    );
+    action = m_drag->copyOnly ? luciole::DragAction::Copy
+                              : resolveDropAction(
+                                    m_connection.keyboardModifiers(), m_lastDropTarget->location, fromTrash,
+                                    remoteSource, m_page.settings().dropAction
+                                );
   }
   const auto shape = slot
       ? (m_drag->sourcePin ? WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_MOVE : WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_COPY)
@@ -808,13 +825,15 @@ void DragDropController::finishDrag() {
     const bool remoteSource =
         std::ranges::any_of(drag.entries, [](const auto& source) { return !source.location.isNative(); });
     const bool fromTrash = !drag.entries.empty() && drag.entries.front().location.isTrash();
-    const auto action = resolveDropAction(
-        m_connection.keyboardModifiers(), target->location, fromTrash, remoteSource, m_page.settings().dropAction
-    );
+    const auto action = drag.copyOnly
+        ? luciole::DragAction::Copy
+        : resolveDropAction(
+              m_connection.keyboardModifiers(), target->location, fromTrash, remoteSource, m_page.settings().dropAction
+          );
     luciole::DropOptions options{
         .action = action,
         .canCopy = true,
-        .canMove = true,
+        .canMove = !drag.copyOnly,
         .x = m_page.pointerX(),
         .y = m_page.pointerY(),
         .select = [](luciole::TransferAction) { return true; }

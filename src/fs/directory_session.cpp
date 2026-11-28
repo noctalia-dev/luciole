@@ -2,6 +2,7 @@
 
 #include "fs/background_job.h"
 #include "fs/custom_icons.h"
+#include "fs/filename.h"
 #include "fs/gio_interop.h"
 #include "fs/heap_trim.h"
 #include "fs/native_listing.h"
@@ -75,6 +76,8 @@ namespace {
   // Local folders derive icons from the content type instead; see FileIconPool::getLocal.
   constexpr const char* kIconAttribute = G_FILE_ATTRIBUTE_STANDARD_ICON;
   constexpr const char* kTrashAttributes = G_FILE_ATTRIBUTE_TRASH_ORIG_PATH "," G_FILE_ATTRIBUTE_TRASH_DELETION_DATE;
+  // When a Recent item was last used; GVfs's recent backend reports it.
+  constexpr const char* kRecentModified = "recent::modified";
   constexpr int kBatchSize = 64;
   // Delay between a change notification and its rescan; slow scans extend it up to the maximum.
   constexpr std::chrono::milliseconds kMonitorDelay{80};
@@ -240,6 +243,29 @@ namespace {
   };
 } // namespace
 
+namespace {
+  // A Recent item stands for its target file. Its folder is shown as context, and the time it was last used, which
+  // Recent sorts by, is its access time.
+  void readRecentItem(GFileInfo* info, luciole::DirectoryEntry& entry) {
+    if (const auto used = luciole::infoUint64(info, kRecentModified)) {
+      entry.details.accessedSeconds = used;
+    }
+    const char* target = luciole::infoString(info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+    if (target == nullptr) {
+      return;
+    }
+    try {
+      auto location = luciole::Location::fromUri(target);
+      const auto parent = location.parent();
+      const auto path = parent ? parent->nativePath() : std::nullopt;
+      entry.setParentDisplayName(path ? luciole::filenameDisplayText(*path) : "");
+      entry.setShortcutTarget(std::move(location));
+    } catch (const std::invalid_argument&) {
+      // A malformed target leaves the item without a file to open; it is never guessed from its name.
+    }
+  }
+} // namespace
+
 namespace luciole {
   luciole::DirectoryEntry readEntry(
       GFileInfo* info, const std::shared_ptr<const luciole::Location>& folder, luciole::FileIconPool& icons, bool local,
@@ -279,6 +305,9 @@ namespace luciole {
       entry.setTrash(std::move(trash));
     }
     entry.details = readEntryMetadata(info);
+    if (folder->isRecent()) {
+      readRecentItem(info, entry);
+    }
     entry.setIdentity(readFileIdentity(info));
     if (const auto size = infoUint64(info, G_FILE_ATTRIBUTE_STANDARD_SIZE); size && *size <= G_MAXINT64) {
       entry.size = size;
@@ -760,7 +789,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       return;
     }
     const auto file = gioFile(*snapshot.location);
-    if (snapshot.location->isNetworkDiscovery()) {
+    // Discovery and Recent change without any local file changing, so only their providers can report changes.
+    if (snapshot.location->isNetworkDiscovery() || snapshot.location->isRecent()) {
       monitorPending = true;
       monitorToken = CancelToken{};
       runJob<GioPtr<GFileMonitor>>(
@@ -788,7 +818,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
                 }
               } else {
                 owner->snapshot.monitorError = result
-                    ? FileError{FileErrorKind::Unsupported, "Network changes cannot be monitored; refresh to update."}
+                    ? FileError{FileErrorKind::Unsupported, owner->snapshot.location->isRecent() ? "Recent changes cannot be monitored; refresh to update." : "Network changes cannot be monitored; refresh to update."}
                     : result.error();
               }
               owner->notify();
@@ -1494,6 +1524,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     }
     if (scan->trash) {
       attributes.append(",").append(kTrashAttributes);
+    }
+    if (scan->folder->isRecent()) {
+      attributes.append(",").append(kRecentModified);
     }
     g_file_enumerate_children_async(
         scan->parent.get(), attributes.c_str(), G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, G_PRIORITY_DEFAULT,
