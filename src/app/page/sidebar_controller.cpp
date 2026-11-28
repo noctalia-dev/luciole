@@ -243,7 +243,7 @@ void SidebarController::removeDrive(const std::string& key) {
           &title
       ),
       ui::label(
-          {.text = "Files on this drive will no longer be available. Finish any file transfers before continuing.",
+          {.text = "Files on this drive will no longer be available.",
            .maxWidth = m_page.dialogWidth(DialogWidth::Small) - 24.0F,
            .maxLines = 4}
       ),
