@@ -1680,18 +1680,27 @@ bool WorkspaceApplication::stripPointer(Host& host, const PointerEvent& event, f
       }
     }
   }
+  // With the tabs hidden the scroll view is too, and the whole strip outside the window controls is title bar.
+  const Node* titlebarArea = host.tabsHidden ? static_cast<const Node*>(host.strip) : host.tabScroll;
   if (event.type == PointerEvent::Type::Button
       && event.pressed
       && (event.button == BTN_LEFT || event.button == BTN_RIGHT)
-      && host.tabScroll
-      && host.tabScroll->containsScenePoint(x, y)) {
-    bool child = host.newTabButton && host.newTabButton->containsScenePoint(x, y);
-    for (const auto& [tab, button] : host.buttons) {
-      (void)tab;
-      float bx = 0.0F;
-      float by = 0.0F;
-      Node::absolutePosition(button, bx, by);
-      child |= x >= bx && x <= bx + button->width();
+      && titlebarArea != nullptr
+      && titlebarArea->containsScenePoint(x, y)) {
+    bool child = false;
+    if (host.tabsHidden) {
+      for (const auto& node : host.strip->children()) {
+        child |= node->visible() && node->containsScenePoint(x, y);
+      }
+    } else {
+      child = host.newTabButton && host.newTabButton->containsScenePoint(x, y);
+      for (const auto& [tab, button] : host.buttons) {
+        (void)tab;
+        float bx = 0.0F;
+        float by = 0.0F;
+        Node::absolutePosition(button, bx, by);
+        child |= x >= bx && x <= bx + button->width();
+      }
     }
     // The empty strip works as a title bar, as browsers' tab strips do: double-click toggles maximized and a right
     // click opens the compositor's window menu. A compositor that decorates the window may still draw no title bar.
