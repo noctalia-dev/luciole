@@ -195,7 +195,6 @@ void OperationsController::open() {
 }
 
 void OperationsController::closed() {
-  // The polling timer keeps running: the toolbar button's bar still follows running jobs.
   m_pendingDetails.reset();
   m_reopen = false;
   m_anchor.reset();

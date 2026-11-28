@@ -1281,10 +1281,8 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         measureSources(owner->meter, job->request, token);
         const bool remote = !job->request.destination.isNative()
             || std::ranges::any_of(job->request.sources, [](const auto& source) { return !source.isNative(); });
-        // Downloads of measured sources count their files as they arrive, like native copies.
-        const bool measuredDownload =
-            job->request.destination.isNative() && std::ranges::all_of(job->request.sources, measurableSource);
-        if (!remote || measuredDownload) {
+        // Native copies and downloads from a phone or camera count their files as they arrive.
+        if (job->request.destination.isNative() && std::ranges::all_of(job->request.sources, measurableSource)) {
           owner->meter.fileCounting.store(true);
         }
         if (remote && !job->provider) {
