@@ -124,7 +124,7 @@ namespace luciole {
       const Presentation* presentation;
       const DirectoryEntry* entry;
     };
-    bool less(const SortItem& left, const SortItem& right) const;
+    bool less(const SortItem& left, const SortItem& right, std::vector<std::string>& tieUris) const;
 
     DirectorySnapshot m_snapshot;
     SortOptions m_sort;
