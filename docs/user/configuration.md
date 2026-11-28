@@ -155,7 +155,7 @@ Name accepts `0` for automatic sizing or an integer from `160` through `16384`. 
 
 `"local"` skips network shares and FUSE mounts without a local disk, such as rclone, sshfs and gocryptfs. To get thumbnails on mounted shares such as `/mnt/media`, choose **Settings → Thumbnails → Show Thumbnails → All Locations**. Locations without a filesystem path stay cache-only; Luciole never downloads whole remote files for thumbnails.
 
-The size limit applies to image and PDF sources only. There is no pixel limit: the decoder's memory, CPU time and output limits decide, which admits phone photos up to about 200 megapixels. With `ffmpegthumbnailer` installed, new video thumbnails get its filmstrip edges; without it they stay plain. Settings can inspect and clear the cache, and existing shared thumbnails are reused.
+The size limit applies to image and PDF sources only. There is no pixel limit: the decoder's memory, CPU time and output limits decide, which admits phone photos up to about 200 megapixels. With `ffmpegthumbnailer` installed, new video thumbnails get its filmstrip edges; without it they stay plain. A video with an embedded cover image, such as one downloaded with `yt-dlp --embed-thumbnail`, shows that cover instead, without filmstrip edges. Settings can inspect and clear the cache, and existing shared thumbnails are reused.
 
 ## Other writable data
 

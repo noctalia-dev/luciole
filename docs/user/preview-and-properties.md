@@ -16,7 +16,7 @@ Select one item and press `Space`. Press `Space` or `Escape` to close it.
 
 In the quick preview, `Left` and `Right` step one item. `Up` and `Down` step one list item or one grid row.
 
-Images, video stills, the first PDF page and embedded audio artwork depend on installed thumbnailers. Video previews are still images, not playback. See [optional features](installation.md#optional-features).
+Images, video stills or embedded video covers, the first PDF page and embedded audio artwork depend on installed thumbnailers. Video previews are still images, not playback. See [optional features](installation.md#optional-features).
 
 ## Preview text and desktop entries
 

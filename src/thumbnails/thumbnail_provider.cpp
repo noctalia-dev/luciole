@@ -9,14 +9,19 @@
 #include "thumbnails/thumbnail_worker.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
 #include <optional>
+#include <ranges>
+#include <string_view>
 #include <unistd.h>
+#include <utility>
 
 namespace {
   LoadedImageFile videoFilmstrip(
@@ -76,25 +81,76 @@ namespace {
     logDebug("[thumbnail] filmstrip unavailable; keeping selected video frame");
     return frame;
   }
-  std::optional<double> videoDuration(int source, const std::filesystem::path& directory, GCancellable* cancel) {
-    const auto path = directory / "duration";
+  struct VideoProbe {
+    std::optional<double> duration;
+    std::optional<int> cover; // stream index of the best embedded cover
+  };
+  template <typename T> std::optional<T> parseNumber(std::string_view text) {
+    T value{};
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    return parsed.ec == std::errc{} ? std::optional(value) : std::nullopt;
+  }
+  VideoProbe probeVideo(int source, const std::filesystem::path& directory, GCancellable* cancel) {
+    constexpr std::size_t kLimit = 16U * 1024U;
+    const auto path = directory / "probe";
     const luciole::Fd output(::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600));
     if (!output.valid()
         || !luciole::runProviderProcess(
-            {"ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries", "format=duration", "-of",
-             "default=noprint_wrappers=1:nokey=1", "/proc/self/fd/3"},
-            source, cancel, 4096, 1, output.get(), std::chrono::seconds(2)
+            {"ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-select_streams", "v", "-show_entries",
+             "format=duration:stream=index,width,height:stream_disposition=attached_pic:stream_tags=filename", "-of",
+             "compact=p=0", "/proc/self/fd/3"},
+            source, cancel, kLimit, 1, output.get(), std::chrono::seconds(2)
         )) {
-      return std::nullopt;
+      return {};
     }
-    const auto bytes = luciole::readThumbnailFile(path, 4096);
-    if (!bytes || bytes->empty()) {
-      return std::nullopt;
+    const auto bytes = luciole::readThumbnailFile(path, kLimit);
+    if (!bytes) {
+      return {};
     }
-    const auto* begin = reinterpret_cast<const char*>(bytes->data());
-    double duration = 0;
-    const auto parsed = std::from_chars(begin, begin + bytes->size(), duration);
-    return parsed.ec == std::errc{} && std::isfinite(duration) && duration > 0 ? std::optional(duration) : std::nullopt;
+    // Rank covers: Matroska cover names first (landscape, then large), then the most pixels.
+    constexpr std::array<std::string_view, 4> kCoverNames{"small_cover", "cover", "small_cover_land", "cover_land"};
+    VideoProbe probe;
+    std::pair<std::size_t, std::int64_t> best{0, -1};
+    const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+    for (const auto lineRange : std::views::split(text, '\n')) {
+      const std::string_view line(lineRange.begin(), lineRange.end());
+      if (line.starts_with("duration=")) {
+        const auto duration = parseNumber<double>(line.substr(9));
+        if (duration && std::isfinite(*duration) && *duration > 0) {
+          probe.duration = duration;
+        }
+        continue;
+      }
+      std::optional<int> index;
+      std::int64_t width = 0;
+      std::int64_t height = 0;
+      bool attached = false;
+      std::size_t nameRank = 0;
+      for (const auto fieldRange : std::views::split(line, '|')) {
+        const std::string_view field(fieldRange.begin(), fieldRange.end());
+        const auto equals = field.find('=');
+        const auto key = field.substr(0, equals);
+        const auto value = equals == std::string_view::npos ? std::string_view{} : field.substr(equals + 1);
+        if (key == "index") {
+          index = parseNumber<int>(value);
+        } else if (key == "width") {
+          width = parseNumber<std::int64_t>(value).value_or(0);
+        } else if (key == "height") {
+          height = parseNumber<std::int64_t>(value).value_or(0);
+        } else if (key == "disposition:attached_pic") {
+          attached = value == "1";
+        } else if (key == "tag:filename") {
+          const auto* const found = std::ranges::find(kCoverNames, value.substr(0, value.find('.')));
+          nameRank = found == kCoverNames.end() ? 0 : static_cast<std::size_t>(found - kCoverNames.begin()) + 1;
+        }
+      }
+      const std::pair rank{nameRank, width * height};
+      if (attached && index && rank > best) {
+        best = rank;
+        probe.cover = index;
+      }
+    }
+    return probe;
   }
   bool darkFrame(const LoadedImageFile& image) {
     std::size_t dark = 0;
@@ -108,7 +164,39 @@ namespace {
       int source, int side, GCancellable* cancel, const std::filesystem::path& output, luciole::ThumbnailPurpose purpose
   ) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
-    const auto duration = videoDuration(source, output.parent_path(), cancel);
+    const auto probe = probeVideo(source, output.parent_path(), cancel);
+    // An embedded cover (attached picture, e.g. yt-dlp --embed-thumbnail) is the file's intended preview, so prefer
+    // it to decoded frames. Files without a usable cover fall through to the frame loop.
+    if (probe.cover) {
+      std::vector<std::string> arguments{"ffmpeg",   "-nostdin",
+                                         "-v",       "error",
+                                         "-xerror",  "-threads",
+                                         "1",        "-filter_threads",
+                                         "1",        "-protocol_whitelist",
+                                         "file,pipe"};
+      arguments.insert(
+          arguments.end(),
+          {"-i", "/proc/self/fd/3", "-map", "0:" + std::to_string(*probe.cover), "-frames:v", "1", "-an", "-sn",
+           "-threads", "1", "-vf",
+           "scale=" + std::to_string(side) + ':' + std::to_string(side) + ":force_original_aspect_ratio=decrease", "-y",
+           output.native()}
+      );
+      (void)::unlink(output.c_str());
+      const auto remaining =
+          std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+      const auto result =
+          luciole::runProviderProcess(std::move(arguments), source, cancel, 8U * 1024U * 1024U, 0, -1, remaining);
+      if (result) {
+        const auto bytes = luciole::readThumbnailFile(output, 8U * 1024U * 1024U);
+        if (bytes) {
+          if (auto cover = luciole::readThumbnailPng(*bytes, side)) {
+            // A cover is already the intended artwork: skip the filmstrip border added to decoded frames.
+            return std::move(cover->image);
+          }
+        }
+      }
+    }
+    const auto& duration = probe.duration;
     const std::vector<double> positions =
         duration && *duration >= 1 ? std::vector{*duration * 0.1, *duration / 3, 0.0} : std::vector{0.0};
     std::optional<LoadedImageFile> dark;
