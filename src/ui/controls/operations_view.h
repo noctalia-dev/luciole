@@ -18,6 +18,8 @@ public:
   // Stages snapshots. Row structure is changed only in Layout; progress updates retain existing controls.
   bool sync(std::vector<luciole::JobActivity> activities);
   void revealFocus(InputArea* focus);
+  // Height the rows need, from the last layout; 0 before the first one.
+  float contentHeight() const;
 
 private:
   class Row;

@@ -108,7 +108,7 @@ namespace {
     std::atomic<std::size_t> completed{0}, expectedFiles{0}, filesDone{0};
     std::atomic<std::uint64_t> expectedBytes{0};
     std::atomic<bool> totalsKnown{false}, totalsPartial{false}, estimating{false};
-    // True once the native copy path runs; it is the only path reporting finished files.
+    // True once a path that reports finished files runs: native copies and downloads from a phone or camera.
     std::atomic<bool> fileCounting{false};
     std::atomic<std::shared_ptr<const std::string>> currentName;
     // Clears every counter. History replay measures nothing, so it passes `measuring` false.
@@ -203,12 +203,10 @@ struct luciole::TransferService::State {
     action = request.action;
     total = request.sources.size();
     bytes.store(0);
-    // Providers, administrator locations and link transfers have no measurable source size, so no
+    // Other providers, administrator locations and link transfers have no measurable source size, so no
     // scan runs and the byte totals stay unknown.
     resetProgress(
-        !retry
-        && request.action != TransferAction::Link
-        && std::ranges::all_of(request.sources, [](const auto& source) { return source.nativePath().has_value(); })
+        !retry && request.action != TransferAction::Link && std::ranges::all_of(request.sources, measurableSource)
     );
     flush.store(TransferFlush::None);
     token = CancelToken{};
@@ -635,7 +633,7 @@ luciole::TransferProgress luciole::TransferService::progress() const {
   if (scanning || state.meter.totalsKnown.load()) {
     // A running scan publishes its totals as a growing lower bound the row can show.
     out.bytesTotal = state.meter.expectedBytes.load();
-    // Only the native copy path counts finished files, so a provider job reports no file counts.
+    // Other provider jobs report no finished files, so they show no file counts.
     if (scanning || state.meter.fileCounting.load()) {
       out.filesTotal = state.meter.expectedFiles.load();
       // A tree that grew after the scan can finish with more entries than were measured.
@@ -1283,7 +1281,8 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         measureSources(owner->meter, job->request, token);
         const bool remote = !job->request.destination.isNative()
             || std::ranges::any_of(job->request.sources, [](const auto& source) { return !source.isNative(); });
-        if (!remote) {
+        // Native copies and downloads from a phone or camera count their files as they arrive.
+        if (job->request.destination.isNative() && std::ranges::all_of(job->request.sources, measurableSource)) {
           owner->meter.fileCounting.store(true);
         }
         if (remote && !job->provider) {

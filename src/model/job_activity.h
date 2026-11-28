@@ -25,4 +25,22 @@ namespace luciole {
   inline bool activitiesNeedAttention(std::span<const JobActivity> activities) {
     return std::ranges::any_of(activities, [](const JobActivity& item) { return !item.finished || item.failed(); });
   }
+
+  // Average progress of the running jobs, for the toolbar button. Empty when none runs or any of them does not know
+  // its progress, so the bar never claims more than is known.
+  inline std::optional<float> runningProgress(std::span<const JobActivity> activities) {
+    float sum = 0.0F;
+    int running = 0;
+    for (const auto& item : activities) {
+      if (item.finished) {
+        continue;
+      }
+      if (!item.progress) {
+        return std::nullopt;
+      }
+      sum += *item.progress;
+      ++running;
+    }
+    return running ? std::optional(sum / static_cast<float>(running)) : std::nullopt;
+  }
 } // namespace luciole

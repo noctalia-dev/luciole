@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <format>
 
 OperationsController::OperationsController(
@@ -57,10 +58,36 @@ void OperationsController::markDirty() {
 }
 
 float OperationsController::popupHeight(std::size_t count) const {
-  return std::min(
-      {520.0F, static_cast<float>(m_page.surface().height()) - 96.0F,
-       160.0F + 116.0F * static_cast<float>(std::min(count, std::size_t{3}))}
-  );
+  const float limit = std::min(520.0F, static_cast<float>(m_page.surface().height()) - 96.0F);
+  // Once laid out, the popover keeps its header and footer and fits the rows; the estimate only sizes the first frame.
+  if (m_view && m_view->height() > 0.0F && m_page.popupSurface()) {
+    const float chrome = static_cast<float>(m_page.popupSurface()->height()) - m_view->height();
+    return std::min(limit, std::ceil(chrome + m_view->contentHeight()));
+  }
+  return std::min(limit, 160.0F + 116.0F * static_cast<float>(std::min(count, std::size_t{3})));
+}
+
+// A thin bar along the button's bottom edge, placed like the button's own badge: outside its layout.
+void OperationsController::showButtonProgress(std::optional<float> progress) {
+  if (!m_buttonProgress) {
+    m_buttonProgress = static_cast<ProgressBar*>(m_button->addChild(
+        ui::progressBar({.styleRadius = Style::radiusSm, .visible = false, .participatesInLayout = false})
+    ));
+  }
+  m_buttonProgress->setVisible(progress.has_value());
+  if (!progress) {
+    return;
+  }
+  // A button that just appeared has no size until the next layout; place the bar on the frame after it.
+  if (m_button->width() <= 0.0F) {
+    markDirty();
+    return;
+  }
+  constexpr float kHeight = 3.0F;
+  const float inset = Style::spaceXs;
+  m_buttonProgress->setSize(std::max(0.0F, m_button->width() - 2 * inset), kHeight);
+  m_buttonProgress->setPosition(inset, std::max(0.0F, m_button->height() - kHeight - inset));
+  m_buttonProgress->setProgress(*progress);
 }
 
 void OperationsController::onFrame() {
@@ -82,7 +109,12 @@ void OperationsController::onFrame() {
   const bool failed = std::ranges::any_of(activities, [](const auto& item) { return item.failed(); });
   m_button->setGlyph(active ? "progress" : failed ? "alert-circle" : "progress-check");
   m_button->setBadge(active ? std::to_string(active) : "");
-  m_button->setTooltip(active ? std::format("File operations · {} active", active) : "File operations");
+  const auto running = std::ranges::find_if(activities, [](const auto& item) { return !item.finished; });
+  m_button->setTooltip(
+      active == 1  ? std::format("{} · {}", running->title, running->summary)
+          : active ? std::format("File operations · {} active", active)
+                   : "File operations"
+  );
   // A file picker never shows the button.
   if (!m_page.choosing()) {
     const bool shown = m_buttonMode == luciole::OperationsButton::Always
@@ -90,6 +122,7 @@ void OperationsController::onFrame() {
     m_button->setVisible(shown);
     m_button->setParticipatesInLayout(shown);
   }
+  showButtonProgress(m_button->visible() ? luciole::runningProgress(activities) : std::nullopt);
   if (m_view) {
     m_count = activities.size();
     m_clear->setEnabled(std::ranges::any_of(activities, [](const auto& item) { return item.finished; }));
@@ -105,7 +138,8 @@ void OperationsController::onFrame() {
       m_page.popupSurface()->requestLayout();
     }
   }
-  const bool polling = progressing || m_detailsLive;
+  // Progress is only drawn by the popover, the details dialog and the toolbar button's bar.
+  const bool polling = (progressing && (m_view || m_button->visible())) || m_detailsLive;
   if (polling && !m_progress.active()) {
     m_progress.startRepeating(std::chrono::milliseconds(200), [this] { markDirty(); });
   } else if (!polling) {
@@ -161,7 +195,6 @@ void OperationsController::open() {
 }
 
 void OperationsController::closed() {
-  m_progress.stop();
   m_pendingDetails.reset();
   m_reopen = false;
   m_anchor.reset();

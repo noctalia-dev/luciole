@@ -39,6 +39,7 @@ private:
   void details(std::uint64_t id);
   void refreshDetails();
   void closed();
+  void showButtonProgress(std::optional<float> progress);
   float popupHeight(std::size_t count) const;
   // The toolbar button, or the main menu button while the toolbar button is hidden.
   LayoutRect popupAnchor() const;
@@ -55,6 +56,7 @@ private:
   std::optional<std::uint64_t> m_detailsId;
   bool m_detailsLive = false;
   Timer m_progress;
+  ProgressBar* m_buttonProgress = nullptr;
   std::size_t m_count = 0;
   std::optional<std::array<int, 4>> m_anchor;
   std::optional<std::uint64_t> m_pendingDetails;

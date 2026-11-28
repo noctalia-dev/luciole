@@ -3,6 +3,7 @@
 #include "operations/copy_receipt.h"
 #include "operations/history_revisions.h"
 #include "operations/provider_transfer.h"
+#include "operations/transfer_estimate.h"
 #include "operations/transfer_service.h"
 #include "operations/transfer_staging.h"
 #include "test_check.h"
@@ -514,6 +515,70 @@ namespace {
     }
     TEST_CHECK(retained);
     fs::remove_all(root);
+  }
+
+  // Transfers measure local, phone and camera sources before copying; other providers stay unmeasured.
+  void measurableSources() {
+    const auto uri = [](const char* text) { return Location::fromUri(text); };
+    TEST_CHECK(luciole::measurableSource(Location::fromPath("/tmp/photo.jpg")));
+    TEST_CHECK(luciole::measurableSource(uri("mtp://Xiaomi_Redmi_Note_11_c4f4af9c/Internal%20shared%20storage/DCIM")));
+    TEST_CHECK(luciole::measurableSource(uri("gphoto2://Canon_EOS/store_00010001/DCIM/100CANON/IMG_0001.JPG")));
+    TEST_CHECK(!luciole::measurableSource(uri("sftp://host/home/me/file.txt")));
+    // The device itself is not an item on it.
+    TEST_CHECK(!luciole::measurableSource(uri("mtp://Xiaomi_Redmi_Note_11_c4f4af9c/")));
+  }
+
+  // Provider downloads report each verified regular file, so progress counts phone copies file by file. Copy
+  // publishes through the download path and Move through staging; both must count.
+  void downloadsCountFiles(const fs::path& root) {
+    for (const auto action : {TransferAction::Copy, TransferAction::Move}) {
+      const auto base = root / (action == TransferAction::Copy ? "copy" : "move");
+      fs::create_directories(base / "remote/tree/nested");
+      fs::create_directories(base / "destination");
+      write(base / "remote/tree/one.txt", "one");
+      write(base / "remote/tree/nested/two.txt", "two");
+      write(base / "remote/single.txt", "single");
+      const auto remote = Location::fromPath((base / "remote").native());
+      ProviderTransfer provider(
+          {{remote.child("tree"), remote.child("single.txt")},
+           Location::fromPath((base / "destination").native()),
+           action}
+      );
+      std::atomic<std::uint64_t> bytes{0};
+      std::atomic<std::size_t> completed{0};
+      transfer::Work work({}, bytes, {});
+      std::size_t files = 0;
+      work.fileObserver = [&files] { ++files; };
+      const auto results = provider.run(
+          {}, bytes, completed, [](const TransferConflict&) { return TransferConflictChoice::Cancel; }, &work
+      );
+      TEST_CHECK(results.size() == 2 && files == 3);
+      TEST_CHECK(read(base / "destination/tree/nested/two.txt") == "two");
+      TEST_CHECK(action == TransferAction::Copy || !fs::exists(base / "remote/tree"));
+    }
+  }
+
+  // The GIO walk phones and cameras use, run here on local files through GIO: it counts regular files and their
+  // bytes, and marks anything a provider copy would not count as done, or could not reach, as partial.
+  void gioEstimates(const fs::path& root) {
+    fs::create_directories(root / "tree/nested");
+    write(root / "tree/one.txt", "abc");
+    write(root / "tree/nested/two.txt", "hello");
+    write(root / "tree/nested/empty.txt", "");
+    const auto tree = Location::fromPath((root / "tree").native());
+    int updates = 0;
+    const auto plain = luciole::estimateGioSource(tree, {}, [&updates](const auto&) { ++updates; });
+    TEST_CHECK(plain.files == 3 && plain.bytes == 8 && !plain.partial && updates > 0);
+    const auto single = luciole::estimateGioSource(tree.child("one.txt"), {}, {});
+    TEST_CHECK(single.files == 1 && single.bytes == 3 && !single.partial);
+    fs::create_symlink("one.txt", root / "tree/link");
+    const auto linked = luciole::estimateGioSource(tree, {}, {});
+    TEST_CHECK(linked.files == 3 && linked.bytes == 8 && linked.partial);
+    TEST_CHECK(luciole::estimateGioSource(tree.child("missing"), {}, {}).partial);
+    CancelToken cancelled;
+    cancelled.cancel();
+    const auto stopped = luciole::estimateGioSource(tree, cancelled, {});
+    TEST_CHECK(stopped.partial && stopped.files == 0);
   }
 
   void downloadHistory(const fs::path& root, const Location& remote, const fs::path& backend) {
@@ -1201,6 +1266,9 @@ int main(int argc, char** argv) {
     const fs::path root(directory);
     fs::create_directory(root / "remote");
     run(root, Location::fromPath((root / "remote").native()), root / "remote", false);
+    measurableSources();
+    downloadsCountFiles(root / "counting");
+    gioEstimates(root / "gio-estimate");
     downloadHistory(root / "history", Location::fromPath((root / "remote-history").native()), root / "remote-history");
     downloadFailureProofs(root / "history-failures");
     providerWriteback(root / "writeback");

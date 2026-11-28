@@ -124,6 +124,21 @@ namespace {
             std::array{activity(ActivityState::Succeeded, true), activity(ActivityState::Partial, true)}
         )
     );
+
+    // The toolbar bar averages running jobs and ignores finished ones, but only while every running job knows its
+    // progress: one unknown job would make the average a guess.
+    auto copying = activity(ActivityState::Working, false);
+    copying.progress = 0.2F;
+    auto archiving = activity(ActivityState::Working, false);
+    archiving.progress = 0.6F;
+    auto done = activity(ActivityState::Succeeded, true);
+    done.progress = 1.0F;
+    const auto average =
+        luciole::runningProgress(std::array{copying, archiving, done, activity(ActivityState::Succeeded, true)});
+    TEST_CHECK(average.has_value());
+    TEST_NEAR(*average, 0.4F, 0.001F);
+    TEST_CHECK(!luciole::runningProgress(std::array{copying, activity(ActivityState::Working, false)}));
+    TEST_CHECK(!luciole::runningProgress(std::array{done}));
   }
 
   void removableFlushActivity(Pump& pump) {

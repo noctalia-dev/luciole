@@ -155,6 +155,8 @@ void OperationsView::doLayout(Renderer& renderer) {
 
 void OperationsView::revealFocus(InputArea* focus) { m_scroll->requestScrollIntoView(focus); }
 
+float OperationsView::contentHeight() const { return m_scroll->content()->height(); }
+
 LayoutSize OperationsView::doMeasure(Renderer& renderer, const LayoutConstraints& constraints) {
   syncRows();
   return Flex::doMeasure(renderer, constraints);

@@ -314,7 +314,11 @@ namespace {
       fail(error);
     }
   }
-  void copy(const Tree& tree, const Location& target, const CancelToken& token, std::atomic<std::uint64_t>& bytes) {
+  // `fileDone` hears about each regular file once its copy is verified, so progress can count files.
+  void copy(
+      const Tree& tree, const Location& target, const CancelToken& token, std::atomic<std::uint64_t>& bytes,
+      const std::function<void()>& fileDone
+  ) {
     check(token);
     destinationName(*target.parent(), *target.basename());
     if (!trustsListing(tree.source)) {
@@ -323,7 +327,7 @@ namespace {
     if (folder(tree.captured.get())) {
       mkdir(target, token);
       for (const auto& child : tree.children) {
-        copy(child, target.child(*child.source.basename()), token, bytes);
+        copy(child, target.child(*child.source.basename()), token, bytes, fileDone);
       }
       copyFolderAttributes(tree.captured.get(), target, token);
     } else {
@@ -347,6 +351,9 @@ namespace {
           || (g_file_info_get_file_type(written.get()) == G_FILE_TYPE_REGULAR
               && g_file_info_get_size(written.get()) != g_file_info_get_size(tree.captured.get()))) {
         throwFileError(FileErrorKind::Changed, "The provider did not report a complete copy.");
+      }
+      if (fileDone && g_file_info_get_file_type(written.get()) == G_FILE_TYPE_REGULAR) {
+        fileDone();
       }
     }
   }
@@ -532,6 +539,7 @@ struct luciole::ProviderTransfer::State {
   TransferRequest request;
   std::optional<Location> exactTarget;
   OperationHistory* operationHistory = nullptr;
+  std::function<void()> fileDone;
   std::vector<std::unique_ptr<Node>> roots;
   std::size_t entries = 0;
   bool collectingRemote = false;
@@ -562,7 +570,7 @@ struct luciole::ProviderTransfer::State {
     try {
       std::size_t count = 0;
       auto tree = capture(node.source, work.token, count, 0, listedFacts(node.source, node.captured.get()));
-      copy(tree, node.parent.child(stage.name()).child("item"), work.token, work.bytes);
+      copy(tree, node.parent.child(stage.name()).child("item"), work.token, work.bytes, work.fileObserver);
       validate(tree, work.token);
       const auto validateDestination = [&] {
         unchanged(parentInfo, info(node.parent, work.token, false, node.parent.isAdmin()).get(), false);
@@ -655,7 +663,7 @@ struct luciole::ProviderTransfer::State {
     }
     std::size_t count = 0;
     auto tree = capture(node.source, token, count, 0, listedFacts(node.source, node.captured.get()));
-    copy(tree, item, token, bytes);
+    copy(tree, item, token, bytes, fileDone);
     validate(tree, token);
     return tree;
   }
@@ -1187,6 +1195,7 @@ std::vector<luciole::TransferResult> luciole::ProviderTransfer::run(
 ) {
   auto& state = *m_state;
   state.operationHistory = nativeCopies ? nativeCopies->operationHistory : nullptr;
+  state.fileDone = nativeCopies ? nativeCopies->fileObserver : std::function<void()>{};
   const bool retry = !state.roots.empty();
   transfer::Writeback localWriteback;
   auto& writeback = nativeCopies ? nativeCopies->writeback : localWriteback;
