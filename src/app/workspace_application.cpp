@@ -1684,7 +1684,7 @@ bool WorkspaceApplication::stripPointer(Host& host, const PointerEvent& event, f
     bool child = false;
     if (host.tabsHidden) {
       for (const auto& node : host.strip->children()) {
-        child |= node->visible() && node.get() != host.tabScroll && node->containsScenePoint(x, y);
+        child |= node->visible() && node->containsScenePoint(x, y);
       }
     } else {
       child = host.newTabButton && host.newTabButton->containsScenePoint(x, y);
