@@ -1,3 +1,4 @@
+#include "app/job_activity.h"
 #include "app/operation_hub.h"
 #include "event_loop/glib_poll_source.h"
 #include "fs/gio_interop.h"
@@ -247,8 +248,43 @@ namespace {
       TEST_CHECK(archWorkspace.hub.activities().front().state == ActivityState::Succeeded);
     }
   }
-  // A running transfer row carries measured meters: bytes, file counts and an advancing bar, so the
-  // user sees work happening instead of an indeterminate spinner.
+  // The row line of a running transfer for each measurement state: scanning, measured, lower bound, unmeasured.
+  void transferMetersLine() {
+    luciole::TransferProgress scanning;
+    scanning.estimating = true;
+    TEST_CHECK(transferMetersText(scanning).starts_with("Measuring size · "));
+    luciole::TransferProgress measured{
+        .bytes = 1024,
+        .completed = 0,
+        .total = 2,
+        .bytesTotal = 4096,
+        .bytesPerSecond = 1024,
+        .files = 1,
+        .filesTotal = 3,
+        .current = "a.txt"
+    };
+    // GLib separates a size from its unit with a no-break space.
+    TEST_CHECK(
+        transferMetersText(measured)
+        == "1.0\u00a0KiB of 4.0\u00a0KiB transferred · 1.0\u00a0KiB/s · 1 of 3 files · 3s left\nNow: a.txt"
+    );
+    measured.partial = true;
+    const auto bounded = transferMetersText(measured);
+    TEST_CHECK(
+        bounded.contains("of at least 4.0\u00a0KiB")
+        && bounded.contains("1 of 3+ files")
+        && bounded.contains("~3s left")
+    );
+    measured.partial = false;
+    measured.bytes = 4000;
+    TEST_CHECK(transferMetersText(measured).contains("less than a second left"));
+    luciole::TransferProgress unmeasured;
+    unmeasured.bytes = 1024;
+    unmeasured.completed = 1;
+    unmeasured.total = 2;
+    TEST_CHECK(transferMetersText(unmeasured) == "1.0\u00a0KiB transferred · 1 of 2 items");
+  }
+  // Measured totals and the details text of a removable copy, during its final device write and after it.
   void transferProgressActivity(Pump& pump) {
     Fixture fixture;
     fixture.write("payload");
@@ -1402,6 +1438,7 @@ int main(int argc, char** argv) {
   TEST_CHECK(argc == 1);
   activityAttention();
   removableFlushActivity(pump);
+  transferMetersLine();
   transferProgressActivity(pump);
   overwriteHistory(pump);
   trashMoveNotifications(pump, false);

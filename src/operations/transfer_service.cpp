@@ -133,6 +133,10 @@ namespace {
       while (m_samples.size() > 1 && now - m_samples.front().first > kWindow) {
         m_samples.pop_front();
       }
+      // Every older sample aged out, so the last rate describes a past moment.
+      if (m_samples.size() == 1) {
+        m_rate.reset();
+      }
       const auto span = std::chrono::duration_cast<std::chrono::microseconds>(now - m_samples.front().first).count();
       if (m_samples.size() > 1 && span >= 400000) {
         m_rate = (bytes - m_samples.front().second) * 1000000U / static_cast<std::uint64_t>(span);
