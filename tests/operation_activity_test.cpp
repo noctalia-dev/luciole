@@ -179,7 +179,8 @@ namespace {
       TEST_CHECK(devService.resolve(devService.conflict()->id, luciole::TransferConflictChoice::Replace));
       pump.until([&] { return devService.flushPhase() == luciole::TransferFlush::Device; });
       const auto devActivity = devWorkspace.hub.activities().front();
-      TEST_CHECK(devActivity.state == ActivityState::Working && devActivity.summary == "Writing to device…");
+      TEST_CHECK(devActivity.state == ActivityState::Working && devActivity.summary != "Writing to device…");
+      TEST_CHECK(devActivity.detail && !devActivity.detail->meters.empty());
       TEST_CHECK(devActivity.canCancel && devWorkspace.hub.cancelActivity(devJob->id()));
       devRelease.release();
       pump.until([&] { return !devService.busy(); });
@@ -271,18 +272,17 @@ namespace {
         && activity.detail->bytes > 0
         && !activity.detail->estimating
     );
-    TEST_CHECK(activity.detail && activity.detail->meters.contains("transferred"));
-    TEST_CHECK(activity.detail && activity.detail->meters.contains("1 of 1 files"));
-    // Nothing is in flight while the device write lands, so the item line is absent at that moment;
-    // whenever the field does appear it starts its own line.
-    TEST_CHECK(activity.detail && !activity.detail->meters.contains("Now:"));
+    // The writeback phase has no measurable denominator: the row shows its flush summary instead of
+    // meters, and the bar stays indeterminate, because a full bar would claim a write that has not landed yet.
+    TEST_CHECK(activity.detail && activity.detail->meters.empty());
+    TEST_CHECK(activity.summary == "Writing to device…");
+    // The current item always starts its own line; nothing is in flight once the device write lands,
+    // so the field cannot appear at that moment.
     TEST_CHECK(
         activity.detail
         && (activity.detail->meters.contains("Now:") ? activity.detail->meters.contains("\nNow:") : true)
     );
     TEST_CHECK(activity.detail && activity.detail->info.contains("Transferred"));
-    // The writeback phase has no measurable denominator: meters stay visible, the bar stays
-    // indeterminate, because a full bar would claim a write that has not landed yet.
     TEST_CHECK(!activity.progress);
     release.release();
     pump.until([&] { return !service.busy(); });

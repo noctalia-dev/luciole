@@ -271,6 +271,7 @@ void OperationsController::refreshDetails() {
   const auto activities = m_hub.activities();
   const auto* shown = findActivity(activities, *m_detailsId);
   if (!shown) {
+    m_detailsLive = false;
     return;
   }
   m_detailsLive = !shown->finished;

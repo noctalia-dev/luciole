@@ -46,7 +46,7 @@ public:
   }
   void bind(const luciole::JobActivity& activity) {
     m_title->setText(activity.title);
-    // A running transfer carries a meters line with the measured speed and totals
+    // A running transfer carries a meters line with the measured speed and totals.
     const std::string& line =
         activity.detail && !activity.detail->meters.empty() ? activity.detail->meters : activity.summary;
     m_summary->setText(line);

@@ -173,13 +173,15 @@ namespace {
       }
       text += part;
     };
-    if (measured.bytesTotal && *measured.bytesTotal) {
+    if (measured.estimating) {
+      add(measured.bytesTotal && *measured.bytesTotal
+              ? std::format("Measuring size · at least {} so far", sizeText(*measured.bytesTotal))
+              : std::format("Measuring size · {} transferred so far", sizeText(measured.bytes)));
+    } else if (measured.bytesTotal && *measured.bytesTotal) {
       add(std::format(
           "{} of {} transferred", sizeText(measured.bytes),
           std::string(measured.partial ? "at least " : "") + sizeText(*measured.bytesTotal)
       ));
-    } else if (measured.estimating) {
-      add(std::format("Measuring size · {} transferred so far", sizeText(measured.bytes)));
     } else {
       add(std::format("{} transferred", sizeText(measured.bytes)));
     }
@@ -201,7 +203,8 @@ namespace {
         && *measured.bytesPerSecond
         && *measured.bytesTotal > measured.bytes) {
       const auto left = (*measured.bytesTotal - measured.bytes) / *measured.bytesPerSecond;
-      add(left ? timeText(left) + " left" : "Almost done");
+      // A lower-bound total makes the estimate optimistic, so it says so.
+      add(left ? std::string(measured.partial ? "~" : "") + timeText(left) + " left" : "Almost done");
     }
     if (!measured.current.empty()) {
       // The item being worked on is the one field that does not fit beside the totals.
@@ -226,7 +229,12 @@ namespace {
   std::string infoText(const luciole::TransferProgress& measured, bool done, std::optional<std::int64_t> elapsedMs) {
     std::string text;
     if (measured.estimating) {
-      addField(text, "Measuring", std::format("{} transferred so far", sizeText(measured.bytes)));
+      addField(
+          text, "Measuring",
+          measured.bytesTotal && *measured.bytesTotal
+              ? std::format("at least {} of tree scanned", sizeText(*measured.bytesTotal))
+              : std::format("{} transferred so far", sizeText(measured.bytes))
+      );
     } else if (measured.bytesTotal && *measured.bytesTotal) {
       addField(
           text, "Transferred",
@@ -265,7 +273,10 @@ namespace {
         && *measured.bytesTotal > measured.bytes
     ) {
       const auto left = (*measured.bytesTotal - measured.bytes) / *measured.bytesPerSecond;
-      addField(text, "Remaining", left ? timeText(left) : "less than a second");
+      addField(
+          text, "Remaining",
+          left ? std::string(measured.partial ? "~" : "") + timeText(left) : std::string("less than a second")
+      );
     }
     if (!measured.current.empty()) {
       addField(text, "Current", measured.current);
@@ -292,8 +303,9 @@ namespace {
       }
     }
     detail.info = infoText(measured, done, detail.elapsedMs);
-    // A finished row keeps its summary text; the meters line only describes live work.
-    detail.meters = done ? std::string() : metersText(measured);
+    // A finished row and the terminal device sync keep their summary text; meters describe streaming work.
+    detail.meters =
+        done || service.flushPhase() == luciole::TransferFlush::Final ? std::string() : metersText(measured);
     return detail;
   }
   void transfer(const OperationJob& job, JobActivity& activity, bool details) {
@@ -306,7 +318,7 @@ namespace {
     }
     if (job.running()) {
       activity.detail = transferDetail(service, false);
-      if (service.flushPhase() != luciole::TransferFlush::None) {
+      if (service.flushPhase() == luciole::TransferFlush::Final) {
         activity.state = ActivityState::Working;
         activity.summary = "Writing to device…";
         return;

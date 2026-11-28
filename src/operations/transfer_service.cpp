@@ -102,6 +102,8 @@ namespace {
     std::atomic<std::size_t> completed{0}, expectedFiles{0}, filesDone{0};
     std::atomic<std::uint64_t> expectedBytes{0};
     std::atomic<bool> totalsKnown{false}, totalsPartial{false}, estimating{false};
+    // True once the native copy path runs; it is the only path reporting finished files.
+    std::atomic<bool> fileCounting{false};
     std::atomic<std::shared_ptr<const std::string>> currentName;
     // Clears every counter. History replay measures nothing, so it passes `measuring` false.
     void reset(bool measuring) {
@@ -112,6 +114,7 @@ namespace {
       totalsKnown.store(false);
       totalsPartial.store(false);
       estimating.store(measuring);
+      fileCounting.store(false);
       currentName.store(nullptr);
     }
   };
@@ -614,15 +617,23 @@ luciole::TransferProgress luciole::TransferService::progress() const {
   State& state = *m_state;
   TransferProgress out;
   out.bytes = state.bytes.load();
-  out.completed = state.meter.completed.load();
   out.total = state.total;
+  out.completed = std::min(state.meter.completed.load(), out.total);
   out.estimating = state.meter.estimating.load();
   out.partial = state.meter.totalsPartial.load();
-  if (state.meter.totalsKnown.load()) {
+  const bool scanning = state.meter.estimating.load();
+  if (scanning || state.meter.totalsKnown.load()) {
+    // A running scan publishes its totals as a growing lower bound the row can show.
     out.bytesTotal = state.meter.expectedBytes.load();
-    out.filesTotal = state.meter.expectedFiles.load();
-    // A tree that grew after the scan can finish with more entries than were measured.
-    out.files = std::min(state.meter.filesDone.load(), *out.filesTotal);
+    // Only the native copy path counts finished files, so a provider job reports no file counts.
+    if (scanning || state.meter.fileCounting.load()) {
+      out.filesTotal = state.meter.expectedFiles.load();
+      // A tree that grew after the scan can finish with more entries than were measured.
+      out.files = std::min(state.meter.filesDone.load(), *out.filesTotal);
+    }
+    if (scanning) {
+      out.partial = true;
+    }
   }
   if (const auto name = state.meter.currentName.load()) {
     out.current = *name;
@@ -1164,7 +1175,9 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         };
         work.allowMerge = allowMerge;
         // The copy threads report their own entries, so a folder copy counts files, not source roots.
-        work.nameObserver = [owner](const std::string& name) { noteCurrentName(owner->meter, name); };
+        work.nameObserver = [owner](const std::string& name) {
+          noteCurrentName(owner->meter, filenameDisplayText(name));
+        };
         work.fileObserver = [owner] { owner->meter.filesDone.fetch_add(1); };
         auto revisions = std::make_shared<HistoryRevisions>();
         work.history = revisions;
@@ -1260,6 +1273,9 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         measureSources(owner->meter, job->request, token);
         const bool remote = !job->request.destination.isNative()
             || std::ranges::any_of(job->request.sources, [](const auto& source) { return !source.isNative(); });
+        if (!remote) {
+          owner->meter.fileCounting.store(true);
+        }
         if (remote && !job->provider) {
           job->provider = std::make_unique<ProviderTransfer>(job->request);
         }

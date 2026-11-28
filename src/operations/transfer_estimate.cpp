@@ -4,6 +4,7 @@
 #include "fs/file_error.h"
 #include "fs/folder_totals.h"
 #include "fs/folder_totals_walk.h"
+#include "fs/native_listing.h"
 
 #include <filesystem>
 #include <sys/stat.h>
@@ -40,6 +41,9 @@ std::optional<luciole::SourceEstimate> luciole::estimateSource(
   if (!path) {
     return {};
   }
+  if (networkFilesystem(*path)) {
+    return {};
+  }
   struct stat value{};
   if (::lstat(path->c_str(), &value) != 0) {
     return SourceEstimate{.partial = true};
@@ -50,6 +54,8 @@ std::optional<luciole::SourceEstimate> luciole::estimateSource(
     if (S_ISREG(value.st_mode) && value.st_size >= 0) {
       estimate.bytes = static_cast<std::uint64_t>(value.st_size);
     }
+    // The copier rejects special nodes, so their count can never land.
+    estimate.partial = !S_ISREG(value.st_mode) && !S_ISLNK(value.st_mode);
     return estimate;
   }
   SourceEstimate estimate;
@@ -63,14 +69,15 @@ std::optional<luciole::SourceEstimate> luciole::estimateSource(
           auto running = estimate;
           running.files += countedFiles(snapshot);
           running.bytes += snapshot.bytes;
-          running.partial |= snapshot.partial();
+          // Special nodes count toward the total but never move, so it is only a lower bound.
+          running.partial |= snapshot.partial() || snapshot.other != 0;
           report(publish, running);
         },
         kLimits
     );
     estimate.files += countedFiles(walked);
     estimate.bytes += walked.bytes;
-    estimate.partial |= walked.partial();
+    estimate.partial |= walked.partial() || walked.other != 0;
   } catch (const FileErrorException&) {
     // A changed or unreadable tree leaves an unknown remainder while the transfer still runs.
     estimate.partial = true;
