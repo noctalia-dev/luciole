@@ -339,6 +339,17 @@ namespace {
     rows(model, {2, 3, 1, 4, 5});
   }
 
+  void testDetailsColumnTables() {
+    for (const auto column : luciole::kDefaultDetailsColumnOrder) {
+      TEST_CHECK(!luciole::detailsColumnName(column).empty());
+      TEST_CHECK(!luciole::detailsColumnLabel(column).empty());
+      TEST_CHECK(!luciole::detailsColumnGlyph(column).empty());
+    }
+    for (const auto field : luciole::kColumnSortFields) {
+      TEST_CHECK(!luciole::sortFieldGlyph(field).empty());
+    }
+  }
+
   void testSortAndMetadata() {
     DirectoryModel model;
     auto data = snapshot(
@@ -1157,6 +1168,7 @@ int main() {
     testSortAndMetadata();
     testExtendedMetadataSort();
     testMediaSort();
+    testDetailsColumnTables();
     testTextSortRefresh();
     testTextSortKeyPoolLifetime();
     testDetailsLayout();

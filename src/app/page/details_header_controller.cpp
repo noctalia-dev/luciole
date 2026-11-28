@@ -614,17 +614,7 @@ void DetailsHeaderController::sortBy(luciole::SortField field) {
   auto options = m_page.browser().model().sort();
   options.descending = options.field == field && !options.descending;
   options.field = field;
-  const auto action = field == luciole::SortField::Name ? Action::SortName
-      : field == luciole::SortField::Type               ? Action::SortType
-      : field == luciole::SortField::Size               ? Action::SortSize
-      : field == luciole::SortField::Accessed           ? Action::SortAccessed
-      : field == luciole::SortField::Created            ? Action::SortCreated
-      : field == luciole::SortField::Owner              ? Action::SortOwner
-      : field == luciole::SortField::Group              ? Action::SortGroup
-      : field == luciole::SortField::Permissions        ? Action::SortPermissions
-      : field == luciole::SortField::Location           ? Action::SortLocation
-
-                                              : Action::SortModified;
+  const auto action = luciole::sortFieldAction(field);
   if (m_page.browser().model().sort().field == field) {
     m_page.dispatchAction(options.descending ? Action::Descending : Action::Ascending);
   } else {

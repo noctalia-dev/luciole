@@ -1579,6 +1579,24 @@ void BrowserPage::runAction(
       {Action::SortGroup, sort},
       {Action::SortPermissions, sort},
       {Action::SortLocation, sort},
+      {Action::SortDimensions, sort},
+      {Action::SortDuration, sort},
+      {Action::SortBitRate, sort},
+      {Action::SortAudioCodec, sort},
+      {Action::SortVideoCodec, sort},
+      {Action::SortDatePhotographed, sort},
+      {Action::SortWidth, sort},
+      {Action::SortHeight, sort},
+      {Action::SortOrientation, sort},
+      {Action::SortAlbum, sort},
+      {Action::SortArtist, sort},
+      {Action::SortGenre, sort},
+      {Action::SortReleaseYear, sort},
+      {Action::SortTrack, sort},
+      {Action::SortAspectRatio, sort},
+      {Action::SortColorSpace, sort},
+      {Action::SortFrameRate, sort},
+      {Action::SortPixelFormat, sort},
 
       {Action::Ascending, sort},
       {Action::Descending, sort},
@@ -1726,17 +1744,7 @@ void BrowserPage::openTerminal(const luciole::Location& target) {
 
 void BrowserPage::sortAction(Action action) {
   auto options = browser().model().sort();
-  const auto field = action == Action::SortName ? luciole::SortField::Name
-      : action == Action::SortType              ? luciole::SortField::Type
-      : action == Action::SortSize              ? luciole::SortField::Size
-      : action == Action::SortAccessed          ? luciole::SortField::Accessed
-      : action == Action::SortCreated           ? luciole::SortField::Created
-      : action == Action::SortOwner             ? luciole::SortField::Owner
-      : action == Action::SortGroup             ? luciole::SortField::Group
-      : action == Action::SortPermissions       ? luciole::SortField::Permissions
-      : action == Action::SortLocation          ? luciole::SortField::Location
-
-                                       : luciole::SortField::Modified;
+  const auto field = luciole::sortActionField(action);
   if (action == Action::Ascending || action == Action::Descending) {
     options.descending = action == Action::Descending;
   } else if (action == Action::FoldersFirst) {

@@ -59,6 +59,24 @@ namespace {
   // Fits a glyph, "Other Pane" and "Ctrl+Alt+Enter" without clipping the shortcut.
   constexpr float kOpenInSubmenuWidth = 240.0F;
 
+  // Media columns grouped under their kind; the columns and sort menus share it so both stay in step.
+  const std::vector<std::pair<std::string_view, std::vector<luciole::DetailsColumn>>> kMediaColumnGroups{
+      {"Image",
+       {luciole::DetailsColumn::DatePhotographed, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Height,
+        luciole::DetailsColumn::Orientation, luciole::DetailsColumn::Width}},
+      {"Audio",
+       {luciole::DetailsColumn::Album, luciole::DetailsColumn::Artist, luciole::DetailsColumn::AudioCodec,
+        luciole::DetailsColumn::BitRate, luciole::DetailsColumn::Duration, luciole::DetailsColumn::Genre,
+        luciole::DetailsColumn::ReleaseYear, luciole::DetailsColumn::Track}},
+      {"Video",
+       {luciole::DetailsColumn::AspectRatio, luciole::DetailsColumn::AudioCodec, luciole::DetailsColumn::BitRate,
+        luciole::DetailsColumn::ColorSpace, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Duration,
+        luciole::DetailsColumn::FrameRate, luciole::DetailsColumn::Height, luciole::DetailsColumn::PixelFormat,
+        luciole::DetailsColumn::VideoCodec, luciole::DetailsColumn::Width}}
+  };
+  // Group rows in the grouped sort menu; outside the action id range so menu dispatch ignores them.
+  constexpr int kMediaSortGroupBase = 301;
+
   // Appends a separator unless `entries` is empty or already ends with one.
   void addSeparator(std::vector<ContextMenuControlEntry>& entries) {
     if (!entries.empty() && !entries.back().separator) {
@@ -901,20 +919,7 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
        .glyph = "eye"}
   );
   const int left = Style::rtl() ? 1 : -1;
-  const std::vector<std::pair<std::string_view, std::vector<luciole::DetailsColumn>>> groups{
-      {"Image",
-       {luciole::DetailsColumn::DatePhotographed, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Height,
-        luciole::DetailsColumn::Orientation, luciole::DetailsColumn::Width}},
-      {"Audio",
-       {luciole::DetailsColumn::Album, luciole::DetailsColumn::Artist, luciole::DetailsColumn::AudioCodec,
-        luciole::DetailsColumn::BitRate, luciole::DetailsColumn::Duration, luciole::DetailsColumn::Genre,
-        luciole::DetailsColumn::ReleaseYear, luciole::DetailsColumn::Track}},
-      {"Video",
-       {luciole::DetailsColumn::AspectRatio, luciole::DetailsColumn::AudioCodec, luciole::DetailsColumn::BitRate,
-        luciole::DetailsColumn::ColorSpace, luciole::DetailsColumn::Dimensions, luciole::DetailsColumn::Duration,
-        luciole::DetailsColumn::FrameRate, luciole::DetailsColumn::Height, luciole::DetailsColumn::PixelFormat,
-        luciole::DetailsColumn::VideoCodec, luciole::DetailsColumn::Width}}
-  };
+  const auto& groups = kMediaColumnGroups;
   std::vector<std::size_t> groupRows;
   entries.push_back({.label = "", .separator = true});
   for (std::size_t index = 0; index < groups.size(); ++index) {
@@ -967,6 +972,7 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
       visibility = luciole::allDetailsColumns();
     } else if (id == 106) {
       visibility = {};
+      m_page.focusFileList();
     }
     m_columns.setDetailsColumnVisibility(visibility);
   };
@@ -1003,7 +1009,8 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
             {.id = static_cast<int>(candidate) + 1,
              .label = std::string(luciole::detailsColumnLabel(candidate)),
              .checkmark = true,
-             .toggleState = luciole::detailsColumnVisible(m_columns.columnVisibility(), candidate) ? 1 : 0}
+             .toggleState = luciole::detailsColumnVisible(m_columns.columnVisibility(), candidate) ? 1 : 0,
+             .glyph = std::string(luciole::detailsColumnGlyph(candidate))}
         );
       }
       m_submenus.show(std::move(submenu), toggleColumns, 264.0F);
@@ -1011,13 +1018,33 @@ void MenuController::openColumnsMenu(const LayoutRect& anchor, std::optional<luc
   }
 }
 
-std::vector<ContextMenuControlEntry> MenuController::sortEntries(const luciole::ActionRequest& request) const {
+std::vector<ContextMenuControlEntry>
+MenuController::sortEntries(const luciole::ActionRequest& request, const bool groupMedia) const {
   std::vector<ContextMenuControlEntry> entries;
   const auto add = [&](Action action, bool radio) { entries.push_back(actionEntry(action, request, radio)); };
   for (const auto action :
        {Action::SortName, Action::SortType, Action::SortSize, Action::SortModified, Action::SortAccessed,
         Action::SortCreated, Action::SortOwner, Action::SortGroup, Action::SortPermissions, Action::SortLocation}) {
     add(action, true);
+  }
+  addSeparator(entries);
+  if (groupMedia) {
+    for (std::size_t index = 0; index < kMediaColumnGroups.size(); ++index) {
+      entries.push_back(
+          {.id = kMediaSortGroupBase + static_cast<int>(index),
+           .label = std::string(kMediaColumnGroups[index].first),
+           .hasSubmenu = true}
+      );
+    }
+  } else {
+    for (const auto action :
+         {Action::SortDimensions, Action::SortDuration, Action::SortBitRate, Action::SortAudioCodec,
+          Action::SortVideoCodec, Action::SortDatePhotographed, Action::SortWidth, Action::SortHeight,
+          Action::SortOrientation, Action::SortAlbum, Action::SortArtist, Action::SortGenre, Action::SortReleaseYear,
+          Action::SortTrack, Action::SortAspectRatio, Action::SortColorSpace, Action::SortFrameRate,
+          Action::SortPixelFormat}) {
+      add(action, true);
+    }
   }
   addSeparator(entries);
   add(Action::Ascending, true);
@@ -1059,7 +1086,42 @@ void MenuController::showActionMenu(
 
 void MenuController::openSortMenu(std::optional<LayoutRect> anchor) {
   const auto request = m_page.actionRequest(false);
-  showActionMenu(sortEntries(request), request, !anchor.has_value(), anchor);
+  auto entries = sortEntries(request, true);
+  // Without an anchor, showActionMenu prepends Menu Back and a separator, shifting every row by two.
+  const std::size_t offset = anchor.has_value() ? 0 : 2;
+  std::vector<std::pair<std::size_t, int>> submenus;
+  for (std::size_t row = 0; row < entries.size(); ++row) {
+    if (entries[row].hasSubmenu) {
+      submenus.emplace_back(row, entries[row].id);
+    }
+  }
+  showActionMenu(std::move(entries), request, !anchor.has_value(), anchor);
+  if (!m_menu) {
+    return;
+  }
+  for (const auto& [row, id] : submenus) {
+    const auto& columns = kMediaColumnGroups[static_cast<std::size_t>(id - kMediaSortGroupBase)].second;
+    m_submenus.attach(row + offset, id, [this, request, columns] {
+      std::vector<ContextMenuControlEntry> submenu;
+      submenu.reserve(columns.size());
+      for (const auto column : columns) {
+        submenu.push_back(actionEntry(luciole::sortFieldAction(luciole::detailsColumnSort(column)), request, true));
+      }
+      m_submenus.show(
+          std::move(submenu),
+          [this, request](int actionId) {
+            const auto action = luciole::ActionRegistry::fromMenuId(actionId);
+            if (!action) {
+              return;
+            }
+            m_page.closePopup();
+            m_page.dispatchAction(*action, request);
+            m_page.focusFileList();
+          },
+          264.0F
+      );
+    });
+  }
 }
 
 void MenuController::openSelectionMenu() {

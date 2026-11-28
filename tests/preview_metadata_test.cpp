@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <memory>
 #include <print>
 #include <sys/stat.h>
 #include <thread>
@@ -429,66 +431,79 @@ namespace {
         == 5'000'000U
     );
     TEST_CHECK(luciole::parseMediaFacts("not json") == luciole::EntryMedia{});
-    // A hand-built JPEG whose EXIF carries orientation 6 and a DateTimeOriginal.
-    std::vector<std::uint8_t> tiff;
-    const auto push16 = [&tiff](std::uint16_t value) {
-      tiff.push_back(static_cast<std::uint8_t>(value & 0xFFU));
-      tiff.push_back(static_cast<std::uint8_t>(value >> 8));
-    };
-    const auto push32 = [&tiff](std::uint32_t value) {
-      for (auto shift = 0U; shift < 32U; shift += 8U) {
-        tiff.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFU));
+    // Hand-built JPEGs whose EXIF carries orientation 6 and a DateTimeOriginal. EXIF carries no zone, so the stored
+    // wall time must come back exactly; pinning Paris makes July observe DST and March standard time.
+    const auto exifJpeg = [](const std::string& datetime) {
+      std::vector<std::uint8_t> tiff;
+      const auto push16 = [&tiff](std::uint16_t value) {
+        tiff.push_back(static_cast<std::uint8_t>(value & 0xFFU));
+        tiff.push_back(static_cast<std::uint8_t>(value >> 8));
+      };
+      const auto push32 = [&tiff](std::uint32_t value) {
+        for (auto shift = 0U; shift < 32U; shift += 8U) {
+          tiff.push_back(static_cast<std::uint8_t>((value >> shift) & 0xFFU));
+        }
+      };
+      const auto exifIfd = 8 + 2 + 2 * 12 + 4; // IFD0 with two entries and its next-IFD word.
+      tiff.insert(tiff.end(), {'I', 'I'});
+      push16(42);
+      push32(8);
+      push16(2); // Two IFD0 entries.
+      push16(0x0112);
+      push16(3);
+      push32(1);
+      push16(6);
+      push16(0); // Orientation 6, inline SHORT.
+      push16(0x8769);
+      push16(4);
+      push32(1);
+      push32(exifIfd);
+      push32(0); // No further IFD.
+      push16(1); // One EXIF IFD entry.
+      push16(0x9003);
+      push16(2);
+      push32(datetime.size() + 1);
+      push32(exifIfd + 2 + 12);
+      for (const auto character : datetime) {
+        tiff.push_back(static_cast<std::uint8_t>(character));
       }
+      tiff.push_back(0);
+      std::vector<std::uint8_t> jpeg{0xFF, 0xD8, 0xFF, 0xE1};
+      const std::size_t segment = 2 + 6 + tiff.size();
+      jpeg.push_back(static_cast<std::uint8_t>(segment >> 8));
+      jpeg.push_back(static_cast<std::uint8_t>(segment & 0xFFU));
+      jpeg.insert(jpeg.end(), {'E', 'x', 'i', 'f', 0, 0});
+      jpeg.insert(jpeg.end(), tiff.begin(), tiff.end());
+      return jpeg;
     };
-    const std::string datetime = "2021:03:04 05:06:07";
-    const auto exifIfd = 8 + 2 + 2 * 12 + 4; // IFD0 with two entries and its next-IFD word.
-    tiff.insert(tiff.end(), {'I', 'I'});
-    push16(42);
-    push32(8);
-    push16(2); // Two IFD0 entries.
-    push16(0x0112);
-    push16(3);
-    push32(1);
-    push16(6);
-    push16(0); // Orientation 6, inline SHORT.
-    push16(0x8769);
-    push16(4);
-    push32(1);
-    push32(exifIfd);
-    push32(0); // No further IFD.
-    push16(1); // One EXIF IFD entry.
-    push16(0x9003);
-    push16(2);
-    push32(datetime.size() + 1);
-    push32(exifIfd + 2 + 12);
-    for (const auto character : datetime) {
-      tiff.push_back(static_cast<std::uint8_t>(character));
-    }
-    tiff.push_back(0);
-    std::vector<std::uint8_t> jpeg{0xFF, 0xD8, 0xFF, 0xE1};
-    const std::size_t segment = 2 + 6 + tiff.size();
-    jpeg.push_back(static_cast<std::uint8_t>(segment >> 8));
-    jpeg.push_back(static_cast<std::uint8_t>(segment & 0xFFU));
-    jpeg.insert(jpeg.end(), {'E', 'x', 'i', 'f', 0, 0});
-    jpeg.insert(jpeg.end(), tiff.begin(), tiff.end());
-    const auto encoded = root / "exif.jpg";
-    std::ofstream(encoded, std::ios::binary)
-        .write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
-    TEST_CHECK(
-        static_cast<std::size_t>(std::ifstream(encoded, std::ios::binary | std::ios::ate).tellg()) == jpeg.size()
-    );
-    const Fd opened(::open(encoded.c_str(), O_RDONLY));
-    TEST_CHECK(opened.valid());
-    const auto exif = luciole::readExifFacts(opened.get());
+    const auto writeExif = [&root](const std::string& name, const std::vector<std::uint8_t>& jpeg) {
+      const auto encoded = root / name;
+      std::ofstream(encoded, std::ios::binary)
+          .write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size()));
+      TEST_CHECK(
+          static_cast<std::size_t>(std::ifstream(encoded, std::ios::binary | std::ios::ate).tellg()) == jpeg.size()
+      );
+      Fd opened(::open(encoded.c_str(), O_RDONLY));
+      TEST_CHECK(opened.valid());
+      return opened;
+    };
+    // The column renders through g_date_time_new_from_unix_local, so the reader must agree with GLib's local view.
+    const auto localEpoch = [](int year, int month, int day, int hour, int minute, int second) {
+      const std::unique_ptr<GDateTime, decltype(&g_date_time_unref)> date(
+          g_date_time_new_local(year, month, day, hour, minute, second), &g_date_time_unref
+      );
+      return date ? static_cast<std::uint64_t>(g_date_time_to_unix(date.get())) : 0U;
+    };
+    g_setenv("TZ", "Europe/Paris", 1);
+    ::tzset();
+    const auto summer = writeExif("exif-summer.jpg", exifJpeg("2021:07:01 14:30:07"));
+    const auto summerFacts = luciole::readExifFacts(summer.get());
+    TEST_CHECK(summerFacts.orientation == 6U);
+    TEST_CHECK(summerFacts.dateSeconds == localEpoch(2021, 7, 1, 14, 30, 7)); // Fails while standard time is forced.
+    const auto winter = writeExif("exif.jpg", exifJpeg("2021:03:04 05:06:07"));
+    const auto exif = luciole::readExifFacts(winter.get());
     TEST_CHECK(exif.orientation == 6U);
-    std::tm fields{};
-    fields.tm_year = 2021 - 1900;
-    fields.tm_mon = 2;
-    fields.tm_mday = 4;
-    fields.tm_hour = 5;
-    fields.tm_min = 6;
-    fields.tm_sec = 7;
-    TEST_CHECK(exif.dateSeconds == static_cast<std::uint64_t>(::mktime(&fields)));
+    TEST_CHECK(exif.dateSeconds == localEpoch(2021, 3, 4, 5, 6, 7));
     const Fd plain(::open((root / "plain.jpg").c_str(), O_RDONLY | O_CREAT | O_WRONLY | O_TRUNC, 0600));
     TEST_CHECK(::write(plain.get(), "FFD8 not enough", 15) == 15);
     TEST_CHECK(luciole::readExifFacts(plain.get()).orientation == std::nullopt);

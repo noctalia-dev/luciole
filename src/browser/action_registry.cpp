@@ -450,6 +450,78 @@ namespace {
        .label = "Location",
        .glyph = luciole::sortFieldGlyph(luciole::SortField::Location),
        .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Location)); }},
+      {.action = A::SortDimensions,
+       .label = "Dimensions",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Dimensions),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Dimensions)); }},
+      {.action = A::SortDuration,
+       .label = "Duration",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Duration),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Duration)); }},
+      {.action = A::SortBitRate,
+       .label = "Bit Rate",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::BitRate),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::BitRate)); }},
+      {.action = A::SortAudioCodec,
+       .label = "Audio Codec",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::AudioCodec),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::AudioCodec)); }},
+      {.action = A::SortVideoCodec,
+       .label = "Video Codec",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::VideoCodec),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::VideoCodec)); }},
+      {.action = A::SortDatePhotographed,
+       .label = "Date Photographed",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::DatePhotographed),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::DatePhotographed)); }},
+      {.action = A::SortWidth,
+       .label = "Width",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Width),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Width)); }},
+      {.action = A::SortHeight,
+       .label = "Height",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Height),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Height)); }},
+      {.action = A::SortOrientation,
+       .label = "Orientation",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Orientation),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Orientation)); }},
+      {.action = A::SortAlbum,
+       .label = "Album",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Album),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Album)); }},
+      {.action = A::SortArtist,
+       .label = "Artist",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Artist),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Artist)); }},
+      {.action = A::SortGenre,
+       .label = "Genre",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Genre),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Genre)); }},
+      {.action = A::SortReleaseYear,
+       .label = "Release Year",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::ReleaseYear),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::ReleaseYear)); }},
+      {.action = A::SortTrack,
+       .label = "Track",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::Track),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::Track)); }},
+      {.action = A::SortAspectRatio,
+       .label = "Aspect Ratio",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::AspectRatio),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::AspectRatio)); }},
+      {.action = A::SortColorSpace,
+       .label = "Color Space",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::ColorSpace),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::ColorSpace)); }},
+      {.action = A::SortFrameRate,
+       .label = "Frame Rate",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::FrameRate),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::FrameRate)); }},
+      {.action = A::SortPixelFormat,
+       .label = "Pixel Format",
+       .glyph = luciole::sortFieldGlyph(luciole::SortField::PixelFormat),
+       .rule = [](const C& c, const R&) { return checked(sortField(c, luciole::SortField::PixelFormat)); }},
       {.action = A::Ascending,
        .label = "Ascending",
        .glyph = "sort-ascending",
@@ -801,7 +873,137 @@ luciole::BrowserAction luciole::ActionRegistry::openAction(const ActionContext& 
       ? A::BrowseArchive
       : A::Open;
 }
+luciole::BrowserAction luciole::sortFieldAction(const luciole::SortField field) {
+  switch (field) {
+  case luciole::SortField::Name:
+    return A::SortName;
+  case luciole::SortField::Type:
+    return A::SortType;
+  case luciole::SortField::Size:
+    return A::SortSize;
+  case luciole::SortField::Modified:
+    return A::SortModified;
+  case luciole::SortField::Accessed:
+    return A::SortAccessed;
+  case luciole::SortField::Created:
+    return A::SortCreated;
+  case luciole::SortField::Owner:
+    return A::SortOwner;
+  case luciole::SortField::Group:
+    return A::SortGroup;
+  case luciole::SortField::Permissions:
+    return A::SortPermissions;
+  case luciole::SortField::Location:
+    return A::SortLocation;
+  case luciole::SortField::Dimensions:
+    return A::SortDimensions;
+  case luciole::SortField::Duration:
+    return A::SortDuration;
+  case luciole::SortField::BitRate:
+    return A::SortBitRate;
+  case luciole::SortField::AudioCodec:
+    return A::SortAudioCodec;
+  case luciole::SortField::VideoCodec:
+    return A::SortVideoCodec;
+  case luciole::SortField::DatePhotographed:
+    return A::SortDatePhotographed;
+  case luciole::SortField::Width:
+    return A::SortWidth;
+  case luciole::SortField::Height:
+    return A::SortHeight;
+  case luciole::SortField::Orientation:
+    return A::SortOrientation;
+  case luciole::SortField::Album:
+    return A::SortAlbum;
+  case luciole::SortField::Artist:
+    return A::SortArtist;
+  case luciole::SortField::Genre:
+    return A::SortGenre;
+  case luciole::SortField::ReleaseYear:
+    return A::SortReleaseYear;
+  case luciole::SortField::Track:
+    return A::SortTrack;
+  case luciole::SortField::AspectRatio:
+    return A::SortAspectRatio;
+  case luciole::SortField::ColorSpace:
+    return A::SortColorSpace;
+  case luciole::SortField::FrameRate:
+    return A::SortFrameRate;
+  case luciole::SortField::PixelFormat:
+    return A::SortPixelFormat;
+  }
+  std::unreachable();
+}
+
+luciole::SortField luciole::sortActionField(const luciole::BrowserAction action) {
+  switch (action) {
+  case A::SortName:
+    return luciole::SortField::Name;
+  case A::SortType:
+    return luciole::SortField::Type;
+  case A::SortSize:
+    return luciole::SortField::Size;
+  case A::SortModified:
+    return luciole::SortField::Modified;
+  case A::SortAccessed:
+    return luciole::SortField::Accessed;
+  case A::SortCreated:
+    return luciole::SortField::Created;
+  case A::SortOwner:
+    return luciole::SortField::Owner;
+  case A::SortGroup:
+    return luciole::SortField::Group;
+  case A::SortPermissions:
+    return luciole::SortField::Permissions;
+  case A::SortLocation:
+    return luciole::SortField::Location;
+  case A::SortDimensions:
+    return luciole::SortField::Dimensions;
+  case A::SortDuration:
+    return luciole::SortField::Duration;
+  case A::SortBitRate:
+    return luciole::SortField::BitRate;
+  case A::SortAudioCodec:
+    return luciole::SortField::AudioCodec;
+  case A::SortVideoCodec:
+    return luciole::SortField::VideoCodec;
+  case A::SortDatePhotographed:
+    return luciole::SortField::DatePhotographed;
+  case A::SortWidth:
+    return luciole::SortField::Width;
+  case A::SortHeight:
+    return luciole::SortField::Height;
+  case A::SortOrientation:
+    return luciole::SortField::Orientation;
+  case A::SortAlbum:
+    return luciole::SortField::Album;
+  case A::SortArtist:
+    return luciole::SortField::Artist;
+  case A::SortGenre:
+    return luciole::SortField::Genre;
+  case A::SortReleaseYear:
+    return luciole::SortField::ReleaseYear;
+  case A::SortTrack:
+    return luciole::SortField::Track;
+  case A::SortAspectRatio:
+    return luciole::SortField::AspectRatio;
+  case A::SortColorSpace:
+    return luciole::SortField::ColorSpace;
+  case A::SortFrameRate:
+    return luciole::SortField::FrameRate;
+  case A::SortPixelFormat:
+    return luciole::SortField::PixelFormat;
+  default:
+    return luciole::SortField::Modified;
+  }
+}
 bool luciole::chooserAction(BrowserAction action) {
+  // The sort block is one contiguous enum run; every sort action, media fields included, stays available in the
+  // chooser.
+  const auto ordinal = std::to_underlying(action);
+  if (ordinal >= std::to_underlying(A::SortName) && ordinal <= std::to_underlying(A::SortPixelFormat)) {
+    return true;
+  }
   switch (action) {
   case A::Back:
   case A::Forward:
@@ -818,16 +1020,6 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::ShowSidebar:
   case A::ShowPreview:
   case A::QuickPreview:
-  case A::SortName:
-  case A::SortType:
-  case A::SortSize:
-  case A::SortModified:
-  case A::SortAccessed:
-  case A::SortCreated:
-  case A::SortOwner:
-  case A::SortGroup:
-  case A::SortPermissions:
-  case A::SortLocation:
   case A::Ascending:
   case A::Descending:
   case A::FoldersFirst:
@@ -888,8 +1080,9 @@ bool luciole::chooserAction(BrowserAction action) {
   case A::OpenCurrentAdmin:
   case A::LeaveAdmin:
     return false;
+  default:
+    return false;
   }
-  return false;
 }
 
 std::vector<luciole::BrowserAction> luciole::itemMenuDeletionActions(bool inTrash, bool showPermanentDeletion) {

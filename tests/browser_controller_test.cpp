@@ -1,3 +1,4 @@
+#include "browser/action_registry.h"
 #include "browser/browser_controller.h"
 #include "browser/entry_details.h"
 #include "browser/location_presentation.h"
@@ -1067,6 +1068,17 @@ namespace {
     TEST_CHECK(probeCalls == settle && browser.folderSize(refusalId) != nullptr);
   }
 
+  void testSortActionMapping() {
+    TEST_CHECK(
+        luciole::sortActionField(luciole::sortFieldAction(luciole::SortField::Name)) == luciole::SortField::Name
+    );
+    for (const auto field : luciole::kColumnSortFields) {
+      const auto action = luciole::sortFieldAction(field);
+      TEST_CHECK(luciole::sortActionField(action) == field);
+      const auto& definition = luciole::ActionRegistry::definition(action);
+      TEST_CHECK(definition.action == action && !definition.label.empty() && !definition.glyph.empty());
+    }
+  }
 } // namespace
 
 int main() {
@@ -1080,6 +1092,7 @@ int main() {
     testRecursiveSearch();
     testBackupPolicyAndSearch();
     testSearchLifetimeAndPartialFailure();
+    testSortActionMapping();
     testFolderSizes();
     testFolderSizeNetworkRefusal();
     testLocationPresentation();

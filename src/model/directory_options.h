@@ -144,14 +144,40 @@ namespace luciole {
   };
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnLabels{
       "Type",       "Size",         "Modified",    "Accessed",     "Created",
-      "Owner",      "Group",        "Permissions", "Location",     "Dimension",
+      "Owner",      "Group",        "Permissions", "Location",     "Dimensions",
       "Duration",   "Bit Rate",     "Audio Codec", "Video Codec",  "Date Photographed",
       "Width",      "Height",       "Orientation", "Album",        "Artist",
       "Genre",      "Release Year", "Track",       "Aspect Ratio", "Color Space",
       "Frame Rate", "Pixel Format"
   };
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnGlyphs{
-      "category", "scale", "pencil", "eye", "calendar-plus", "user", "users", "lock", "map-pin"
+      "category",
+      "scale",
+      "pencil",
+      "eye",
+      "calendar-plus",
+      "user",
+      "users",
+      "lock",
+      "map-pin",
+      "dimensions",
+      "clock",
+      "wave-sine",
+      "music",
+      "movie",
+      "camera",
+      "arrows-horizontal",
+      "arrows-vertical",
+      "rotate",
+      "disc",
+      "microphone",
+      "tag",
+      "calendar-event",
+      "list-numbers",
+      "crop",
+      "palette",
+      "video",
+      "grid-dots"
   };
   inline std::string_view detailsColumnName(DetailsColumn column) {
     const auto index = static_cast<std::size_t>(column);

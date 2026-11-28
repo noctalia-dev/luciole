@@ -177,6 +177,9 @@ luciole::ExifFacts luciole::readExifFacts(int fd) {
       fields.tm_hour = static_cast<int>(*hour);
       fields.tm_min = static_cast<int>(*minute);
       fields.tm_sec = static_cast<int>(*second);
+      // EXIF carries no zone, so the local DST rule resolves the offset; forcing standard time shifts DST dates an
+      // hour.
+      fields.tm_isdst = -1;
       const auto seconds = ::mktime(&fields);
       if (seconds >= 0) {
         facts.dateSeconds = static_cast<std::uint64_t>(seconds);
