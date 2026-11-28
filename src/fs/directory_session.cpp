@@ -12,10 +12,12 @@
 #include <bit>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <iterator>
 #include <optional>
+#include <print>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -24,6 +26,8 @@
 #include <vector>
 
 namespace {
+  // [media-debug] Set LUCIOLE_MEDIA_DEBUG=1 to trace the media pipeline; gated and silent otherwise.
+  const bool mediaDebug = g_getenv("LUCIOLE_MEDIA_DEBUG") != nullptr;
   constexpr const char* kAccessAttributes =
       G_FILE_ATTRIBUTE_ACCESS_CAN_READ "," G_FILE_ATTRIBUTE_ACCESS_CAN_WRITE "," G_FILE_ATTRIBUTE_ACCESS_CAN_EXECUTE
                                        "," G_FILE_ATTRIBUTE_ACCESS_CAN_RENAME "," G_FILE_ATTRIBUTE_ACCESS_CAN_TRASH
@@ -432,7 +436,15 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       // The media pipeline handles churn and rescans itself; only fact queries stay gated below. A media-only
       // request still falls through so catalogue rows queue the base facts the probe needs.
       if (index < snapshot.entries.size() && snapshot.entries.brief(index).id == id) {
+        if (mediaDebug) {
+          std::println(stderr, "[media-debug] request idx={} id={}", index, static_cast<unsigned long long>(id));
+        }
         requestMedia(index, id);
+      } else if (mediaDebug) {
+        std::println(
+            stderr, "[media-debug] request refused idx={} id={} size={}", index, static_cast<unsigned long long>(id),
+            snapshot.entries.size()
+        );
       }
       details = static_cast<std::uint8_t>(details & ~EntryDetails::Media);
     }
@@ -620,10 +632,17 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void requestMedia(std::size_t index, std::uint64_t id) {
+    const auto* known = snapshot.entries.known(index);
+    if (mediaDebug) {
+      std::println(
+          stderr, "[media-debug] mediaRequest idx={} id={} facts={} size={} known={} failed={} qMedia={}", index,
+          static_cast<unsigned long long>(id), mediaFacts != nullptr, mediaRequested.size(), known != nullptr,
+          known ? known->metadataFailed : false, known ? (known->queriedDetails & EntryDetails::Media) != 0 : false
+      );
+    }
     if (!mediaFacts || mediaRequested.size() >= 1024) {
       return;
     }
-    const auto* known = snapshot.entries.known(index);
     if (known && (known->metadataFailed || (known->queriedDetails & EntryDetails::Media) != 0)) {
       return;
     }
@@ -632,6 +651,11 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void queueMedia() {
+    if (mediaDebug) {
+      std::println(
+          stderr, "[media-debug] queue requested={} idle={} running={}", mediaRequested.size(), mediaIdle, mediaRunning
+      );
+    }
     if (mediaRequested.empty() || mediaIdle != 0 || mediaRunning) {
       return;
     }
@@ -652,6 +676,12 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   void prepareMedia() {
     // Churn and rescans must not gate probing: the probe revalidates the file's stamps and publication
     // revalidates by name, so batches build and publish through both.
+    if (mediaDebug) {
+      std::println(
+          stderr, "[media-debug] prepare enter requested={} running={} status={} loc={}", mediaRequested.size(),
+          mediaRunning, static_cast<int>(snapshot.status), snapshot.location.has_value()
+      );
+    }
     if (mediaRunning || mediaRequested.empty() || snapshot.status != DirectoryStatus::Ready || !snapshot.location) {
       return;
     }
@@ -709,6 +739,12 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     for (const auto& [index, id] : waiting) {
       mediaRequested.emplace(index, id);
     }
+    if (mediaDebug) {
+      std::println(
+          stderr, "[media-debug] batch rows={} waiting={} local={} folder={}", job->rows.size(), waiting.size(), local,
+          job->folder.c_str()
+      );
+    }
     if (job->rows.empty()) {
       return;
     }
@@ -737,19 +773,38 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
       auto& job = *static_cast<MediaJob*>(data);
       const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
+      if (mediaDebug) {
+        std::println(stderr, "[media-debug] worker rows={} folder={}", job.rows.size(), job.folder.c_str());
+      }
       // The icon pass's filesystem check: network folders answer completed unknowns without probing.
       const bool network = std::ranges::any_of(job.rows, [](const MediaRow& row) { return row.eligible && !row.facts; })
           && networkFilesystem(job.folder);
+      if (mediaDebug) {
+        std::println(stderr, "[media-debug] worker network={}", network);
+      }
       for (auto& row : job.rows) {
         if (g_cancellable_is_cancelled(cancellable) != FALSE) {
           break;
         }
         if (row.eligible && !row.facts) {
+          if (mediaDebug) {
+            std::println(
+                stderr, "[media-debug] probe {}{} start", job.folder.c_str(),
+                std::string(separator).append(row.name).c_str()
+            );
+          }
           if (network) {
             row.facts = EntryMedia{};
           } else {
             row.facts =
                 job.probe(std::string(job.folder).append(separator).append(row.name), row.contentType, cancellable);
+          }
+          if (mediaDebug) {
+            std::println(
+                stderr, "[media-debug] probed {}{} empty={} cancelled={}", job.folder.c_str(),
+                std::string(separator).append(row.name).c_str(), row.facts == EntryMedia{},
+                g_cancellable_is_cancelled(cancellable) != FALSE
+            );
           }
         }
       }
@@ -766,6 +821,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   void mediaRead(MediaJob& job) {
     mediaRunning = false;
     const bool cancelled = g_cancellable_is_cancelled(mediaCancellable.get()) != FALSE;
+    if (mediaDebug) {
+      std::println(stderr, "[media-debug] read rows={} cancelled={}", job.rows.size(), cancelled);
+    }
     // Publication matches by name (rescans reorder the listing, so batch indexes are stale by the time probes
     // return); an eligible row applies only while its stamps still match.
     std::unordered_map<std::string_view, const MediaRow*, NameHash, std::equal_to<>> byName;
@@ -827,6 +885,12 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
         if (touched) {
           snapshot.entries = std::move(entries);
         }
+      }
+      if (mediaDebug) {
+        std::println(
+            stderr, "[media-debug] publish touched={} catalogue={} entries={}", touched, catalogue,
+            snapshot.entries.size()
+        );
       }
       if (touched) {
         identities.rebase(snapshot.entries);
