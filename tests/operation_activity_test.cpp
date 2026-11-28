@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <fcntl.h>
 #include <filesystem>
@@ -136,7 +135,8 @@ namespace {
     done.progress = 1.0F;
     const auto average =
         luciole::runningProgress(std::array{copying, archiving, done, activity(ActivityState::Succeeded, true)});
-    TEST_CHECK(average && std::abs(*average - 0.4F) < 0.001F);
+    TEST_CHECK(average.has_value());
+    TEST_NEAR(*average, 0.4F, 0.001F);
     TEST_CHECK(!luciole::runningProgress(std::array{copying, activity(ActivityState::Working, false)}));
     TEST_CHECK(!luciole::runningProgress(std::array{done}));
   }
