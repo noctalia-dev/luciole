@@ -84,6 +84,7 @@ namespace {
   struct VideoProbe {
     std::optional<double> duration;
     std::optional<int> cover; // stream index of the best embedded cover
+    int coverPacket = 0;      // 1-based position of that cover among the attached pictures, in stream order
   };
   template <typename T> std::optional<T> parseNumber(std::string_view text) {
     T value{};
@@ -111,6 +112,7 @@ namespace {
     constexpr std::array<std::string_view, 4> kCoverNames{"small_cover", "cover", "small_cover_land", "cover_land"};
     VideoProbe probe;
     std::pair<std::size_t, std::int64_t> best{0, -1};
+    int attachedCount = 0;
     const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
     for (const auto lineRange : std::views::split(text, '\n')) {
       const std::string_view line(lineRange.begin(), lineRange.end());
@@ -144,13 +146,118 @@ namespace {
           nameRank = found == kCoverNames.end() ? 0 : static_cast<std::size_t>(found - kCoverNames.begin()) + 1;
         }
       }
+      attachedCount += attached ? 1 : 0;
       const std::pair rank{nameRank, width * height};
       if (attached && index && rank > best) {
         best = rank;
         probe.cover = index;
+        probe.coverPacket = attachedCount;
       }
     }
     return probe;
+  }
+  // ffmpeg, and ffprobe with the stream selected, read a whole file looking for a second packet of an attached
+  // picture: minutes for large files on network storage. Demuxers queue attached pictures in stream order before any
+  // other packet, so an unselected ffprobe that stops after `packets` packets returns the cover from the header.
+  std::optional<LoadedImageFile> embeddedCover(
+      int source, int stream, int packets, int side, GCancellable* cancel, const std::filesystem::path& output,
+      std::chrono::steady_clock::time_point deadline
+  ) {
+    constexpr std::size_t kDumpLimit = 64U * 1024U * 1024U; // the hex dump takes about 4.4 bytes per cover byte
+    const auto budget = [&] {
+      return std::min(
+          std::chrono::milliseconds(2000),
+          std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now())
+      );
+    };
+    const auto dumpPath = output.parent_path() / "cover-dump";
+    std::vector<std::uint8_t> bytes;
+    {
+      const luciole::Fd dump(::open(dumpPath.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600));
+      if (!dump.valid()
+          || !luciole::runProviderProcess(
+              {"ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries",
+               "packet=stream_index,data", "-show_data", "-read_intervals", "%+#" + std::to_string(packets), "-of",
+               "default=nw=1", "/proc/self/fd/3"},
+              source, cancel, kDumpLimit, 1, dump.get(), budget()
+          )) {
+        return std::nullopt;
+      }
+      const auto dumped = luciole::readThumbnailFile(dumpPath, kDumpLimit);
+      if (!dumped) {
+        return std::nullopt;
+      }
+      const std::string_view text(reinterpret_cast<const char*>(dumped->data()), dumped->size());
+      bool inCover = false;
+      for (const auto lineRange : std::views::split(text, '\n')) {
+        const std::string_view line(lineRange.begin(), lineRange.end());
+        if (line.starts_with("stream_index=")) {
+          inCover = parseNumber<int>(line.substr(13)) == stream;
+          continue;
+        }
+        // Dump rows look like "00000000: 8950 4e47 ...  .PNG....": 16 bytes in a 39-column hex field.
+        if (!inCover || line.size() < 10 || line[8] != ':') {
+          continue;
+        }
+        const auto hex = line.substr(10, 39);
+        for (std::size_t i = 0; i + 2 <= hex.size();) {
+          if (hex[i] == ' ') {
+            ++i;
+            continue;
+          }
+          std::uint8_t value = 0;
+          if (std::from_chars(hex.data() + i, hex.data() + i + 2, value, 16).ec != std::errc{}) {
+            return std::nullopt;
+          }
+          bytes.push_back(value);
+          i += 2;
+        }
+      }
+    }
+    const auto coverPath = output.parent_path() / "cover";
+    if (bytes.empty()
+        || !g_file_set_contents(
+            coverPath.c_str(), reinterpret_cast<const char*>(bytes.data()), static_cast<gssize>(bytes.size()), nullptr
+        )) {
+      return std::nullopt;
+    }
+    const luciole::Fd image(::open(coverPath.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
+    if (!image.valid()) {
+      return std::nullopt;
+    }
+    (void)::unlink(output.c_str());
+    if (!luciole::runProviderProcess(
+            {"ffmpeg",
+             "-nostdin",
+             "-v",
+             "error",
+             "-xerror",
+             "-threads",
+             "1",
+             "-filter_threads",
+             "1",
+             "-protocol_whitelist",
+             "file,pipe",
+             "-i",
+             "/proc/self/fd/3",
+             "-map",
+             "0:v:0",
+             "-frames:v",
+             "1",
+             "-threads",
+             "1",
+             "-vf",
+             "scale=" + std::to_string(side) + ':' + std::to_string(side) + ":force_original_aspect_ratio=decrease",
+             "-y",
+             output.native()},
+            image.get(), cancel, 8U * 1024U * 1024U, 0, -1, budget()
+        )) {
+      return std::nullopt;
+    }
+    const auto png = luciole::readThumbnailFile(output, 8U * 1024U * 1024U);
+    auto cover = png ? luciole::readThumbnailPng(*png, side)
+                     : std::expected<luciole::ThumbnailPng, std::string>(std::unexpected("no cover output"));
+    return cover ? std::optional(std::move(cover->image)) : std::nullopt;
   }
   bool darkFrame(const LoadedImageFile& image) {
     std::size_t dark = 0;
@@ -168,32 +275,9 @@ namespace {
     // An embedded cover (attached picture, e.g. yt-dlp --embed-thumbnail) is the file's intended preview, so prefer
     // it to decoded frames. Files without a usable cover fall through to the frame loop.
     if (probe.cover) {
-      std::vector<std::string> arguments{"ffmpeg",   "-nostdin",
-                                         "-v",       "error",
-                                         "-xerror",  "-threads",
-                                         "1",        "-filter_threads",
-                                         "1",        "-protocol_whitelist",
-                                         "file,pipe"};
-      arguments.insert(
-          arguments.end(),
-          {"-i", "/proc/self/fd/3", "-map", "0:" + std::to_string(*probe.cover), "-frames:v", "1", "-an", "-sn",
-           "-threads", "1", "-vf",
-           "scale=" + std::to_string(side) + ':' + std::to_string(side) + ":force_original_aspect_ratio=decrease", "-y",
-           output.native()}
-      );
-      (void)::unlink(output.c_str());
-      const auto remaining =
-          std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
-      const auto result =
-          luciole::runProviderProcess(std::move(arguments), source, cancel, 8U * 1024U * 1024U, 0, -1, remaining);
-      if (result) {
-        const auto bytes = luciole::readThumbnailFile(output, 8U * 1024U * 1024U);
-        if (bytes) {
-          if (auto cover = luciole::readThumbnailPng(*bytes, side)) {
-            // A cover is already the intended artwork: skip the filmstrip border added to decoded frames.
-            return std::move(cover->image);
-          }
-        }
+      if (auto cover = embeddedCover(source, *probe.cover, probe.coverPacket, side, cancel, output, deadline)) {
+        // A cover is already the intended artwork: skip the filmstrip border added to decoded frames.
+        return std::move(*cover);
       }
     }
     const auto& duration = probe.duration;
