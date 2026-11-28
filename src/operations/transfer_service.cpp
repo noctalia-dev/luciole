@@ -173,6 +173,10 @@ struct luciole::TransferService::State {
   Meter meter;
   RateMeter rate;
   CancelToken token;
+  std::shared_ptr<transfer::PauseState> pause = std::make_shared<transfer::PauseState>();
+  // True while a native, non-link run offers pause; provider, link and replay paths have no park points.
+  bool pauseCapable = false;
+  bool replay = false;
   std::vector<TransferResult> results;
   Gate gate;
   std::uint64_t jobId = 0;
@@ -206,6 +210,12 @@ struct luciole::TransferService::State {
     );
     flush.store(TransferFlush::None);
     token = CancelToken{};
+    // A fresh pause control releases any reader of the previous run before its worker unwinds.
+    pause = std::make_shared<transfer::PauseState>();
+    pauseCapable = request.action != TransferAction::Link
+        && request.destination.isNative()
+        && std::ranges::all_of(request.sources, [](const auto& source) { return source.isNative(); });
+    replay = false;
     receipt.reset();
     copyReceipt.reset();
     historyRetired = false;
@@ -394,7 +404,10 @@ namespace {
   }
 
   // Measures every source before the transfer runs so progress can be shown.
-  void measureSources(Meter& meter, const luciole::TransferRequest& request, const luciole::CancelToken& token) {
+  void measureSources(
+      Meter& meter, const luciole::TransferRequest& request, const luciole::CancelToken& token,
+      const std::shared_ptr<luciole::transfer::PauseState>& pause
+  ) {
     if (!meter.estimating.load()) {
       return;
     }
@@ -403,12 +416,15 @@ namespace {
       return;
     }
     luciole::SourceEstimate measured;
-    const auto publish = [&meter](const luciole::SourceEstimate& value) {
+    const auto publish = [&meter, &token, &pause](const luciole::SourceEstimate& value) {
+      // Park inside the scan too: the walker reports a snapshot every 64 items.
+      luciole::transfer::waitIfPaused(pause, token);
       meter.expectedBytes.store(value.bytes);
       meter.expectedFiles.store(value.files);
       meter.totalsPartial.store(value.partial);
     };
     for (const auto& source : request.sources) {
+      luciole::transfer::waitIfPaused(pause, token);
       if (token.cancelled()) {
         measured.partial = true;
         break;
@@ -656,9 +672,29 @@ void luciole::TransferService::cancel() {
   }
   shutdown();
 }
+bool luciole::TransferService::canPause() const {
+  // Provider, link and replay paths have no pause checkpoints; a flush runs to its end once started.
+  return m_state->active
+      && m_state->pauseCapable
+      && !m_state->replay
+      && m_state->flush.load() == TransferFlush::None
+      && !m_state->gate.pending();
+}
+void luciole::TransferService::pause() {
+  if (canPause()) {
+    m_state->pause->paused.store(true);
+  }
+}
+void luciole::TransferService::resume() {
+  if (m_state->pause->paused.exchange(false)) {
+    luciole::transfer::wakePaused(m_state->pause);
+  }
+}
+bool luciole::TransferService::paused() const { return m_state->active && m_state->pause->paused.load(); }
 void luciole::TransferService::shutdown() {
   m_state->token.cancel();
   m_state->gate.wake();
+  luciole::transfer::wakePaused(m_state->pause);
 }
 std::optional<luciole::TransferConflict> luciole::TransferService::conflict() const { return m_state->gate.pending(); }
 bool luciole::TransferService::resolve(std::uint64_t id, TransferConflictChoice choice, bool applyToAll) {
@@ -673,6 +709,7 @@ bool luciole::TransferService::resolve(std::uint64_t id, TransferConflictChoice 
     }
     if (choice == TransferConflictChoice::Cancel) {
       token.cancel();
+      luciole::transfer::wakePaused(m_state->pause);
     }
     return true;
   });
@@ -1172,6 +1209,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
             conflictAsker(owner->gate, [owner] { State::notify(owner); }, token, allowMerge, policies)
         };
         work.writeback.ops = owner->writeback;
+        work.pause = owner->pause;
         work.writeback.phase = [owner](TransferFlush phase) {
           if (owner->flush.exchange(phase) != phase) {
             State::notify(owner);
@@ -1274,7 +1312,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         work.changedLinks = job->changedLinks;
         work.mergedItems = job->mergedItems;
         // Measure the sources, so the running transfer shows a byte total, file count and remaining time.
-        measureSources(owner->meter, job->request, token);
+        measureSources(owner->meter, job->request, token, owner->pause);
         const bool remote = !job->request.destination.isNative()
             || std::ranges::any_of(job->request.sources, [](const auto& source) { return !source.isNative(); });
         if (!remote) {
@@ -1409,6 +1447,7 @@ bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& 
     return false;
   }
   m_state->active = true;
+  m_state->replay = true;
   m_state->action = TransferAction::Move;
   m_state->total = receipt->size();
   m_state->bytes.store(0);
@@ -1434,6 +1473,7 @@ bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& 
           owner->results = receipt->unconfirmed(result.error());
         }
         owner->report = jobReport(owner->results);
+        owner->replay = false;
         owner->active = false;
         const auto callback = owner->changed;
         if (callback) {
@@ -1453,6 +1493,7 @@ bool luciole::TransferService::replayCopy(const std::shared_ptr<const CopyReceip
     return false;
   }
   m_state->active = true;
+  m_state->replay = true;
   m_state->action = receipt->action();
   m_state->total = receipt->size();
   m_state->bytes.store(0);
@@ -1478,6 +1519,7 @@ bool luciole::TransferService::replayCopy(const std::shared_ptr<const CopyReceip
           owner->results = receipt->unconfirmed(result.error());
         }
         owner->report = jobReport(owner->results);
+        owner->replay = false;
         owner->active = false;
         const auto callback = owner->changed;
         if (callback) {

@@ -73,6 +73,11 @@ public:
   // The operation can currently be stopped through the activity controls.
   bool cancellable() const;
   void cancel();
+  // Transfers that park their worker at checkpoints; pause and resume apply only while pausable or paused.
+  bool pausable() const;
+  bool paused() const;
+  void pause();
+  void resume();
   // The restore, archive or transfer conflict waiting for an answer.
   std::optional<luciole::TransferConflict> conflict() const;
   bool resolve(std::uint64_t id, luciole::TransferConflictChoice choice, bool applyToAll = false);
@@ -180,6 +185,8 @@ public:
   std::vector<luciole::JobActivity> activities() const;
   std::shared_ptr<const std::string> activityReport(luciole::JobId id) const;
   bool cancelActivity(luciole::JobId id);
+  bool pauseActivity(luciole::JobId id);
+  bool resumeActivity(luciole::JobId id);
   void clearFinishedActivities();
 
 private:

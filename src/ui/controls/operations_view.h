@@ -8,7 +8,7 @@
 
 class ScrollView;
 class InputArea;
-enum class ActivityAction { Cancel, Review, Retry, Details };
+enum class ActivityAction { Cancel, Review, Retry, Details, Pause, Resume };
 
 class OperationsView final : public Flex {
 public:

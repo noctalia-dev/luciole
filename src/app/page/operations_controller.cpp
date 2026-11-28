@@ -179,6 +179,12 @@ void OperationsController::act(std::uint64_t id, ActivityAction action) {
   if (action == ActivityAction::Cancel) {
     (void)m_hub.cancelActivity(id);
     markDirty();
+  } else if (action == ActivityAction::Pause) {
+    (void)m_hub.pauseActivity(id);
+    markDirty();
+  } else if (action == ActivityAction::Resume) {
+    (void)m_hub.resumeActivity(id);
+    markDirty();
   } else if (action == ActivityAction::Details) {
     m_pendingDetails = id;
     markDirty();

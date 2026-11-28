@@ -5,6 +5,7 @@
 #include "ui/controls/scroll_view.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 class OperationsView::Row final : public Flex {
@@ -30,14 +31,18 @@ public:
            .text = text,
            .controlHeight = Style::controlHeightSm,
            .variant = ButtonVariant::Ghost,
-           .onClick = [action, id, choice] { action(id, choice); }}
+           // One button carries both directions; it sends Resume while the job is parked.
+           .onClick = [action, id, choice, paused = m_paused] {
+             action(id, choice == ActivityAction::Pause && *paused ? ActivityAction::Resume : choice);
+           }}
       );
     };
     addChild(
         ui::row(
             {.align = FlexAlign::Center, .justify = FlexJustify::End, .gap = Style::spaceXs},
-            button(&m_details, "Details", ActivityAction::Details), button(&m_cancel, "Cancel", ActivityAction::Cancel),
-            button(&m_review, "Review", ActivityAction::Review), button(&m_retry, "Retry Failed", ActivityAction::Retry)
+            button(&m_details, "Details", ActivityAction::Details), button(&m_pause, "Pause", ActivityAction::Pause),
+            button(&m_cancel, "Cancel", ActivityAction::Cancel), button(&m_review, "Review", ActivityAction::Review),
+            button(&m_retry, "Retry Failed", ActivityAction::Retry)
         )
     );
     addChild(ui::separator({}));
@@ -45,6 +50,7 @@ public:
     m_summary->setUseMarkup(false);
   }
   void bind(const luciole::JobActivity& activity) {
+    *m_paused = activity.paused;
     m_title->setText(activity.title);
     // A running transfer carries a meters line with the measured speed and totals.
     m_summary->setText(activity.meters.empty() ? activity.summary : activity.meters);
@@ -54,6 +60,7 @@ public:
             : activity.state == luciole::ActivityState::Cancelled ? "x"
             : activity.finished                                   ? "check"
             : activity.state == luciole::ActivityState::Waiting   ? "clock"
+            : activity.state == luciole::ActivityState::Paused    ? "media-pause"
                                                                   : "progress"
     );
     m_glyph->setColor(colorSpecFromRole(activity.failed() ? ColorRole::Error : ColorRole::Primary));
@@ -70,9 +77,10 @@ public:
     m_progress->setVisible(activity.progress.has_value() && !activity.finished);
     m_progress->setParticipatesInLayout(activity.progress.has_value() && !activity.finished);
     m_progress->setProgress(activity.progress.value_or(0.0F));
+    m_pause->setText(activity.paused ? "Resume" : "Pause");
     for (const auto& [button, shown] :
-         {std::pair(m_cancel, activity.canCancel), std::pair(m_review, activity.canReview),
-          std::pair(m_retry, activity.canRetry)}) {
+         {std::pair(m_pause, activity.canPause || activity.paused), std::pair(m_cancel, activity.canCancel),
+          std::pair(m_review, activity.canReview), std::pair(m_retry, activity.canRetry)}) {
       button->setVisible(shown);
       button->setParticipatesInLayout(shown);
     }
@@ -99,7 +107,9 @@ private:
   Glyph* m_glyph = nullptr;
   Spinner* m_spinner = nullptr;
   ProgressBar* m_progress = nullptr;
-  Button *m_details = nullptr, *m_cancel = nullptr, *m_review = nullptr, *m_retry = nullptr;
+  Button *m_details = nullptr, *m_pause = nullptr, *m_cancel = nullptr, *m_review = nullptr, *m_retry = nullptr;
+  // Read by the shared pause button at click time, without capturing the row.
+  std::shared_ptr<bool> m_paused = std::make_shared<bool>(false);
 };
 
 OperationsView::OperationsView(Action action) : m_action(std::move(action)) {

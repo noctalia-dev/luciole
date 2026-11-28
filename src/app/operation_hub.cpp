@@ -92,6 +92,26 @@ void OperationJob::cancel() {
   std::visit([](auto& service) { service->cancel(); }, m_service);
 }
 
+bool OperationJob::pausable() const {
+  return kind() == JobKind::Transfer && service<luciole::TransferService>().canPause();
+}
+
+bool OperationJob::paused() const {
+  return kind() == JobKind::Transfer && service<luciole::TransferService>().paused();
+}
+
+void OperationJob::pause() {
+  if (pausable()) {
+    service<luciole::TransferService>().pause();
+  }
+}
+
+void OperationJob::resume() {
+  if (paused()) {
+    service<luciole::TransferService>().resume();
+  }
+}
+
 std::optional<luciole::TransferConflict> OperationJob::conflict() const {
   switch (kind()) {
   case JobKind::Transfer:
@@ -668,6 +688,26 @@ bool OperationHub::cancelActivity(luciole::JobId id) {
     return false;
   }
   job->cancel();
+  return true;
+}
+
+bool OperationHub::pauseActivity(luciole::JobId id) {
+  auto* job = find(id);
+  if (!job || !job->pausable()) {
+    return false;
+  }
+  job->pause();
+  notifyActivity();
+  return true;
+}
+
+bool OperationHub::resumeActivity(luciole::JobId id) {
+  auto* job = find(id);
+  if (!job || !job->paused()) {
+    return false;
+  }
+  job->resume();
+  notifyActivity();
   return true;
 }
 
