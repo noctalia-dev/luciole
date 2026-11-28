@@ -408,7 +408,8 @@ namespace {
     facts = luciole::probeEntryMediaFacts(clip.native(), "video/mp4", nullptr);
     TEST_CHECK(facts.width == 160U && facts.height == 90U);
     TEST_CHECK(facts.videoCodec == luciole::InternedText("h264") && facts.audioCodec == luciole::InternedText("aac"));
-    TEST_CHECK(facts.frameRateMilli == 25'000U && facts.aspectRatioPerMille == 1'777U);
+    // "16:9" rounds to the nearest milli.
+    TEST_CHECK(facts.frameRateMilli == 25'000U && facts.aspectRatioPerMille == 1'778U);
     TEST_CHECK(facts.pixelFormat == luciole::InternedText("yuv420p") && facts.colorSpace);
     TEST_CHECK(facts.durationMicros && facts.bitsPerSecond);
     // The parser accepts the fields ffprobe emits, including tags, and rejects anything else.
@@ -430,6 +431,26 @@ namespace {
             .bitsPerSecond
         == 5'000'000U
     );
+    // VFR fractions parse like the preview does, rounded to its three decimals.
+    const auto vfr = luciole::parseMediaFacts(
+        R"({"streams": [{"codec_type": "video", "codec_name": "h264",)"
+        R"("avg_frame_rate": "112680000/1879957"}, {"codec_type": "audio", "codec_name": "aac"}]})"
+    );
+    TEST_CHECK(vfr.frameRateMilli == 59'938U);
+    // Over a million per second, or unrepresentable, answers nothing.
+    TEST_CHECK(!luciole::parseMediaFacts(R"({"streams": [{"codec_type": "video", "avg_frame_rate": "1126800000/1"}]})")
+                    .frameRateMilli);
+    TEST_CHECK(!luciole::parseMediaFacts(
+                    R"({"streams": [{"codec_type": "video", "avg_frame_rate": "18446744073709551615/1000000"}]})"
+    )
+                    .frameRateMilli);
+    // A later 0/0 timecode stream must not erase the first stream's rate.
+    const auto timed = luciole::parseMediaFacts(
+        R"({"streams": [{"codec_type": "video", "codec_name": "h264", "avg_frame_rate": "30000/1001"},)"
+        R"({"codec_type": "video", "codec_name": "tmcd", "avg_frame_rate": "0/0",)"
+        R"("disposition": {"attached_pic": 0}}]})"
+    );
+    TEST_CHECK(timed.frameRateMilli == 29'970U);
     TEST_CHECK(luciole::parseMediaFacts("not json") == luciole::EntryMedia{});
     // Hand-built JPEGs whose EXIF carries orientation 6 and a DateTimeOriginal. EXIF carries no zone, so the stored
     // wall time must come back exactly; pinning Paris makes July observe DST and March standard time.

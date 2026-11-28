@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <format>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <sys/stat.h>
@@ -277,7 +278,7 @@ namespace {
     return seconds;
   }
 
-  // "25/1" for rates and "16:9" for ratios; the result is the value scaled by one thousand.
+  // "25/1" for rates and "16:9" for ratios; scaled by one thousand, rounded, capped at one million per second.
   std::optional<std::uint64_t> probeRatioMilli(const nlohmann::json& value) {
     if (!value.is_string()) {
       return {};
@@ -291,17 +292,24 @@ namespace {
     const auto [numberEnd, numberError] = std::from_chars(
         text.data(), text.data() + (separator == std::string_view::npos ? text.size() : separator), numerator
     );
-    if (numberError != std::errc{} || numerator > 1'000'000U) {
+    if (numberError != std::errc{}) {
       return {};
     }
     if (separator != std::string_view::npos) {
       const auto [denominatorEnd, denominatorError] =
           std::from_chars(text.data() + separator + 1, text.data() + text.size(), denominator);
-      if (denominatorError != std::errc{} || denominator == 0 || denominator > 1'000'000U) {
+      if (denominatorError != std::errc{} || denominator == 0) {
         return {};
       }
     }
-    return numerator * 1000U / denominator;
+    if (numerator > (std::numeric_limits<std::uint64_t>::max() - denominator / 2U) / 1000U) {
+      return {};
+    }
+    const auto milli = (numerator * 1000U + denominator / 2U) / denominator;
+    if (milli > 1'000'000'000U) {
+      return {};
+    }
+    return milli;
   }
 } // namespace
 
@@ -385,8 +393,10 @@ luciole::EntryMedia luciole::parseMediaFacts(std::string_view data) {
         facts.width = static_cast<std::uint32_t>(*parseWidth);
         facts.height = static_cast<std::uint32_t>(*parseHeight);
       }
-      if (const auto rate = stream.find("avg_frame_rate"); rate != stream.end()) {
-        facts.frameRateMilli = probeRatioMilli(*rate);
+      if (!facts.frameRateMilli) {
+        if (const auto rate = stream.find("avg_frame_rate"); rate != stream.end()) {
+          facts.frameRateMilli = probeRatioMilli(*rate);
+        }
       }
       if (const auto ratio = stream.find("display_aspect_ratio"); ratio != stream.end()) {
         facts.aspectRatioPerMille = probeRatioMilli(*ratio);
