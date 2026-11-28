@@ -215,6 +215,29 @@ namespace {
     pump.until([&] { return !service.busy(); });
     TEST_CHECK(service.results().size() == 1 && service.results().front().outcome == TransferOutcome::Cancelled);
     TEST_CHECK(fs::is_empty(fixture.destination("")));
+    // A pause stops a running size scan itself: with the scan half done the published totals freeze,
+    // the estimate stays unfinished while parked, and nothing copies after a cancel.
+    fs::create_directory(fixture.source("wide"));
+    for (int i = 0; i < 40000; ++i) {
+      write(fixture.source(std::format("wide/leaf{}", i)), "x");
+    }
+    luciole::TransferService scanning;
+    TEST_CHECK(
+        scanning.start({{location(fixture.source("wide"))}, location(fixture.destination("")), TransferAction::Copy})
+    );
+    pump.until([&] {
+      const auto partial = scanning.progress();
+      return partial.estimating && partial.bytesTotal && *partial.bytesTotal >= 20000;
+    });
+    scanning.pause();
+    pump.pumpFor(std::chrono::milliseconds(500));
+    const auto midScan = scanning.progress();
+    pump.pumpFor(std::chrono::milliseconds(500));
+    const auto frozenScan = scanning.progress();
+    TEST_CHECK(frozenScan.estimating && midScan.bytesTotal == frozenScan.bytesTotal);
+    scanning.cancel();
+    pump.until([&] { return !scanning.busy(); });
+    TEST_CHECK(fs::is_empty(fixture.destination("")));
     // Resume continues the same job to completion.
     luciole::TransferService resuming;
     TEST_CHECK(

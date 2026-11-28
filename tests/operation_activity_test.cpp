@@ -317,6 +317,26 @@ namespace {
     TEST_CHECK(done.info.contains("Elapsed") && done.info.contains("Transferred"));
   }
 
+  // A paused row must say so in the text line it actually renders: running rows show meters, not summary.
+  void pausedActivity(Pump& pump) {
+    Fixture fixture;
+    fs::create_directory(fixture.root / "tree");
+    for (int i = 0; i < 400; ++i) {
+      std::ofstream(fixture.root / (std::string("tree/leaf") + std::to_string(i))) << "x";
+    }
+    Workspace workspace;
+    auto job = workspace.hub.create<luciole::TransferService>(workspace.page);
+    auto& service = job->service<luciole::TransferService>();
+    TEST_CHECK(service.start({{fixture.at("tree")}, fixture.at("destination"), luciole::TransferAction::Copy}));
+    service.pause();
+    const auto paused = workspace.hub.activities().front();
+    TEST_CHECK(paused.paused && paused.canPause && paused.state == ActivityState::Paused);
+    TEST_CHECK(paused.meters.starts_with("Paused · ") && paused.summary.starts_with("Paused · "));
+    TEST_CHECK(workspace.hub.resumeActivity(job->id()) && !service.paused());
+    service.cancel();
+    pump.until([&] { return !service.busy(); });
+  }
+
   void batchRenameHistory(Pump& pump) {
     Fixture fixture;
     fixture.write("a");
@@ -1462,6 +1482,7 @@ int main(int argc, char** argv) {
   removableFlushActivity(pump);
   transferMetersLine();
   transferProgressActivity(pump);
+  pausedActivity(pump);
   overwriteHistory(pump);
   trashMoveNotifications(pump, false);
   transferLifecycle(pump);

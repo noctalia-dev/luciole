@@ -296,7 +296,8 @@ namespace {
       }
       activity.canPause = service.canPause();
       activity.paused = service.paused();
-      activity.meters = transferMetersText(measured);
+      // The running row shows the meters line instead of the summary.
+      activity.meters = (service.paused() ? "Paused · " : "") + transferMetersText(measured);
       activity.state = service.paused()
           ? ActivityState::Paused
           : (measured.bytes || measured.completed ? ActivityState::Working : ActivityState::Preparing);

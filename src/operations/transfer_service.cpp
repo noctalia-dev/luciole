@@ -416,7 +416,9 @@ namespace {
       return;
     }
     luciole::SourceEstimate measured;
-    const auto publish = [&meter](const luciole::SourceEstimate& value) {
+    const auto publish = [&meter, &token, &pause](const luciole::SourceEstimate& value) {
+      // Park inside the scan too: the walker reports a snapshot every 64 items.
+      luciole::transfer::waitIfPaused(pause, token);
       meter.expectedBytes.store(value.bytes);
       meter.expectedFiles.store(value.files);
       meter.totalsPartial.store(value.partial);
