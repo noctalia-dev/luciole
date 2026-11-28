@@ -40,7 +40,13 @@ std::unique_ptr<Flex> LocationBarController::buildLocationArea() {
   );
   breadcrumbScroll->content()->setDirection(FlexDirection::Horizontal);
   breadcrumbScroll->content()->addChild(
-      ui::row({.out = &m_breadcrumbs, .align = FlexAlign::Center, .gap = 0.0F, .height = Style::controlHeight})
+      ui::row(
+          {.out = &m_breadcrumbs,
+           .align = FlexAlign::Center,
+           .gap = 0.0F,
+           .height = Style::controlHeight,
+           .configure = [](Flex& row) { row.setPadding(0.0F, 0.0F, 0.0F, Style::spaceXs); }}
+      )
   );
   auto locationArea = ui::row(
       {.out = &m_locationArea,
@@ -633,7 +639,7 @@ bool LocationBarController::layoutBreadcrumbs(Renderer& renderer) {
   if (!m_breadcrumbScroll->visible() || m_breadcrumbParts.empty()) {
     return false;
   }
-  const float available = m_breadcrumbScroll->contentViewportWidth();
+  const float available = m_breadcrumbScroll->contentViewportWidth() - m_breadcrumbs->paddingLeft();
   if (available == m_breadcrumbLayoutWidth
       && renderer.renderScale() == m_breadcrumbRenderScale
       && renderer.textMetricsGeneration() == m_breadcrumbMetricsGeneration) {
