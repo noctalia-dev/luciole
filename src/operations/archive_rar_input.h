@@ -3,7 +3,8 @@
 #include "operations/archive_input.h"
 
 namespace luciole::archive_work {
-  enum class RarInput { None, Rar4, Rar5 };
+  // Header-encrypted (rar -hp) inputs are listed and unpacked by the 7-Zip provider.
+  enum class RarInput { None, Rar4, Rar5, Rar4Encrypted, Rar5Encrypted };
   // Worker-only envelope check. Do not enable an SFX or multipart RAR reader
   // without this check: a first volume can contain complete readable members.
   RarInput validateRarInput(Input& input);

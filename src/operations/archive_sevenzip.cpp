@@ -33,7 +33,9 @@ namespace {
         return found.get();
       }
     }
-    throwFileError(FileErrorKind::Unavailable, "Encrypted 7z archives need the 7-Zip command (7zz or 7z) installed.");
+    throwFileError(
+        FileErrorKind::Unavailable, "Encrypted 7z and RAR archives need the 7-Zip command (7zz or 7z) installed."
+    );
   }
 
   struct Run {
@@ -180,7 +182,7 @@ namespace {
 } // namespace
 
 std::vector<luciole::archive_work::SevenZipMember>
-luciole::archive_work::sevenZipCatalog(Input& input, Work& work, const Passwords& passwords) {
+luciole::archive_work::sevenZipCatalog(Input& input, Work& work, const Passwords& passwords, std::string_view type) {
   // No catalog fits below one minimal record; fail before any password prompt.
   if (work.limits.maxMetadataBytes < 32 || work.limits.maxEntries == 0) {
     throwFileError(FileErrorKind::Unsupported, "The 7z catalog exceeds its metadata limit.");
@@ -189,7 +191,8 @@ luciole::archive_work::sevenZipCatalog(Input& input, Work& work, const Passwords
   const auto outputLimit = work.limits.maxEntries > (maximum - work.limits.maxMetadataBytes) / recordBytes
       ? maximum
       : work.limits.maxMetadataBytes + work.limits.maxEntries * recordBytes;
-  const std::vector<std::string> arguments{"l", "-slt", "-ba", "-t7z", "-bsp0", "-bse1", "/proc/self/fd/3"};
+  const std::vector<std::string> arguments{"l",     "-slt",           "-ba", "-t" + std::string(type), "-bsp0",
+                                           "-bse1", "/proc/self/fd/3"};
   for (const auto password : attempts(passwords)) {
     work.check();
     const auto result = run(input, work, password, arguments, outputLimit, 0);
@@ -206,14 +209,14 @@ luciole::archive_work::sevenZipCatalog(Input& input, Work& work, const Passwords
 
 void luciole::archive_work::extractSevenZip(
     Input& input, Work& work, const Passwords& passwords, const std::vector<std::string>& names, bool encrypted,
-    std::uint64_t largest, const std::string& directory
+    std::uint64_t largest, const std::string& directory, std::string_view type
 ) {
   if (passwords.values.empty() && encrypted) {
     requestPassword(work, "Could not unlock the selected 7z members.");
   }
   // -spd: literal names, no wildcards. "--" keeps names such as "-p..." or "@list" literal.
-  std::vector<std::string> arguments{"x",     "-y",   "-t7z",           "-bso0",          "-bsp0",
-                                     "-bse1", "-spd", "-o" + directory, "/proc/self/fd/3"};
+  std::vector<std::string> arguments{"x",     "-y",   "-t" + std::string(type), "-bso0",          "-bsp0",
+                                     "-bse1", "-spd", "-o" + directory,         "/proc/self/fd/3"};
   if (!names.empty()) {
     arguments.emplace_back("--");
     arguments.insert(arguments.end(), names.begin(), names.end());
