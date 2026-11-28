@@ -55,12 +55,19 @@ namespace {
         })) {
       return std::nullopt;
     }
+    if (luciole::transferDeviceDestination(destination)) {
+      return "Only files from this computer or the same phone can be copied onto a phone.";
+    }
+    if (destination.isDeviceRoot()) {
+      return destination.uri().starts_with("mtp:") ? "Open a storage on the phone first."
+                                                   : "Files cannot be copied onto cameras.";
+    }
     if (luciole::transferLocationSupported(destination)
         && std::ranges::any_of(sources, luciole::transferDeviceSource)) {
       return "Files from phones and cameras can only be copied or moved into local folders.";
     }
-    if (luciole::transferDeviceSource(destination) || destination.isDeviceRoot()) {
-      return "Files cannot be copied onto phones or cameras.";
+    if (luciole::transferDeviceSource(destination)) {
+      return "Files cannot be copied onto cameras.";
     }
     return "File transfers support local and mounted SFTP, SMB or WebDAV folders outside Trash.";
   }
@@ -100,7 +107,7 @@ void TransferController::paste(
       return;
     }
     if (!selection) {
-      if (m_page.clipboard().hasImage()) {
+      if (m_page.clipboard().hasImage() && !luciole::transferDeviceDestination(destination)) {
         // No file URIs: the clipboard may still hold an image to save as a new file.
         pasteImage(request, scope, std::move(destination));
         return;

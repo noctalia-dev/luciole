@@ -253,7 +253,7 @@ luciole::FileDropTarget DragDropController::externalDestination(const luciole::L
           && (!destination.isNative() || (m_connection.keyboardModifiers() & (KeyMod::Ctrl | KeyMod::Alt)) != 0))
       || (destination == luciole::Location::trash()
           && (m_connection.keyboardModifiers() & (KeyMod::Ctrl | KeyMod::Alt)) != 0)
-      || (!luciole::transferLocationSupported(destination) && destination != luciole::Location::trash())) {
+      || (!luciole::transferDestinationSupported(destination) && destination != luciole::Location::trash())) {
     return {};
   }
   m_externalDropTarget = DropTarget{destination, rect};
@@ -313,7 +313,7 @@ std::optional<std::pair<luciole::Location, LayoutRect>> DragDropController::fore
     const auto* entry = *index < rows.size() ? m_page.browser().model().entry(rows[*index]) : nullptr;
     if (entry && !entry->symlink && entry->type == luciole::FileType::Directory) {
       auto location = entry->location();
-      if (!luciole::transferLocationSupported(location)) {
+      if (!luciole::transferDestinationSupported(location)) {
         return std::nullopt;
       }
       if (auto rect = m_page.fileList()->itemRect(*index)) {
@@ -323,7 +323,7 @@ std::optional<std::pair<luciole::Location, LayoutRect>> DragDropController::fore
     }
   }
   const auto& location = m_page.browser().model().snapshot().location;
-  if (location && luciole::transferLocationSupported(*location) && m_page.browser().searchQuery().empty()) {
+  if (location && luciole::transferDestinationSupported(*location) && m_page.browser().searchQuery().empty()) {
     return std::pair(*location, sceneRect(m_page.filePane()));
   }
   return std::nullopt;
@@ -373,7 +373,7 @@ bool DragDropController::validDropFolder(const luciole::Location& destination) c
         && std::ranges::all_of(m_drag->entries, [](const auto& source) { return source.location.isNative(); });
   }
   if (m_externalHover) {
-    if (!luciole::transferLocationSupported(destination)) {
+    if (!luciole::transferDestinationSupported(destination)) {
       return false;
     }
     const auto* payload = m_page.clipboard().dragFiles();
@@ -390,7 +390,7 @@ bool DragDropController::validDropFolder(const luciole::Location& destination) c
     }
     return differentParent || (m_connection.keyboardModifiers() & (KeyMod::Ctrl | KeyMod::Alt)) != 0;
   }
-  if (!m_drag || m_drag->sourcePin || !luciole::transferLocationSupported(destination)) {
+  if (!m_drag || m_drag->sourcePin || !luciole::transferDestinationSupported(destination)) {
     return false;
   }
   bool anyDifferentParent = false;
