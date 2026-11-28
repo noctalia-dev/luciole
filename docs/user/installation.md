@@ -281,6 +281,7 @@ Missing helpers leave ordinary local browsing available. [PACKAGING.md](../../PA
 | Image formats | Installed GdkPixbuf image loaders (Glycin loaders when GdkPixbuf is built with Glycin) |
 | Video and audio thumbnails and metadata | FFmpeg |
 | PDF thumbnails and metadata | Poppler utilities |
+| [Installed `.thumbnailer` helpers](preview-and-properties.md#use-custom-thumbnailers) | Bubblewrap (`bwrap`) and the helper for each format |
 | Encrypted 7z archives | A system 7-Zip executable |
 | Terminal actions | `xdg-terminal-exec` and a suitable terminal |
 | Trash and mounted network locations | GIO/GVfs services |

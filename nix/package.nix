@@ -37,6 +37,7 @@
   stb,
   ffmpeg,
   ffmpegthumbnailer,
+  bubblewrap,
   poppler-utils,
   _7zz,
   nlohmann_json,
@@ -184,6 +185,7 @@ stdenv.mkDerivation (finalAttrs: {
           xdg-terminal-exec
           ffmpeg
           ffmpegthumbnailer
+          bubblewrap
           poppler-utils
           _7zz
         ]

@@ -148,7 +148,7 @@ Name accepts `0` for automatic sizing or an integer from `160` through `16384`. 
 | Key | Default | Accepted values |
 | --- | --- | --- |
 | `thumbnail_policy` | `"local"` | `"never"`, `"local"`, `"all"` |
-| `thumbnail_max_file_mib` | `64` | Image/PDF source limit, integer `1` through `1024`; does not limit video or audio files |
+| `thumbnail_max_file_mib` | `64` | Thumbnail source limit, integer `1` through `1024`; does not limit video or audio files |
 | `thumbnail_cache_mib` | `1024` | Integer `16` through `8192`; bounds the whole shared cache, oldest thumbnails pruned first |
 
 `"local"` skips network shares and FUSE mounts without a local disk, such as rclone, sshfs and gocryptfs. To get thumbnails on mounted shares such as `/mnt/media`, choose **Settings → Thumbnails → Show Thumbnails → All Locations**. Locations without a filesystem path stay cache-only; Luciole never downloads whole remote files for thumbnails.

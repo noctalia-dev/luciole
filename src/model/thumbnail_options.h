@@ -6,7 +6,7 @@ namespace luciole {
   enum class ThumbnailPolicy { Never, Local, All };
   struct ThumbnailOptions {
     ThumbnailPolicy policy = ThumbnailPolicy::Local;
-    int maxFileMiB = 64; // Image/PDF source cap; seekable video/audio providers have separate resource limits.
+    int maxFileMiB = 64; // Source cap for files outside the seekable video/audio providers.
     int cacheMiB = 1024;
     bool operator==(const ThumbnailOptions&) const = default;
   };

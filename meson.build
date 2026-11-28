@@ -312,6 +312,7 @@ system_dep = declare_dependency(link_with: system_lib, include_directories: src_
 thumbnails_lib = static_library('luciole-thumbnails',
   files(
     'src/thumbnails/file_icon_cache.cpp',
+    'src/thumbnails/installed_thumbnailers.cpp',
     'src/thumbnails/preview_service.cpp',
     'src/thumbnails/preview_metadata.cpp',
     'src/thumbnails/metadata_probe.cpp',

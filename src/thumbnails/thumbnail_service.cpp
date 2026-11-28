@@ -5,6 +5,7 @@
 #include "fs/gio_ptr.h"
 #include "fs/native_listing.h"
 #include "fs/posix_fd.h"
+#include "thumbnails/installed_thumbnailers.h"
 #include "thumbnails/thumbnail_codec.h"
 #include "thumbnails/thumbnail_provider.h"
 #include "thumbnails/thumbnail_store.h"
@@ -68,13 +69,24 @@ namespace {
     std::optional<luciole::ThumbnailCacheWrite> write;
     bool decodeNeeded = false;
   };
+  bool hasBuiltinProvider(std::string_view mime) {
+    return mime.starts_with("image/")
+        || mime.starts_with("video/")
+        || mime.starts_with("audio/")
+        || mime == "application/pdf";
+  }
   LoadResult load(
       const luciole::DirectoryEntry& source, int side, const luciole::ThumbnailOptions& options,
       const luciole::ThumbnailService::NetworkFilesystemCheck& networkFilesystem, GCancellable* cancel, bool generate,
-      luciole::ThumbnailPurpose purpose
+      luciole::ThumbnailPurpose purpose, const luciole::InstalledThumbnailers& thumbnailers
   ) {
     using namespace luciole;
     LoadResult result;
+    const auto& mime = *source.contentType;
+    const bool builtin = hasBuiltinProvider(mime);
+    if (!builtin && !thumbnailers.contains(mime)) {
+      return result;
+    }
     ThumbnailStore store;
     const auto location = source.location();
     const auto native = location.nativePath();
@@ -94,7 +106,6 @@ namespace {
     if (options.policy == ThumbnailPolicy::Local && networkFilesystem(*native)) {
       return result;
     }
-    const std::string mime(source.contentType.value_or(""));
     const bool media = mime.starts_with("video/") || mime.starts_with("audio/");
     const luciole::Fd file(::open(native->c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
     struct stat before{};
@@ -156,8 +167,14 @@ namespace {
       return result;
     }
     std::expected<LoadedImageFile, std::string> decoded = std::unexpected("no thumbnail decoder");
-    if (mime.starts_with("image/") || !insideCache) {
+    if (builtin && (mime.starts_with("image/") || !insideCache)) {
       decoded = renderThumbnailProvider(file.get(), mime, side, options, cancel, purpose);
+    }
+    if (!decoded && !insideCache && !videoPreview && !g_cancellable_is_cancelled(cancel)) {
+      auto installed = thumbnailers.render(file.get(), mime, source.name, side, cancel);
+      if (installed || !builtin) {
+        decoded = std::move(installed);
+      }
     }
     if (!decoded && !g_cancellable_is_cancelled(cancel)) {
       logDebug("[thumbnail] mime={} size={}: {}", mime, side, decoded.error());
@@ -217,6 +234,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     std::string key;
     DirectoryEntry source;
     ThumbnailOptions options;
+    std::shared_ptr<const InstalledThumbnailers> thumbnailers;
     std::uint64_t epoch, serial;
     int side;
     bool generate;
@@ -233,6 +251,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
   };
   static constexpr std::size_t kWriteBudget = 64U * 1024U * 1024U;
   ThumbnailOptions options;
+  std::shared_ptr<const InstalledThumbnailers> thumbnailers;
   NetworkFilesystemCheck networkFilesystem;
   std::unordered_map<std::string, Item> cache;
   std::unordered_map<const FileIconImage*, Item*> leases;
@@ -251,6 +270,37 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     Location source;
   };
   std::vector<Running> running;
+  void discoverThumbnailers() {
+    const GioPtr<GTask> task(g_task_new(
+        nullptr, nullptr,
+        [](GObject*, GAsyncResult* result, gpointer) {
+          auto* task = G_TASK(result);
+          const auto owner = static_cast<std::weak_ptr<State>*>(g_task_get_task_data(task))->lock();
+          const std::unique_ptr<InstalledThumbnailers> registry(
+              static_cast<InstalledThumbnailers*>(g_task_propagate_pointer(task, nullptr))
+          );
+          if (owner && owner->alive) {
+            owner->thumbnailers = registry ? std::make_shared<InstalledThumbnailers>(std::move(*registry))
+                                           : std::make_shared<InstalledThumbnailers>();
+            owner->pump();
+            owner->notify();
+          }
+        },
+        nullptr
+    ));
+    g_task_set_task_data(task.get(), new std::weak_ptr<State>(weak_from_this()), [](gpointer data) {
+      delete static_cast<std::weak_ptr<State>*>(data);
+    });
+    g_task_run_in_thread(task.get(), [](GTask* task, gpointer, gpointer, GCancellable*) {
+      try {
+        g_task_return_pointer(task, new InstalledThumbnailers(InstalledThumbnailers::discover()), [](gpointer data) {
+          delete static_cast<InstalledThumbnailers*>(data);
+        });
+      } catch (const std::exception& error) {
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "%s", error.what());
+      }
+    });
+  }
   void notify() {
     const auto callback = changed;
     if (alive && callback) {
@@ -521,8 +571,8 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     g_task_set_task_data(
         task.get(),
         new Request{
-            shared_from_this(), next->first, item.source, requestOptions, epoch, item.serial, item.side, generate,
-            item.purpose
+            shared_from_this(), next->first, item.source, requestOptions, thumbnailers, epoch, item.serial, item.side,
+            generate, item.purpose
         },
         [](gpointer data) { delete static_cast<Request*>(data); }
     );
@@ -532,7 +582,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
       try {
         result->loaded = load(
             request.source, request.side, request.options, request.owner->networkFilesystem, cancel, request.generate,
-            request.purpose
+            request.purpose, *request.thumbnailers
         );
       } catch (const std::exception& error) {
         result->error = error.what();
@@ -541,7 +591,7 @@ struct luciole::ThumbnailService::State : std::enable_shared_from_this<State> {
     });
   }
   void pump() {
-    if (!alive || clearing) {
+    if (!alive || clearing || !thumbnailers) {
       return;
     }
     // Cancellation must run even while both decoders are occupied.
@@ -575,6 +625,7 @@ luciole::ThumbnailService::ThumbnailService()
 luciole::ThumbnailService::ThumbnailService(NetworkFilesystemCheck networkFilesystem)
     : m_state(std::make_shared<State>()) {
   m_state->networkFilesystem = std::move(networkFilesystem);
+  m_state->discoverThumbnailers();
 }
 std::size_t luciole::ThumbnailService::decoders() {
   static const std::size_t count = std::clamp<std::size_t>(std::thread::hardware_concurrency() / 4, 2, 6);
@@ -598,12 +649,7 @@ luciole::ThumbnailService::request(const DirectoryEntry& source, int pixels, boo
   if (policy == ThumbnailPolicy::Never
       || state.clearing
       || !mime
-      || !(
-          mime->starts_with("image/")
-          || mime->starts_with("video/")
-          || mime->starts_with("audio/")
-          || *mime == "application/pdf"
-      )
+      || (state.thumbnailers && !hasBuiltinProvider(*mime) && !state.thumbnailers->contains(*mime))
       || source.type != luciole::FileType::Regular
       || source.symlink
       || !source.modifiedSeconds

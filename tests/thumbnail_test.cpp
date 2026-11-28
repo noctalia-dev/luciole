@@ -208,6 +208,64 @@ namespace {
     TEST_CHECK(!luciole::readThumbnailPng(sharedPng(std::move(oversized), PNG_TEXT_COMPRESSION_zTXt), 128));
   }
 
+  void testInstalledThumbnailer(const Fixture& fixture) {
+    constexpr auto mime = "application/x-luciole-thumbnail-test";
+    const auto directory = fixture.root / "data" / "thumbnailers";
+    fs::create_directories(directory);
+    const auto definition = fixture.root / "custom.thumbnailer";
+    std::ofstream(definition) << "[Thumbnailer Entry]\n"
+                                 "TryExec=sh\n"
+                                 "Exec=sh -c 'test \"$1\" = file:///input/source.custom && "
+                                 "test \"$2\" = 128 && test \"$3\" = %m && cp %i %o' thumb %u %s %m\n"
+                                 "MimeType=application/x-luciole-thumbnail-test;\n";
+    fs::create_symlink(definition, directory / "custom.thumbnailer");
+    const auto path = fixture.root / "with spaces and % characters.custom";
+    write(path, sharedPng({.image = picture(1920, 960), .text = {}}, PNG_TEXT_COMPRESSION_NONE));
+    Pump pump;
+    auto entry = source(path, pump);
+    entry.contentType = mime;
+    luciole::ThumbnailStore store;
+    luciole::ThumbnailPng foreign{
+        .image = picture(),
+        .text = {
+            {"Thumb::URI", entry.location().uri()},
+            {"Thumb::MTime", std::to_string(*entry.modifiedSeconds)},
+            {"Software", "another file manager"}
+        }
+    };
+    const auto cache = store.root() / "normal" / luciole::ThumbnailStore::filename(entry.location().uri());
+    fs::create_directories(cache.parent_path());
+    write(cache, sharedPng(foreign, PNG_TEXT_COMPRESSION_NONE));
+    {
+      luciole::ThumbnailService service;
+      const auto asset = service.request(entry, 128);
+      pump.until([&] { return asset && asset->ready; });
+      TEST_CHECK(asset->pixels && asset->pixels->rgba == foreign.image.rgba);
+    }
+    fs::remove(cache);
+    const luciole::GString sandbox(g_find_program_in_path("bwrap"));
+    const luciole::GString shell(g_find_program_in_path("sh"));
+    const GioPtr<GSubprocess> probe(
+        sandbox && shell ? g_subprocess_new(
+                               G_SUBPROCESS_FLAGS_STDERR_SILENCE, nullptr, sandbox.get(), "--unshare-all", "--ro-bind",
+                               "/", "/", "--", shell.get(), "-c", "exit 0", nullptr
+                           )
+                         : nullptr
+    );
+    if (probe && g_subprocess_wait_check(probe.get(), nullptr, nullptr)) {
+      luciole::ThumbnailService service;
+      const auto asset = service.request(entry, 128);
+      pump.until([&] { return asset && asset->ready; });
+      TEST_CHECK(asset->pixels && asset->pixels->width == 128 && asset->pixels->height == 64);
+      pump.until([&] {
+        return store.read(entry.location().uri(), 128, *entry.modifiedSeconds, entry.size).has_value();
+      });
+    } else {
+      std::println("skipping installed thumbnailer execution: Bubblewrap isolation unavailable");
+    }
+    fs::remove_all(directory);
+  }
+
   void testCodecs() {
     const GioPtr<GCancellable> cancel(g_cancellable_new());
     const auto original = picture();
@@ -1348,6 +1406,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     testSharedCacheInterop(fixture);
+    testInstalledThumbnailer(fixture);
     testCodecs();
     testRasterFormats();
     testWorkerTransport();
