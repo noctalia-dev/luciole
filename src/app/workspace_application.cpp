@@ -376,7 +376,9 @@ void WorkspaceApplication::choose(
 }
 
 bool WorkspaceApplication::hasWindows() const {
-  return std::ranges::any_of(m_hosts, [](const auto& item) { return item.second->surface.isRunning(); });
+  return std::ranges::any_of(m_hosts, [](const auto& item) {
+    return item.second->surface.isRunning() || item.second->surface.modalReplyPending();
+  });
 }
 
 void WorkspaceApplication::focus(wl_surface* surface, bool entered) {
@@ -497,6 +499,10 @@ bool WorkspaceApplication::running() {
   }
   m_hub.update(m_focused);
   bool busy = (live ? m_hub.busy() : m_hub.shutdownPending()) || m_thumbnails.clearing() || m_pins.busy();
+  for (const auto& [id, host] : m_hosts) {
+    (void)id;
+    busy |= host->surface.modalReplyPending();
+  }
   for (auto& [id, page] : m_pages) {
     if (!live) {
       page->shutdown();
@@ -542,7 +548,7 @@ bool WorkspaceApplication::running() {
   if (live) {
     std::vector<luciole::WindowId> retiredHosts;
     for (const auto& [id, host] : m_hosts) {
-      if (host->closed && std::ranges::none_of(m_pages, [&](const auto& item) {
+      if (host->closed && !host->surface.modalReplyPending() && std::ranges::none_of(m_pages, [&](const auto& item) {
             return item.second->boundSurface() == &host->surface;
           })) {
         retiredHosts.push_back(id);

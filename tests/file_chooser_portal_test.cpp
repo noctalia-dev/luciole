@@ -2,6 +2,7 @@
 #include "platform/file_chooser_portal.h"
 #include "test_check.h"
 
+#include <algorithm>
 #include <functional>
 #include <gio/gio.h>
 #include <memory>
@@ -357,6 +358,73 @@ namespace {
       until([&] { return saveFiles.done; });
       TEST_CHECK(state.requests == 5 && state.request->mode == luciole::FileChooserMode::SaveFiles);
       TEST_CHECK((state.request->files == std::vector<std::string>{"b.txt", "a\xff.png"}));
+
+      // Every result, including Request.Close and its acknowledgment, waits for modal cleanup. The queued
+      // reply outlives both the call and the handler; a second result or continuation cannot answer twice.
+      state.keep = true;
+      for (unsigned kind = 0; kind < 4; ++kind) {
+        const auto handle = "/org/freedesktop/portal/desktop/request/1_1/deferred" + std::to_string(kind);
+        const auto requests = state.requests;
+        Reply deferred, closeReply;
+        openFile(client.get(), handle.c_str(), emptyOptions(), deferred);
+        until([&] { return state.requests == requests + 1; });
+        std::function<void(bool)> ready;
+        state.call->setReplyBarrier([&](auto callback) { ready = std::move(callback); });
+        state.call->setCloseCallback([&] { state.call.reset(); });
+        if (kind == 0) {
+          state.call->complete({.uris = {"file:///tmp/chosen"}, .currentFilter = {}, .choices = {}});
+        } else if (kind == 1) {
+          state.call->cancel();
+        } else if (kind == 2) {
+          state.call->fail();
+        } else {
+          closeRequest(client.get(), handle.c_str(), closeReply);
+          until([&] { return static_cast<bool>(ready); });
+        }
+        if (state.call) {
+          TEST_CHECK(state.call->finished());
+          state.call->cancel();
+          state.call.reset();
+        }
+        settle();
+        TEST_CHECK(ready && !deferred.done && !closeReply.done);
+        ready(true);
+        ready(false);
+        until([&] { return deferred.done && (kind != 3 || closeReply.done); });
+        results = nullptr;
+        TEST_CHECK(response(deferred, &results) == std::min(kind, 2U));
+        TEST_CHECK(g_variant_n_children(results) == (kind == 0 ? 1U : 0U));
+        g_variant_unref(results);
+        if (kind == 3) {
+          TEST_CHECK(closeReply.value && !closeReply.error);
+        }
+      }
+
+      // Failed or abandoned cleanup answers Other rather than reporting an unacknowledged success.
+      for (unsigned kind = 0; kind < 3; ++kind) {
+        const auto handle = "/org/freedesktop/portal/desktop/request/1_1/failed" + std::to_string(kind);
+        const auto requests = state.requests;
+        Reply deferred;
+        openFile(client.get(), handle.c_str(), emptyOptions(), deferred);
+        until([&] { return state.requests == requests + 1; });
+        std::function<void(bool)> ready;
+        state.call->setReplyBarrier([&](auto callback) {
+          if (kind == 2) {
+            throw std::runtime_error("cleanup setup failed");
+          }
+          ready = std::move(callback);
+        });
+        state.call->complete({.uris = {"file:///tmp/never-confirmed"}, .currentFilter = {}, .choices = {}});
+        state.call.reset();
+        if (kind == 0) {
+          ready(false);
+        }
+        ready = {};
+        until([&] { return deferred.done; });
+        results = nullptr;
+        TEST_CHECK(response(deferred, &results) == 2 && g_variant_n_children(results) == 0);
+        g_variant_unref(results);
+      }
     }
     settle();
     TEST_CHECK(g_dbus_connection_close_sync(stranger.get(), nullptr, nullptr));

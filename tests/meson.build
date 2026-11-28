@@ -12,6 +12,11 @@ activation_server = custom_target('launch-activation-server-header',
   output: 'launch-activation-server-protocol.h',
   command: [scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
 )
+dialog_server = custom_target('modal-dialog-server-header',
+  input: protocol_root / 'staging/xdg-dialog/xdg-dialog-v1.xml',
+  output: 'modal-dialog-server-protocol.h',
+  command: [scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+)
 
 test_table = [
   {'name': 'admin-access', 'deps': [operations_dep, browser_dep, event_loop_dep], 'env': gio_env},
@@ -61,6 +66,7 @@ test_table = [
   {'name': 'directory-tree', 'deps': [browser_dep], 'timeout': 60, 'env': gio_env},
   {'name': 'directory-model', 'deps': [browser_dep, event_loop_dep], 'env': gio_env},
   {'name': 'launch-activation', 'deps': [platform_dep, dependency('wayland-server')], 'sources': [activation_server]},
+  {'name': 'modal-dialog', 'deps': [platform_dep, dependency('wayland-server')], 'sources': [dialog_server]},
   {'name': 'extraction-launcher', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'program-launcher', 'deps': [platform_dep, event_loop_dep], 'env': gio_env},
   {'name': 'file-launcher', 'deps': [platform_dep, event_loop_dep], 'wrapper': files('file_launcher_test.py')},

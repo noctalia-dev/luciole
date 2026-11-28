@@ -54,6 +54,34 @@ namespace {
   constexpr guint kResponseCancelled = 1;
   constexpr guint kResponseOther = 2;
 
+  struct PendingReply {
+    GDBusMethodInvocation* invocation;
+    unsigned response;
+    GVariant* results;
+    GDBusMethodInvocation* close;
+
+    ~PendingReply() {
+      finish(false);
+      g_variant_unref(results);
+    }
+
+    void finish(bool acknowledged) {
+      if (!invocation) {
+        return;
+      }
+      g_dbus_method_invocation_return_value(
+          std::exchange(invocation, nullptr),
+          g_variant_new(
+              "(u@a{sv})", acknowledged ? response : kResponseOther,
+              acknowledged ? results : g_variant_new_array(G_VARIANT_TYPE("{sv}"), nullptr, 0)
+          )
+      );
+      if (close) {
+        g_dbus_method_invocation_return_value(std::exchange(close, nullptr), nullptr);
+      }
+    }
+  };
+
   const Logger kLog("file-chooser-dbus");
 
   // GTK mnemonics: a lone `_` marks the access key, `__` is a literal underscore.
@@ -309,15 +337,29 @@ void luciole::FileChooserCall::setCloseCallback(std::function<void()> callback) 
   m_closeCallback = std::move(callback);
 }
 
-void luciole::FileChooserCall::finish(unsigned response, GVariant* results) {
+void luciole::FileChooserCall::setReplyBarrier(std::function<void(std::function<void(bool)>)> barrier) {
+  m_replyBarrier = std::move(barrier);
+}
+
+void luciole::FileChooserCall::finish(unsigned response, GVariant* results, GDBusMethodInvocation* close) {
   if (m_registration != 0) {
     g_dbus_connection_unregister_object(m_connection, m_registration);
     m_registration = 0;
   }
-  // Returning a value consumes the invocation reference this call held.
-  g_dbus_method_invocation_return_value(
-      std::exchange(m_invocation, nullptr), g_variant_new("(u@a{sv})", static_cast<guint32>(response), results)
+  // The continuation owns the invocation and results even if the UI or this call is destroyed while waiting.
+  auto reply = std::make_shared<PendingReply>(
+      std::exchange(m_invocation, nullptr), response, g_variant_ref_sink(results), close
   );
+  if (const auto barrier = m_replyBarrier) {
+    try {
+      barrier([reply](bool acknowledged) { reply->finish(acknowledged); });
+    } catch (const std::exception& error) {
+      kLog.warn("finishing the chooser failed: {}", error.what());
+      reply->finish(false);
+    }
+  } else {
+    reply->finish(true);
+  }
 }
 
 void luciole::FileChooserCall::closeCall(
@@ -333,8 +375,7 @@ void luciole::FileChooserCall::closeCall(
   }
   // The callback may drop the last reference to this call.
   auto callback = std::move(self->m_closeCallback);
-  self->fail();
-  g_dbus_method_invocation_return_value(invocation, nullptr);
+  self->finish(kResponseOther, emptyResults(), invocation);
   if (callback) {
     try {
       callback();
