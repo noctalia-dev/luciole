@@ -138,6 +138,7 @@ namespace {
     case Kind::Unsupported:
     case Kind::ReadOnly:
     case Kind::NotEmpty:
+    case Kind::NotMounted:
     case Kind::InvalidArgument:
       return Outcome::Failed;
     default:
