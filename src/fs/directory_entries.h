@@ -26,6 +26,8 @@ namespace luciole {
     inline constexpr std::uint8_t Group = 8;
     inline constexpr std::uint8_t Permissions = 16;
     inline constexpr std::uint8_t All = 31;
+    // Probed media facts; All covers only the filesystem facts, so ordinary listings never claim media.
+    inline constexpr std::uint8_t Media = 32;
   } // namespace EntryDetails
   // Where an entry lives. A listing shares one folder between its entries, and each entry's location is that
   // folder's child named by the entry; other entries hold their whole location.
@@ -52,6 +54,29 @@ namespace luciole {
     std::string parentDisplayName;
     std::optional<TrashInfo> trash;
     std::optional<Location> target; // Provider shortcut destination; never replaces the entry operation address.
+  };
+
+  // Media facts a bounded probe reads from the file itself. A missing value is unavailable, not pending.
+  struct EntryMedia {
+    std::optional<std::uint32_t> width = std::nullopt;
+    std::optional<std::uint32_t> height = std::nullopt;
+    std::optional<std::uint64_t> durationMicros = std::nullopt;
+    std::optional<std::uint64_t> bitsPerSecond = std::nullopt;
+    std::optional<std::uint64_t> frameRateMilli = std::nullopt;
+    std::optional<std::uint64_t> aspectRatioPerMille = std::nullopt;
+    std::optional<std::uint8_t> orientation = std::nullopt; // EXIF orientation, 1 through 8.
+    std::optional<std::uint64_t> photoDateSeconds = std::nullopt;
+    std::optional<std::uint64_t> track = std::nullopt;
+    std::optional<std::uint64_t> releaseYear = std::nullopt;
+    InternedText audioCodec = nullptr;
+    InternedText videoCodec = nullptr;
+    InternedText pixelFormat = nullptr;
+    InternedText colorSpace = nullptr;
+    InternedText aspectRatio = nullptr;
+    InternedText album = nullptr;
+    InternedText artist = nullptr;
+    InternedText genre = nullptr;
+    bool operator==(const EntryMedia&) const = default;
   };
 
   // Local providers' entity tag and identity as numbers; the text forms are rebuilt exactly on request.
@@ -90,6 +115,7 @@ namespace luciole {
     EntryMetadata details{};
     std::optional<ChangeRevision> contentRevision = std::nullopt;
     LocalTags tags{};
+    std::optional<EntryMedia> media = std::nullopt;
     std::shared_ptr<const EntryExtra> extra = nullptr;
 
     Location location() const { return place.resolve(name); }

@@ -244,32 +244,65 @@ void luciole::ViewPreferenceWriter::saveColumnOrder(DetailsColumnOrder order) {
 }
 
 void luciole::ViewPreferenceWriter::saveColumnWidths(DetailsColumnWidths widths) {
-  m_state->queue(
-      {{BrowserPreference::NameColumnWidth, widths[0]},
-       {BrowserPreference::TypeColumnWidth, widths[1]},
-       {BrowserPreference::SizeColumnWidth, widths[2]},
-       {BrowserPreference::ModifiedColumnWidth, widths[3]},
-       {BrowserPreference::AccessedColumnWidth, widths[4]},
-       {BrowserPreference::CreatedColumnWidth, widths[5]},
-       {BrowserPreference::OwnerColumnWidth, widths[6]},
-       {BrowserPreference::GroupColumnWidth, widths[7]},
-       {BrowserPreference::PermissionsColumnWidth, widths[8]},
-       {BrowserPreference::LocationColumnWidth, widths[9]}}
-  );
+  m_state->queue({{BrowserPreference::NameColumnWidth, widths[0]},
+                  {BrowserPreference::TypeColumnWidth, widths[1]},
+                  {BrowserPreference::SizeColumnWidth, widths[2]},
+                  {BrowserPreference::ModifiedColumnWidth, widths[3]},
+                  {BrowserPreference::AccessedColumnWidth, widths[4]},
+                  {BrowserPreference::CreatedColumnWidth, widths[5]},
+                  {BrowserPreference::OwnerColumnWidth, widths[6]},
+                  {BrowserPreference::GroupColumnWidth, widths[7]},
+                  {BrowserPreference::PermissionsColumnWidth, widths[8]},
+                  {BrowserPreference::LocationColumnWidth, widths[9]},
+                  {BrowserPreference::DimensionsColumnWidth, widths[10]},
+                  {BrowserPreference::DurationColumnWidth, widths[11]},
+                  {BrowserPreference::BitRateColumnWidth, widths[12]},
+                  {BrowserPreference::AudioCodecColumnWidth, widths[13]},
+                  {BrowserPreference::VideoCodecColumnWidth, widths[14]},
+                  {BrowserPreference::DatePhotographedColumnWidth, widths[15]},
+                  {BrowserPreference::WidthColumnWidth, widths[16]},
+                  {BrowserPreference::HeightColumnWidth, widths[17]},
+                  {BrowserPreference::OrientationColumnWidth, widths[18]},
+                  {BrowserPreference::AlbumColumnWidth, widths[19]},
+                  {BrowserPreference::ArtistColumnWidth, widths[20]},
+                  {BrowserPreference::GenreColumnWidth, widths[21]},
+                  {BrowserPreference::ReleaseYearColumnWidth, widths[22]},
+                  {BrowserPreference::TrackColumnWidth, widths[23]},
+                  {BrowserPreference::AspectRatioColumnWidth, widths[24]},
+                  {BrowserPreference::ColorSpaceColumnWidth, widths[25]},
+                  {BrowserPreference::FrameRateColumnWidth, widths[26]},
+                  {BrowserPreference::PixelFormatColumnWidth, widths[27]}});
 }
 void luciole::ViewPreferenceWriter::saveDetailsColumns(DetailsColumnVisibility visibility) {
-  m_state->queue({
-      {BrowserPreference::ShowTypeColumn, visibility.type},
-      {BrowserPreference::ShowSizeColumn, visibility.size},
-      {BrowserPreference::ShowModifiedColumn, visibility.modified},
-      {BrowserPreference::ShowAccessedColumn, visibility.accessed},
-      {BrowserPreference::ShowCreatedColumn, visibility.created},
-      {BrowserPreference::ShowOwnerColumn, visibility.owner},
-      {BrowserPreference::ShowGroupColumn, visibility.group},
-      {BrowserPreference::ShowPermissionsColumn, visibility.permissions},
-      {BrowserPreference::ShowLocationColumn, visibility.location},
-
-  });
+  m_state->queue(
+      {{BrowserPreference::ShowTypeColumn, visibility.type},
+       {BrowserPreference::ShowSizeColumn, visibility.size},
+       {BrowserPreference::ShowModifiedColumn, visibility.modified},
+       {BrowserPreference::ShowAccessedColumn, visibility.accessed},
+       {BrowserPreference::ShowCreatedColumn, visibility.created},
+       {BrowserPreference::ShowOwnerColumn, visibility.owner},
+       {BrowserPreference::ShowGroupColumn, visibility.group},
+       {BrowserPreference::ShowPermissionsColumn, visibility.permissions},
+       {BrowserPreference::ShowLocationColumn, visibility.location},
+       {BrowserPreference::ShowDimensionsColumn, visibility.dimensions},
+       {BrowserPreference::ShowDurationColumn, visibility.duration},
+       {BrowserPreference::ShowBitRateColumn, visibility.bitRate},
+       {BrowserPreference::ShowAudioCodecColumn, visibility.audioCodec},
+       {BrowserPreference::ShowVideoCodecColumn, visibility.videoCodec},
+       {BrowserPreference::ShowDatePhotographedColumn, visibility.datePhotographed},
+       {BrowserPreference::ShowWidthColumn, visibility.width},
+       {BrowserPreference::ShowHeightColumn, visibility.height},
+       {BrowserPreference::ShowOrientationColumn, visibility.orientation},
+       {BrowserPreference::ShowAlbumColumn, visibility.album},
+       {BrowserPreference::ShowArtistColumn, visibility.artist},
+       {BrowserPreference::ShowGenreColumn, visibility.genre},
+       {BrowserPreference::ShowReleaseYearColumn, visibility.releaseYear},
+       {BrowserPreference::ShowTrackColumn, visibility.track},
+       {BrowserPreference::ShowAspectRatioColumn, visibility.aspectRatio},
+       {BrowserPreference::ShowColorSpaceColumn, visibility.colorSpace},
+       {BrowserPreference::ShowFrameRateColumn, visibility.frameRate},
+       {BrowserPreference::ShowPixelFormatColumn, visibility.pixelFormat}}
+  );
 }
 void luciole::ViewPreferenceWriter::setChangedCallback(std::function<void(const std::string&)> callback) {
   m_state->changed = std::move(callback);

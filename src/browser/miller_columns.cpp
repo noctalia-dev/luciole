@@ -13,7 +13,7 @@ luciole::MillerColumns::makeColumn(BrowserController& source, const Location& lo
   auto column = std::make_unique<Column>(Column{
       ++m_nextId,
       std::make_unique<BrowserController>(
-          source.defaultSort(), source.model().filter().showHidden, source.model().filter().showBackups
+          source.defaultSort(), source.model().filter().showHidden, source.model().filter().showBackups, m_mediaFacts
       ),
       location, std::nullopt, defaultWidth
   });

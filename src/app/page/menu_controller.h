@@ -85,7 +85,8 @@ private:
   // Path and URI of the request's targets, or of its folder when `targets` is false.
   void showCopyLocationMenu(const luciole::ActionRequest& request, bool targets);
   // Sort fields and order as radios, then the sort toggles.
-  std::vector<ContextMenuControlEntry> sortEntries(const luciole::ActionRequest& request) const;
+  std::vector<ContextMenuControlEntry>
+  sortEntries(const luciole::ActionRequest& request, bool groupMedia = false) const;
   // Shows `entries` of browser actions for `request`, after a Back row when `back` is set.
   void showActionMenu(
       std::vector<ContextMenuControlEntry> entries, const luciole::ActionRequest& request, bool back = false,

@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <gio/gio.h>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,9 +38,13 @@ namespace luciole {
     using IdResolver = std::function<std::uint64_t(const DirectoryEntry&)>;
     // Whether the link at a local path leads to a folder. It runs on a worker thread and may block.
     using LinkTargetCheck = std::function<bool(const std::string& path)>;
+    // Reads one file's media facts on a worker thread, observing the cancellable; empty facts mean unavailable.
+    using MediaFactsCheck =
+        std::function<EntryMedia(const std::string& path, const std::string& contentType, GCancellable* cancel)>;
     // An empty linksToDirectory asks the filesystem.
     explicit DirectorySession(
-        std::size_t entryLimit = 0, IdResolver resolveId = {}, LinkTargetCheck linksToDirectory = {}
+        std::size_t entryLimit = 0, IdResolver resolveId = {}, LinkTargetCheck linksToDirectory = {},
+        MediaFactsCheck mediaFacts = {}
     );
     ~DirectorySession();
     DirectorySession(const DirectorySession&) = delete;

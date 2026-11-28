@@ -42,6 +42,24 @@ namespace luciole {
     SortGroup,
     SortPermissions,
     SortLocation,
+    SortDimensions,
+    SortDuration,
+    SortBitRate,
+    SortAudioCodec,
+    SortVideoCodec,
+    SortDatePhotographed,
+    SortWidth,
+    SortHeight,
+    SortOrientation,
+    SortAlbum,
+    SortArtist,
+    SortGenre,
+    SortReleaseYear,
+    SortTrack,
+    SortAspectRatio,
+    SortColorSpace,
+    SortFrameRate,
+    SortPixelFormat,
 
     Ascending,
     Descending,
@@ -104,6 +122,9 @@ namespace luciole {
   inline constexpr std::size_t kBrowserActionCount =
       std::size_t{std::to_underlying(BrowserAction::KeyboardShortcuts)} + 1;
   enum class ActionScope : std::uint8_t { Global, Location, Targets, Selection };
+  // Every sort field, media fields included, owns an action; headers and menus resolve fields through these.
+  BrowserAction sortFieldAction(SortField field);
+  SortField sortActionField(BrowserAction action);
   struct ActionTarget {
     EntryId id;
     Location location;

@@ -10,9 +10,13 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <fcntl.h>
 #include <filesystem>
 #include <format>
+#include <gdk-pixbuf/gdk-pixbuf.h>
+#include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -187,7 +191,233 @@ namespace {
     }
     return fields;
   }
+
+  // Shared with probeEntryMediaFacts below.
+  struct Cleanup {
+    std::filesystem::path path;
+    ~Cleanup() {
+      std::error_code error;
+      std::filesystem::remove_all(path, error);
+    }
+  };
+
+  // The bounded ffprobe invocation; preview metadata and list view's media columns ask for the same fields.
+  constexpr std::array<std::string_view, 20> kMediaProbeArguments{
+      "ffprobe",
+      "-v",
+      "error",
+      "-max_alloc",
+      "67108864",
+      "-probesize",
+      "8388608",
+      "-analyzeduration",
+      "2000000",
+      "-max_streams",
+      "32",
+      "-threads",
+      "1",
+      "-protocol_whitelist",
+      "file,pipe",
+      "-of",
+      "json",
+      "-show_entries",
+      "format=format_long_name,duration,bit_rate:format_tags=title,artist,album,track,date,genre:stream=codec_type,"
+      "codec_name,width,height,avg_frame_rate,pix_fmt,color_space,nb_frames,duration,sample_rate,channels,channel_"
+      "layout,bits_per_sample,bit_rate,display_aspect_ratio:stream_disposition=attached_pic:stream_side_data=rotation",
+      "/proc/self/fd/3"
+  };
+
+  luciole::InternedText boundedText(const std::string& text) {
+    if (text.empty() || text.size() > 256 || !g_utf8_validate(text.c_str(), -1, nullptr)) {
+      return {};
+    }
+    return luciole::InternedText(text);
+  }
+
+  std::optional<std::uint64_t> probeNumber(const nlohmann::json& value, std::uint64_t maximum) {
+    if (value.is_number_unsigned()) {
+      const auto parsed = value.get<std::uint64_t>();
+      return parsed <= maximum ? std::optional(parsed) : std::nullopt;
+    }
+    if (value.is_number_integer() && value.get<int>() > 0) {
+      const auto parsed = static_cast<std::uint64_t>(value.get<int>());
+      return parsed <= maximum ? std::optional(parsed) : std::nullopt;
+    }
+    if (!value.is_string()) {
+      return {};
+    }
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.size() > 20) {
+      return {};
+    }
+    std::uint64_t parsed = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), parsed);
+    if (error != std::errc{} || parsed > maximum) {
+      return {};
+    }
+    return parsed;
+  }
+
+  std::optional<double> probeSeconds(const nlohmann::json& value) {
+    if (value.is_number()) {
+      const double seconds = value.get<double>();
+      return seconds > 0 && seconds < 10'000'000.0 ? std::optional(seconds) : std::nullopt;
+    }
+    if (!value.is_string()) {
+      return {};
+    }
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.empty() || text.size() > 24) {
+      return {};
+    }
+    double seconds = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), seconds);
+    if (error != std::errc{} || seconds <= 0 || seconds >= 10'000'000.0) {
+      return {};
+    }
+    return seconds;
+  }
+
+  // "25/1" for rates and "16:9" for ratios; scaled by one thousand, rounded, capped at one million per second.
+  std::optional<std::uint64_t> probeRatioMilli(const nlohmann::json& value) {
+    if (!value.is_string()) {
+      return {};
+    }
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.empty() || text.size() > 24) {
+      return {};
+    }
+    const auto separator = text.find_first_of("/:");
+    std::uint64_t numerator = 0, denominator = 1;
+    const auto [numberEnd, numberError] = std::from_chars(
+        text.data(), text.data() + (separator == std::string_view::npos ? text.size() : separator), numerator
+    );
+    if (numberError != std::errc{}) {
+      return {};
+    }
+    if (separator != std::string_view::npos) {
+      const auto [denominatorEnd, denominatorError] =
+          std::from_chars(text.data() + separator + 1, text.data() + text.size(), denominator);
+      if (denominatorError != std::errc{} || denominator == 0) {
+        return {};
+      }
+    }
+    if (numerator > (std::numeric_limits<std::uint64_t>::max() - denominator / 2U) / 1000U) {
+      return {};
+    }
+    const auto milli = (numerator * 1000U + denominator / 2U) / denominator;
+    if (milli > 1'000'000'000U) {
+      return {};
+    }
+    return milli;
+  }
 } // namespace
+
+// Structured facts for list view's columns; parallel to parseMediaMetadata's presentation parser. Both walk the same
+// bounded ffprobe JSON, so their field selection and size bounds must change together.
+luciole::EntryMedia luciole::parseMediaFacts(std::string_view data) {
+  const auto root = nlohmann::json::parse(data, nullptr, false);
+  if (!root.is_object() || root.size() > 8) {
+    return {};
+  }
+
+  EntryMedia facts;
+  const auto format = root.find("format");
+  if (format != root.end() && format->is_object() && format->size() <= 16) {
+    if (const auto duration = format->find("duration"); duration != format->end()) {
+      if (const auto seconds = probeSeconds(*duration)) {
+        facts.durationMicros = static_cast<std::uint64_t>(*seconds * 1'000'000.0);
+      }
+    }
+    if (const auto rate = format->find("bit_rate"); rate != format->end()) {
+      facts.bitsPerSecond = probeNumber(*rate, 10'000'000'000U);
+    }
+    if (const auto tags = format->find("tags"); tags != format->end() && tags->is_object() && tags->size() <= 16) {
+      const auto text = [&tags](const std::string& key) {
+        const auto found = tags->find(key);
+        return found != tags->end() && found->is_string() ? boundedText(found->get_ref<const std::string&>())
+                                                          : InternedText();
+      };
+      facts.artist = text("artist");
+      facts.album = text("album");
+      facts.genre = text("genre");
+      if (const auto track = tags->find("track"); track != tags->end()) {
+        facts.track = probeNumber(*track, 100'000U);
+      }
+      if (const auto date = tags->find("date"); date != tags->end() && date->is_string()) {
+        const auto& value = date->get_ref<const std::string&>();
+        if (value.size() >= 4) {
+          std::uint64_t year = 0;
+          const auto [end, error] = std::from_chars(value.data(), value.data() + 4, year);
+          if (error == std::errc{} && year >= 1000 && year <= 3000) {
+            facts.releaseYear = year;
+          }
+        }
+      }
+    }
+  }
+  const auto streams = root.find("streams");
+  if (streams == root.end() || !streams->is_array() || streams->size() > 32) {
+    return facts;
+  }
+  for (const auto& stream : *streams) {
+    if (!stream.is_object() || stream.size() > 24) {
+      continue;
+    }
+    const auto type = stream.find("codec_type");
+    if (type == stream.end() || !type->is_string()) {
+      continue;
+    }
+    const auto codec = stream.find("codec_name");
+    const std::string name = codec != stream.end() && codec->is_string() ? codec->get<std::string>() : std::string();
+    if (name.size() > 64 || (!name.empty() && !g_utf8_validate(name.c_str(), -1, nullptr))) {
+      continue;
+    }
+    if (type->get_ref<const std::string&>() == "video") {
+      const auto disposition = stream.find("disposition");
+      const bool cover = disposition != stream.end()
+          && disposition->is_object()
+          && disposition->contains("attached_pic")
+          && disposition->at("attached_pic").is_number_integer()
+          && disposition->at("attached_pic").get<int>() != 0;
+      if (cover) {
+        continue;
+      }
+      if (!name.empty() && !facts.videoCodec) {
+        facts.videoCodec = InternedText(name);
+      }
+      const auto width = stream.find("width"), height = stream.find("height");
+      const auto parseWidth = width != stream.end() ? probeNumber(*width, 1'000'000U) : std::nullopt;
+      const auto parseHeight = height != stream.end() ? probeNumber(*height, 1'000'000U) : std::nullopt;
+      if (parseWidth && *parseWidth > 0 && parseHeight && *parseHeight > 0) {
+        facts.width = static_cast<std::uint32_t>(*parseWidth);
+        facts.height = static_cast<std::uint32_t>(*parseHeight);
+      }
+      if (!facts.frameRateMilli) {
+        if (const auto rate = stream.find("avg_frame_rate"); rate != stream.end()) {
+          facts.frameRateMilli = probeRatioMilli(*rate);
+        }
+      }
+      if (const auto ratio = stream.find("display_aspect_ratio"); ratio != stream.end()) {
+        facts.aspectRatioPerMille = probeRatioMilli(*ratio);
+        if (ratio->is_string()) {
+          facts.aspectRatio = boundedText(ratio->get_ref<const std::string&>());
+        }
+      }
+      const auto pixel = stream.find("pix_fmt");
+      if (pixel != stream.end() && pixel->is_string()) {
+        facts.pixelFormat = boundedText(pixel->get_ref<const std::string&>());
+      }
+      const auto space = stream.find("color_space");
+      if (space != stream.end() && space->is_string()) {
+        facts.colorSpace = boundedText(space->get_ref<const std::string&>());
+      }
+    } else if (type->get_ref<const std::string&>() == "audio" && !name.empty() && !facts.audioCodec) {
+      facts.audioCodec = InternedText(name);
+    }
+  }
+  return facts;
+}
 
 luciole::MetadataFields
 luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions options, GCancellable* cancel) {
@@ -266,13 +496,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   if (!temporary) {
     return fields;
   }
-  struct Cleanup {
-    std::filesystem::path path;
-    ~Cleanup() {
-      std::error_code error;
-      std::filesystem::remove_all(path, error);
-    }
-  } cleanup{temporary.get()};
+  const Cleanup cleanup{temporary.get()};
   const auto output = cleanup.path / "result";
   const Fd capture(::open(output.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
   if (!capture.valid()) {
@@ -289,30 +513,7 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
     args = {"/proc/self/exe", "--preview-metadata-worker", mime, std::to_string(maximum)};
     fileLimit = std::max<std::uint64_t>(maximum, kProviderMemoryBytes);
   } else if (media) {
-    args = {
-        "ffprobe",
-        "-v",
-        "error",
-        "-max_alloc",
-        "67108864",
-        "-probesize",
-        "8388608",
-        "-analyzeduration",
-        "2000000",
-        "-max_streams",
-        "32",
-        "-threads",
-        "1",
-        "-protocol_whitelist",
-        "file,pipe",
-        "-of",
-        "json",
-        "-show_entries",
-        "format=format_long_name,duration,bit_rate:format_tags=title,artist,album,track,date:stream=codec_type,codec_"
-        "name,width,height,avg_frame_rate,pix_fmt,color_space,nb_frames,duration,sample_rate,channels,channel_layout,"
-        "bits_per_sample,bit_rate:stream_disposition=attached_pic:stream_side_data=rotation",
-        "/proc/self/fd/3"
-    };
+    args.assign(kMediaProbeArguments.begin(), kMediaProbeArguments.end());
   } else {
     args = {"pdfinfo", "-enc", "UTF-8", "/proc/self/fd/3"};
   }
@@ -336,4 +537,65 @@ luciole::probePreviewMetadata(const DirectoryEntry& entry, ThumbnailOptions opti
   auto extra = image ? imageFields(data) : media ? parseMediaMetadata(data) : parsePdfMetadata(data);
   extra.insert(extra.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
   return extra;
+}
+
+luciole::EntryMedia
+luciole::probeEntryMediaFacts(const std::string& path, const std::string& contentType, GCancellable* cancel) {
+  const bool image = contentType.starts_with("image/"),
+             media = contentType.starts_with("video/") || contentType.starts_with("audio/");
+  if ((!image && !media) || g_cancellable_is_cancelled(cancel)) {
+    return {};
+  }
+  const Fd input(::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
+  struct stat before;
+  if (!input.valid() || ::fstat(input.get(), &before) < 0 || !S_ISREG(before.st_mode) || before.st_size <= 0) {
+    return {};
+  }
+  // The facts only describe the file that was read; a changed file answers nothing.
+  const auto unchanged = [&] {
+    struct stat after{}, named{};
+    return !g_cancellable_is_cancelled(cancel)
+        && ::fstat(input.get(), &after) == 0
+        && ::lstat(path.c_str(), &named) == 0
+        && stamp(before) == stamp(after)
+        && stamp(before) == stamp(named);
+  };
+  if (image) {
+    int width = 0, height = 0;
+    const std::string descriptor = std::format("/proc/self/fd/{}", input.get());
+    // GdkPixbuf owns the returned format (transfer-none); freeing it corrupts the loader registry.
+    const auto* info = gdk_pixbuf_get_file_info(descriptor.c_str(), &width, &height);
+    EntryMedia facts;
+    if (info && width > 0 && height > 0) {
+      facts.width = static_cast<std::uint32_t>(width);
+      facts.height = static_cast<std::uint32_t>(height);
+    }
+    const auto exif = readExifFacts(input.get());
+    facts.orientation = exif.orientation;
+    facts.photoDateSeconds = exif.dateSeconds;
+    if (!unchanged() || facts == EntryMedia{}) {
+      return {};
+    }
+    return facts;
+  }
+  const GString temporary(g_dir_make_tmp("luciole-media-facts-XXXXXXX", nullptr));
+  if (!temporary) {
+    return {};
+  }
+  const Cleanup cleanup{temporary.get()};
+  const auto output = cleanup.path / "result";
+  const Fd capture(::open(output.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
+  if (!capture.valid()) {
+    return {};
+  }
+  std::vector<std::string> args(kMediaProbeArguments.begin(), kMediaProbeArguments.end());
+  const auto success = runProviderProcess(std::move(args), input.get(), cancel, 65536, 2, capture.get());
+  if (!unchanged() || !success) {
+    return {};
+  }
+  const auto bytes = readThumbnailFile(output, 65536);
+  if (!bytes) {
+    return {};
+  }
+  return parseMediaFacts(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
 }

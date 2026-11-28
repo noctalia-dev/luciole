@@ -45,13 +45,30 @@ namespace luciole {
   enum class OperationsButton : std::uint8_t { Always, Busy, Never };
   // Complete column allocations, including the gap after their contents. Zero
   // is the automatic Name width; metadata always has an explicit allocation.
-  inline constexpr std::size_t kDetailsColumnCount = 9;
+  inline constexpr std::size_t kDetailsColumnCount = 27;
   using DetailsColumnWidths = std::array<int, kDetailsColumnCount + 1>;
-  inline constexpr DetailsColumnWidths kDefaultDetailsColumnWidths{0, 152, 118, 156, 156, 156, 128, 128, 112, 260};
+  inline constexpr DetailsColumnWidths kDefaultDetailsColumnWidths{
+      0,   152, 118, 156, 156, 156, 128, 128, 112, 260, // name and the filesystem columns
+      128, 112, 112, 120, 120, 156,                     // dimensions, duration, bit rate, codecs, photo date
+      96,  96,  152,                                    // width, height, orientation
+      148, 132, 120, 96,  80,                           // album, artist, genre, release date, track
+      104, 112, 104, 120
+  }; // aspect ratio, color space, frame rate, pixel format
   inline constexpr std::array<std::string_view, kDetailsColumnCount + 1> kDetailsColumnWidthKeys{
-      "name_column_width",        "type_column_width",    "size_column_width",  "modified_column_width",
-      "accessed_column_width",    "created_column_width", "owner_column_width", "group_column_width",
-      "permissions_column_width", "location_column_width"
+      "name_column_width",         "type_column_width",
+      "size_column_width",         "modified_column_width",
+      "accessed_column_width",     "created_column_width",
+      "owner_column_width",        "group_column_width",
+      "permissions_column_width",  "location_column_width",
+      "dimensions_column_width",   "duration_column_width",
+      "bit_rate_column_width",     "audio_codec_column_width",
+      "video_codec_column_width",  "date_photographed_column_width",
+      "width_column_width",        "height_column_width",
+      "orientation_column_width",  "album_column_width",
+      "artist_column_width",       "genre_column_width",
+      "release_year_column_width", "track_column_width",
+      "aspect_ratio_column_width", "color_space_column_width",
+      "frame_rate_column_width",   "pixel_format_column_width"
   };
   inline int minimumDetailsColumnWidth(std::size_t index) { return index == 0 ? 160 : 64; }
   inline int maximumDetailsColumnWidth(std::size_t index) { return index == 0 ? 16384 : 2048; }
@@ -65,6 +82,11 @@ namespace luciole {
     bool size = true;
     bool modified = true;
     bool accessed = false, created = false, owner = false, group = false, permissions = false, location = false;
+    bool dimensions = false, duration = false, bitRate = false;
+    bool audioCodec = false, videoCodec = false, datePhotographed = false;
+    bool width = false, height = false, orientation = false;
+    bool album = false, artist = false, genre = false, releaseYear = false, track = false;
+    bool aspectRatio = false, colorSpace = false, frameRate = false, pixelFormat = false;
     bool operator==(const DetailsColumnVisibility&) const = default;
   };
   enum class DetailsColumn : std::uint8_t {
@@ -76,26 +98,86 @@ namespace luciole {
     Owner,
     Group,
     Permissions,
-    Location
+    Location,
+    Dimensions,
+    Duration,
+    BitRate,
+    AudioCodec,
+    VideoCodec,
+    DatePhotographed,
+    Width,
+    Height,
+    Orientation,
+    Album,
+    Artist,
+    Genre,
+    ReleaseYear,
+    Track,
+    AspectRatio,
+    ColorSpace,
+    FrameRate,
+    PixelFormat
   };
   using DetailsColumnOrder = std::array<DetailsColumn, kDetailsColumnCount>;
-  inline constexpr DetailsColumnOrder kDefaultDetailsColumnOrder{DetailsColumn::Type,     DetailsColumn::Size,
-                                                                 DetailsColumn::Modified, DetailsColumn::Accessed,
-                                                                 DetailsColumn::Created,  DetailsColumn::Owner,
-                                                                 DetailsColumn::Group,    DetailsColumn::Permissions,
-                                                                 DetailsColumn::Location};
+  inline constexpr DetailsColumnOrder kDefaultDetailsColumnOrder{
+      DetailsColumn::Type,        DetailsColumn::Size,        DetailsColumn::Modified,
+      DetailsColumn::Accessed,    DetailsColumn::Created,     DetailsColumn::Owner,
+      DetailsColumn::Group,       DetailsColumn::Permissions, DetailsColumn::Location,
+      DetailsColumn::Dimensions,  DetailsColumn::Duration,    DetailsColumn::BitRate,
+      DetailsColumn::AudioCodec,  DetailsColumn::VideoCodec,  DetailsColumn::DatePhotographed,
+      DetailsColumn::Width,       DetailsColumn::Height,      DetailsColumn::Orientation,
+      DetailsColumn::Album,       DetailsColumn::Artist,      DetailsColumn::Genre,
+      DetailsColumn::ReleaseYear, DetailsColumn::Track,       DetailsColumn::AspectRatio,
+      DetailsColumn::ColorSpace,  DetailsColumn::FrameRate,   DetailsColumn::PixelFormat
+  };
   inline bool validDetailsColumnOrder(DetailsColumnOrder order) {
     std::ranges::sort(order);
     return order == kDefaultDetailsColumnOrder;
   }
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnNames{
-      "type", "size", "modified", "accessed", "created", "owner", "group", "permissions", "location"
+      "type",       "size",         "modified",    "accessed",     "created",
+      "owner",      "group",        "permissions", "location",     "dimensions",
+      "duration",   "bit_rate",     "audio_codec", "video_codec",  "date_photographed",
+      "width",      "height",       "orientation", "album",        "artist",
+      "genre",      "release_year", "track",       "aspect_ratio", "color_space",
+      "frame_rate", "pixel_format"
   };
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnLabels{
-      "Type", "Size", "Modified", "Accessed", "Created", "Owner", "Group", "Permissions", "Location"
+      "Type",       "Size",         "Modified",    "Accessed",     "Created",
+      "Owner",      "Group",        "Permissions", "Location",     "Dimensions",
+      "Duration",   "Bit Rate",     "Audio Codec", "Video Codec",  "Date Photographed",
+      "Width",      "Height",       "Orientation", "Album",        "Artist",
+      "Genre",      "Release Year", "Track",       "Aspect Ratio", "Color Space",
+      "Frame Rate", "Pixel Format"
   };
   inline constexpr std::array<std::string_view, kDetailsColumnCount> kDetailsColumnGlyphs{
-      "category", "scale", "pencil", "eye", "calendar-plus", "user", "users", "lock", "map-pin"
+      "category",
+      "scale",
+      "pencil",
+      "eye",
+      "calendar-plus",
+      "user",
+      "users",
+      "lock",
+      "map-pin",
+      "dimensions",
+      "clock",
+      "wave-sine",
+      "music",
+      "movie",
+      "camera",
+      "arrows-horizontal",
+      "arrows-vertical",
+      "rotate",
+      "disc",
+      "microphone",
+      "tag",
+      "calendar-event",
+      "list-numbers",
+      "crop",
+      "palette",
+      "video",
+      "grid-dots"
   };
   inline std::string_view detailsColumnName(DetailsColumn column) {
     const auto index = static_cast<std::size_t>(column);
@@ -137,6 +219,42 @@ namespace luciole {
       return visibility.permissions;
     case DetailsColumn::Location:
       return visibility.location;
+    case DetailsColumn::Dimensions:
+      return visibility.dimensions;
+    case DetailsColumn::Duration:
+      return visibility.duration;
+    case DetailsColumn::BitRate:
+      return visibility.bitRate;
+    case DetailsColumn::AudioCodec:
+      return visibility.audioCodec;
+    case DetailsColumn::VideoCodec:
+      return visibility.videoCodec;
+    case DetailsColumn::DatePhotographed:
+      return visibility.datePhotographed;
+    case DetailsColumn::Width:
+      return visibility.width;
+    case DetailsColumn::Height:
+      return visibility.height;
+    case DetailsColumn::Orientation:
+      return visibility.orientation;
+    case DetailsColumn::Album:
+      return visibility.album;
+    case DetailsColumn::Artist:
+      return visibility.artist;
+    case DetailsColumn::Genre:
+      return visibility.genre;
+    case DetailsColumn::ReleaseYear:
+      return visibility.releaseYear;
+    case DetailsColumn::Track:
+      return visibility.track;
+    case DetailsColumn::AspectRatio:
+      return visibility.aspectRatio;
+    case DetailsColumn::ColorSpace:
+      return visibility.colorSpace;
+    case DetailsColumn::FrameRate:
+      return visibility.frameRate;
+    case DetailsColumn::PixelFormat:
+      return visibility.pixelFormat;
     }
     std::unreachable();
   }
@@ -207,11 +325,36 @@ namespace luciole {
     Owner,
     Group,
     Permissions,
-    Location
+    Location,
+    Dimensions,
+    Duration,
+    BitRate,
+    AudioCodec,
+    VideoCodec,
+    DatePhotographed,
+    Width,
+    Height,
+    Orientation,
+    Album,
+    Artist,
+    Genre,
+    ReleaseYear,
+    Track,
+    AspectRatio,
+    ColorSpace,
+    FrameRate,
+    PixelFormat
   };
   inline constexpr std::array<SortField, kDetailsColumnCount> kColumnSortFields{
-      SortField::Type,  SortField::Size,  SortField::Modified,    SortField::Accessed, SortField::Created,
-      SortField::Owner, SortField::Group, SortField::Permissions, SortField::Location
+      SortField::Type,        SortField::Size,        SortField::Modified,
+      SortField::Accessed,    SortField::Created,     SortField::Owner,
+      SortField::Group,       SortField::Permissions, SortField::Location,
+      SortField::Dimensions,  SortField::Duration,    SortField::BitRate,
+      SortField::AudioCodec,  SortField::VideoCodec,  SortField::DatePhotographed,
+      SortField::Width,       SortField::Height,      SortField::Orientation,
+      SortField::Album,       SortField::Artist,      SortField::Genre,
+      SortField::ReleaseYear, SortField::Track,       SortField::AspectRatio,
+      SortField::ColorSpace,  SortField::FrameRate,   SortField::PixelFormat
   };
   inline SortField detailsColumnSort(DetailsColumn column) {
     return kColumnSortFields[static_cast<std::size_t>(column)];

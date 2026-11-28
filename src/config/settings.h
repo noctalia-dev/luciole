@@ -170,6 +170,24 @@ namespace luciole {
     ShowGroupColumn,
     ShowPermissionsColumn,
     ShowLocationColumn,
+    ShowDimensionsColumn,
+    ShowDurationColumn,
+    ShowBitRateColumn,
+    ShowAudioCodecColumn,
+    ShowVideoCodecColumn,
+    ShowDatePhotographedColumn,
+    ShowWidthColumn,
+    ShowHeightColumn,
+    ShowOrientationColumn,
+    ShowAlbumColumn,
+    ShowArtistColumn,
+    ShowGenreColumn,
+    ShowReleaseYearColumn,
+    ShowTrackColumn,
+    ShowAspectRatioColumn,
+    ShowColorSpaceColumn,
+    ShowFrameRateColumn,
+    ShowPixelFormatColumn,
     ColumnOrder,
     NameColumnWidth,
     TypeColumnWidth,
@@ -181,6 +199,24 @@ namespace luciole {
     GroupColumnWidth,
     PermissionsColumnWidth,
     LocationColumnWidth,
+    DimensionsColumnWidth,
+    DurationColumnWidth,
+    BitRateColumnWidth,
+    AudioCodecColumnWidth,
+    VideoCodecColumnWidth,
+    DatePhotographedColumnWidth,
+    WidthColumnWidth,
+    HeightColumnWidth,
+    OrientationColumnWidth,
+    AlbumColumnWidth,
+    ArtistColumnWidth,
+    GenreColumnWidth,
+    ReleaseYearColumnWidth,
+    TrackColumnWidth,
+    AspectRatioColumnWidth,
+    ColorSpaceColumnWidth,
+    FrameRateColumnWidth,
+    PixelFormatColumnWidth,
     ThumbnailPolicy,
     ThumbnailMaxFileMib,
     ThumbnailCacheMib,
@@ -282,6 +318,24 @@ namespace luciole {
     static constexpr PreferenceKey<bool> ShowGroupColumn{Id::ShowGroupColumn};
     static constexpr PreferenceKey<bool> ShowPermissionsColumn{Id::ShowPermissionsColumn};
     static constexpr PreferenceKey<bool> ShowLocationColumn{Id::ShowLocationColumn};
+    static constexpr PreferenceKey<bool> ShowDimensionsColumn{Id::ShowDimensionsColumn};
+    static constexpr PreferenceKey<bool> ShowDurationColumn{Id::ShowDurationColumn};
+    static constexpr PreferenceKey<bool> ShowBitRateColumn{Id::ShowBitRateColumn};
+    static constexpr PreferenceKey<bool> ShowAudioCodecColumn{Id::ShowAudioCodecColumn};
+    static constexpr PreferenceKey<bool> ShowVideoCodecColumn{Id::ShowVideoCodecColumn};
+    static constexpr PreferenceKey<bool> ShowDatePhotographedColumn{Id::ShowDatePhotographedColumn};
+    static constexpr PreferenceKey<bool> ShowWidthColumn{Id::ShowWidthColumn};
+    static constexpr PreferenceKey<bool> ShowHeightColumn{Id::ShowHeightColumn};
+    static constexpr PreferenceKey<bool> ShowOrientationColumn{Id::ShowOrientationColumn};
+    static constexpr PreferenceKey<bool> ShowAlbumColumn{Id::ShowAlbumColumn};
+    static constexpr PreferenceKey<bool> ShowArtistColumn{Id::ShowArtistColumn};
+    static constexpr PreferenceKey<bool> ShowGenreColumn{Id::ShowGenreColumn};
+    static constexpr PreferenceKey<bool> ShowReleaseYearColumn{Id::ShowReleaseYearColumn};
+    static constexpr PreferenceKey<bool> ShowTrackColumn{Id::ShowTrackColumn};
+    static constexpr PreferenceKey<bool> ShowAspectRatioColumn{Id::ShowAspectRatioColumn};
+    static constexpr PreferenceKey<bool> ShowColorSpaceColumn{Id::ShowColorSpaceColumn};
+    static constexpr PreferenceKey<bool> ShowFrameRateColumn{Id::ShowFrameRateColumn};
+    static constexpr PreferenceKey<bool> ShowPixelFormatColumn{Id::ShowPixelFormatColumn};
     static constexpr PreferenceKey<luciole::DetailsColumnOrder> ColumnOrder{Id::ColumnOrder};
     static constexpr PreferenceKey<int> NameColumnWidth{Id::NameColumnWidth};
     static constexpr PreferenceKey<int> TypeColumnWidth{Id::TypeColumnWidth};
@@ -293,6 +347,24 @@ namespace luciole {
     static constexpr PreferenceKey<int> GroupColumnWidth{Id::GroupColumnWidth};
     static constexpr PreferenceKey<int> PermissionsColumnWidth{Id::PermissionsColumnWidth};
     static constexpr PreferenceKey<int> LocationColumnWidth{Id::LocationColumnWidth};
+    static constexpr PreferenceKey<int> DimensionsColumnWidth{Id::DimensionsColumnWidth};
+    static constexpr PreferenceKey<int> DurationColumnWidth{Id::DurationColumnWidth};
+    static constexpr PreferenceKey<int> BitRateColumnWidth{Id::BitRateColumnWidth};
+    static constexpr PreferenceKey<int> AudioCodecColumnWidth{Id::AudioCodecColumnWidth};
+    static constexpr PreferenceKey<int> VideoCodecColumnWidth{Id::VideoCodecColumnWidth};
+    static constexpr PreferenceKey<int> DatePhotographedColumnWidth{Id::DatePhotographedColumnWidth};
+    static constexpr PreferenceKey<int> WidthColumnWidth{Id::WidthColumnWidth};
+    static constexpr PreferenceKey<int> HeightColumnWidth{Id::HeightColumnWidth};
+    static constexpr PreferenceKey<int> OrientationColumnWidth{Id::OrientationColumnWidth};
+    static constexpr PreferenceKey<int> AlbumColumnWidth{Id::AlbumColumnWidth};
+    static constexpr PreferenceKey<int> ArtistColumnWidth{Id::ArtistColumnWidth};
+    static constexpr PreferenceKey<int> GenreColumnWidth{Id::GenreColumnWidth};
+    static constexpr PreferenceKey<int> ReleaseYearColumnWidth{Id::ReleaseYearColumnWidth};
+    static constexpr PreferenceKey<int> TrackColumnWidth{Id::TrackColumnWidth};
+    static constexpr PreferenceKey<int> AspectRatioColumnWidth{Id::AspectRatioColumnWidth};
+    static constexpr PreferenceKey<int> ColorSpaceColumnWidth{Id::ColorSpaceColumnWidth};
+    static constexpr PreferenceKey<int> FrameRateColumnWidth{Id::FrameRateColumnWidth};
+    static constexpr PreferenceKey<int> PixelFormatColumnWidth{Id::PixelFormatColumnWidth};
     static constexpr PreferenceKey<luciole::ThumbnailPolicy> ThumbnailPolicy{Id::ThumbnailPolicy};
     static constexpr PreferenceKey<int> ThumbnailMaxFileMib{Id::ThumbnailMaxFileMib};
     static constexpr PreferenceKey<int> ThumbnailCacheMib{Id::ThumbnailCacheMib};

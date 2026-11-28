@@ -11,8 +11,9 @@ namespace luciole {
     float typeWidth = 144.0F;
     float sizeWidth = 110.0F;
     float modifiedWidth = 148.0F;
-    std::array<bool, 6> extraVisible{};
-    std::array<float, 6> extraWidths{148, 148, 120, 120, 104, 252};
+    std::array<bool, 24> extraVisible{};
+    std::array<float, 24> extraWidths{148, 148, 120, 120, 104, 252, 120, 104, 104, 112, 112, 148,
+                                      88,  88,  144, 140, 124, 112, 88,  72,  96,  104, 96,  112};
     bool visible(DetailsColumn column) const {
       const auto index = static_cast<std::size_t>(column);
       return index == 0 ? showType : index == 1 ? showSize : index == 2 ? showModified : extraVisible[index - 3];

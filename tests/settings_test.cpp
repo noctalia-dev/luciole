@@ -1266,8 +1266,14 @@ namespace {
 
   void testExtendedColumns() {
     using P = luciole::BrowserPreference;
-    const std::array keys{P::ShowAccessedColumn, P::ShowCreatedColumn,     P::ShowOwnerColumn,
-                          P::ShowGroupColumn,    P::ShowPermissionsColumn, P::ShowLocationColumn};
+    const std::array keys{P::ShowAccessedColumn,    P::ShowCreatedColumn,     P::ShowOwnerColumn,
+                          P::ShowGroupColumn,       P::ShowPermissionsColumn, P::ShowLocationColumn,
+                          P::ShowDimensionsColumn,  P::ShowDurationColumn,    P::ShowBitRateColumn,
+                          P::ShowAudioCodecColumn,  P::ShowVideoCodecColumn,  P::ShowDatePhotographedColumn,
+                          P::ShowWidthColumn,       P::ShowHeightColumn,      P::ShowOrientationColumn,
+                          P::ShowAlbumColumn,       P::ShowArtistColumn,      P::ShowGenreColumn,
+                          P::ShowReleaseYearColumn, P::ShowTrackColumn,       P::ShowAspectRatioColumn,
+                          P::ShowColorSpaceColumn,  P::ShowFrameRateColumn,   P::ShowPixelFormatColumn};
     Fixture fixture;
     luciole::ConfigService config(fixture.paths());
     TEST_CHECK(config.reload());
@@ -1298,8 +1304,14 @@ namespace {
     TEST_CHECK(config.saveOverrides(edit) == luciole::AtomicWriteState::Durable);
     TEST_CHECK(luciole::loadSettings(fixture.paths())->browser.columnOrder == order);
     for (const auto field :
-         {luciole::SortField::Accessed, luciole::SortField::Created, luciole::SortField::Owner,
-          luciole::SortField::Group, luciole::SortField::Permissions, luciole::SortField::Location}) {
+         {luciole::SortField::Accessed,    luciole::SortField::Created,     luciole::SortField::Owner,
+          luciole::SortField::Group,       luciole::SortField::Permissions, luciole::SortField::Location,
+          luciole::SortField::Dimensions,  luciole::SortField::Duration,    luciole::SortField::BitRate,
+          luciole::SortField::AudioCodec,  luciole::SortField::VideoCodec,  luciole::SortField::DatePhotographed,
+          luciole::SortField::Width,       luciole::SortField::Height,      luciole::SortField::Orientation,
+          luciole::SortField::Album,       luciole::SortField::Artist,      luciole::SortField::Genre,
+          luciole::SortField::ReleaseYear, luciole::SortField::Track,       luciole::SortField::AspectRatio,
+          luciole::SortField::ColorSpace,  luciole::SortField::FrameRate,   luciole::SortField::PixelFormat}) {
       const std::array sort{luciole::OverrideEdit{P::SortBy, field}};
       TEST_CHECK(config.saveOverrides(sort) == luciole::AtomicWriteState::Durable);
       TEST_CHECK(luciole::loadSettings(fixture.paths())->browser.sort.field == field);
@@ -1313,9 +1325,14 @@ namespace {
     Fixture fixture;
     luciole::ConfigService config(fixture.paths());
     TEST_CHECK(config.reload() && config.settings().browser.columnOrder == luciole::kDefaultDetailsColumnOrder);
-    const luciole::DetailsColumnOrder baseOrder{Column::Modified, Column::Type,        Column::Size,
-                                                Column::Accessed, Column::Created,     Column::Owner,
-                                                Column::Group,    Column::Permissions, Column::Location};
+    const luciole::DetailsColumnOrder baseOrder{
+        Column::Modified,  Column::Type,        Column::Size,        Column::Accessed,    Column::Created,
+        Column::Owner,     Column::Group,       Column::Permissions, Column::Location,    Column::Dimensions,
+        Column::Duration,  Column::BitRate,     Column::AudioCodec,  Column::VideoCodec,  Column::DatePhotographed,
+        Column::Width,     Column::Height,      Column::Orientation, Column::Album,       Column::Artist,
+        Column::Genre,     Column::ReleaseYear, Column::Track,       Column::AspectRatio, Column::ColorSpace,
+        Column::FrameRate, Column::PixelFormat
+    };
     const std::string base = "[browser]\ncolumn_order = ['modified', 'type', 'size']\nshow_size_column = false\n";
     fixture.write("config.toml", base);
     fixture.write("settings.toml", "[browser]\ngrid_icon_size = 64\n");

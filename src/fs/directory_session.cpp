@@ -76,6 +76,8 @@ namespace {
   constexpr const char* kIconAttribute = G_FILE_ATTRIBUTE_STANDARD_ICON;
   constexpr const char* kTrashAttributes = G_FILE_ATTRIBUTE_TRASH_ORIG_PATH "," G_FILE_ATTRIBUTE_TRASH_DELETION_DATE;
   constexpr int kBatchSize = 64;
+  // Media probes run in small batches so a folder of videos never holds a worker for long.
+  constexpr std::size_t kMediaBatch = 8;
   // Delay between a change notification and its rescan; slow scans extend it up to the maximum.
   constexpr std::chrono::milliseconds kMonitorDelay{80};
   constexpr std::chrono::milliseconds kMaxMonitorDelay{2000};
@@ -348,6 +350,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   struct Request {
     std::weak_ptr<State> state;
     std::shared_ptr<Scan> scan;
+    // Media completions publish against the open location, surviving scan generations; facts completions use scan.
+    std::optional<luciole::Location> location;
   };
 
   DirectorySnapshot snapshot;
@@ -363,6 +367,44 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   std::uint64_t nextId = 1;
   IdResolver resolveId;
   LinkTargetCheck linksToDirectory;
+  MediaFactsCheck mediaFacts;
+  // Probed media facts by name; a rescan keeps them while the file's stamp is unchanged.
+  struct MediaFact {
+    FileType type = FileType::Unknown;
+    std::optional<std::uint64_t> size;
+    std::optional<std::uint64_t> modifiedSeconds;
+    std::optional<ChangeRevision> contentRevision;
+    std::optional<EntryMedia> facts;
+
+    bool sameStamp(const MediaFact& other) const {
+      return type == other.type
+          && size == other.size
+          && modifiedSeconds == other.modifiedSeconds
+          && contentRevision == other.contentRevision;
+    }
+  };
+  std::unordered_map<std::string, MediaFact, NameHash, std::equal_to<>> mediaByName;
+  struct MediaRow {
+    std::size_t index = 0;
+    std::uint64_t id = 0;
+    std::string name;
+    std::string contentType;
+    MediaFact stamp;
+    bool eligible = false;
+    std::optional<EntryMedia> facts;
+  };
+  struct MediaJob {
+    DirectoryEntries entries;
+    std::string folder;
+    std::vector<MediaRow> rows;
+    MediaFactsCheck probe;
+  };
+  std::unordered_map<std::size_t, std::uint64_t> mediaRequested;
+  guint mediaIdle = 0;
+  // The media pipeline outlives scan generations: rescans cancel the listing passes but keep pending requests and
+  // in-flight probes, so churn cannot stall publication.
+  bool mediaRunning = false;
+  GioPtr<GCancellable> mediaCancellable{g_cancellable_new()};
   // Names of the published links that lead to folders. A rescan keeps them there until its own pass checks again.
   std::unordered_set<std::string, NameHash, std::equal_to<>> directoryLinkNames;
   // Icons that replace the listing's own: a link's target icon, a folder's custom icon. A rescan keeps them until its
@@ -386,14 +428,23 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void requestFacts(std::size_t index, std::uint64_t id, std::uint8_t details) {
+    if ((details & EntryDetails::Media) != 0) {
+      // The media pipeline handles churn and rescans itself; only fact queries stay gated below. A media-only
+      // request still falls through so catalogue rows queue the base facts the probe needs.
+      if (index < snapshot.entries.size() && snapshot.entries.brief(index).id == id) {
+        requestMedia(index, id);
+      }
+      details = static_cast<std::uint8_t>(details & ~EntryDetails::Media);
+    }
     if (!scan
         || scan->enumerating
         || dirty
         || snapshot.status != DirectoryStatus::Ready
-        || !snapshot.entries.isCatalogue()
         || index >= snapshot.entries.size()
-        || snapshot.entries.brief(index).id != id
-        || factsRequested.size() >= 1024) {
+        || snapshot.entries.brief(index).id != id) {
+      return;
+    }
+    if (!snapshot.entries.isCatalogue() || factsRequested.size() >= 1024) {
       return;
     }
     const auto* known = snapshot.entries.known(index);
@@ -484,6 +535,12 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
               }
               std::unordered_map<std::size_t, DirectoryEntry> fresh;
               for (auto& [index, entry] : job.facts) {
+                // A media publication may have landed since this job was prepared; keep its facts and bit.
+                if (const auto* current = state->snapshot.entries.known(index)) {
+                  entry.media = current->media;
+                  entry.queriedDetails =
+                      static_cast<std::uint8_t>(entry.queriedDetails | (current->queriedDetails & EntryDetails::Media));
+                }
                 const auto icon = state->iconOverrides.find(entry.name);
                 if (icon != state->iconOverrides.end() && (entry.symlink || entry.type == FileType::Directory)) {
                   entry.icon = icon->second;
@@ -506,10 +563,11 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             // The observer can navigate, replace the scan or destroy its session.
             if (state->scan == request->scan) {
               state->prepareFacts();
+              state->prepareMedia();
             }
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(task, job.release(), [](gpointer data) { delete static_cast<Job*>(data); });
     g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
@@ -561,6 +619,223 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     g_object_unref(task);
   }
 
+  void requestMedia(std::size_t index, std::uint64_t id) {
+    if (!mediaFacts || mediaRequested.size() >= 1024) {
+      return;
+    }
+    const auto* known = snapshot.entries.known(index);
+    if (known && (known->metadataFailed || (known->queriedDetails & EntryDetails::Media) != 0)) {
+      return;
+    }
+    mediaRequested[index] = id;
+    queueMedia();
+  }
+
+  void queueMedia() {
+    if (mediaRequested.empty() || mediaIdle != 0 || mediaRunning) {
+      return;
+    }
+    mediaIdle = g_idle_add_full(
+        G_PRIORITY_DEFAULT_IDLE,
+        [](gpointer data) -> gboolean {
+          if (const auto state = static_cast<std::weak_ptr<State>*>(data)->lock()) {
+            state->mediaIdle = 0;
+            state->prepareMedia();
+          }
+          return G_SOURCE_REMOVE;
+        },
+        new std::weak_ptr<State>(weak_from_this()),
+        [](gpointer data) { delete static_cast<std::weak_ptr<State>*>(data); }
+    );
+  }
+
+  void prepareMedia() {
+    // Churn and rescans must not gate probing: the probe revalidates the file's stamps and publication
+    // revalidates by name, so batches build and publish through both.
+    if (mediaRunning || mediaRequested.empty() || snapshot.status != DirectoryStatus::Ready || !snapshot.location) {
+      return;
+    }
+    auto job = std::make_unique<MediaJob>();
+    job->entries = snapshot.entries;
+    const GString folderPath(g_file_get_path(gioFile(*snapshot.location).get()));
+    const bool local = folderPath != nullptr;
+    job->folder = local ? std::string(folderPath.get()) : std::string();
+    job->probe = mediaFacts;
+    std::unordered_map<std::size_t, std::uint64_t> waiting;
+    while (!mediaRequested.empty() && job->rows.size() < kMediaBatch) {
+      const auto found = mediaRequested.begin();
+      const auto [index, id] = *found;
+      mediaRequested.erase(found);
+      if (index >= snapshot.entries.size() || snapshot.entries.brief(index).id != id) {
+        continue;
+      }
+      const auto* known = snapshot.entries.known(index);
+      if (!known) {
+        // A catalogue row waits for its basic facts to name its content type.
+        waiting.emplace(index, id);
+        continue;
+      }
+      if ((known->queriedDetails & EntryDetails::Media) != 0) {
+        continue;
+      }
+      MediaRow row;
+      row.index = index;
+      row.id = id;
+      row.name = known->name;
+      row.contentType = known->contentType ? known->contentType->c_str() : "";
+      row.stamp = MediaFact{
+          .type = known->type,
+          .size = known->size,
+          .modifiedSeconds = known->modifiedSeconds,
+          .contentRevision = known->contentRevision,
+          .facts = {}
+      };
+      const std::string_view type = row.contentType;
+      row.eligible = local
+          && !known->metadataFailed
+          && !known->symlink
+          && known->type == FileType::Regular
+          && (type.starts_with("image/") || type.starts_with("video/") || type.starts_with("audio/"));
+      if (!row.eligible) {
+        row.facts = EntryMedia{};
+      } else if (
+          const auto cached = mediaByName.find(row.name);
+          cached != mediaByName.end() && cached->second.facts && cached->second.sameStamp(row.stamp)
+      ) {
+        row.facts = cached->second.facts;
+      }
+      job->rows.push_back(std::move(row));
+    }
+    for (const auto& [index, id] : waiting) {
+      mediaRequested.emplace(index, id);
+    }
+    if (job->rows.empty()) {
+      return;
+    }
+    const bool probes = std::ranges::any_of(job->rows, [](const MediaRow& row) { return row.eligible && !row.facts; });
+    if (!probes) {
+      mediaRead(*job);
+      return;
+    }
+    mediaRunning = true;
+    auto* task = g_task_new(
+        nullptr, mediaCancellable.get(),
+        [](GObject*, GAsyncResult* result, gpointer data) {
+          const std::unique_ptr<Request> request(static_cast<Request*>(data));
+          auto& job = *static_cast<MediaJob*>(g_task_get_task_data(G_TASK(result)));
+          // Navigation replaces the location and abandons in-flight probes; rescans keep it and let them publish.
+          if (const auto state = request->state.lock(); state
+              && state->snapshot.location
+              && request->location
+              && *state->snapshot.location == *request->location) {
+            state->mediaRead(job);
+          }
+        },
+        new Request{.state = weak_from_this(), .scan = {}, .location = snapshot.location}
+    );
+    g_task_set_task_data(task, job.release(), [](gpointer data) { delete static_cast<MediaJob*>(data); });
+    g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
+      auto& job = *static_cast<MediaJob*>(data);
+      const std::string_view separator = job.folder.ends_with('/') ? "" : "/";
+      // The icon pass's filesystem check: network folders answer completed unknowns without probing.
+      const bool network = std::ranges::any_of(job.rows, [](const MediaRow& row) { return row.eligible && !row.facts; })
+          && networkFilesystem(job.folder);
+      for (auto& row : job.rows) {
+        if (g_cancellable_is_cancelled(cancellable) != FALSE) {
+          break;
+        }
+        if (row.eligible && !row.facts) {
+          if (network) {
+            row.facts = EntryMedia{};
+          } else {
+            row.facts =
+                job.probe(std::string(job.folder).append(separator).append(row.name), row.contentType, cancellable);
+          }
+        }
+      }
+      g_task_return_boolean(task, TRUE);
+    });
+    g_object_unref(task);
+  }
+
+  void applyMedia(DirectoryEntry& entry, const MediaRow& row) {
+    entry.media = *row.facts != EntryMedia{} ? row.facts : std::optional<EntryMedia>{};
+    entry.queriedDetails = static_cast<std::uint8_t>(entry.queriedDetails | EntryDetails::Media);
+  }
+
+  void mediaRead(MediaJob& job) {
+    mediaRunning = false;
+    const bool cancelled = g_cancellable_is_cancelled(mediaCancellable.get()) != FALSE;
+    // Publication matches by name (rescans reorder the listing, so batch indexes are stale by the time probes
+    // return); an eligible row applies only while its stamps still match.
+    std::unordered_map<std::string_view, const MediaRow*, NameHash, std::equal_to<>> byName;
+    for (const auto& row : job.rows) {
+      if (row.facts) {
+        byName.emplace(row.name, &row);
+        // Retain even a superseded scan's probe: the stamp retires it if the file changed again.
+        if (row.eligible) {
+          auto stamp = row.stamp;
+          stamp.facts = row.facts;
+          mediaByName.insert_or_assign(row.name, stamp);
+        }
+      } else if (!cancelled) {
+        // A batch cancelled between probes drops its remaining rows here; re-request them so pending cells
+        // never wait on a run that silently ended.
+        mediaRequested.emplace(row.index, row.id);
+      }
+    }
+    const bool catalogue = snapshot.entries.isCatalogue();
+    const auto matchingRow = [&](const DirectoryEntry& entry) -> const MediaRow* {
+      const auto found = byName.find(entry.name);
+      if (found == byName.end()) {
+        return nullptr;
+      }
+      const MediaFact current{
+          .type = entry.type,
+          .size = entry.size,
+          .modifiedSeconds = entry.modifiedSeconds,
+          .contentRevision = entry.contentRevision,
+          .facts = {}
+      };
+      return !found->second->eligible || found->second->stamp.sameStamp(current) ? found->second : nullptr;
+    };
+    bool touched = false;
+    if (!byName.empty() && (!catalogue || snapshot.entries.sameCatalogue(job.entries))) {
+      if (catalogue) {
+        std::vector<std::pair<std::size_t, DirectoryEntry>> facts;
+        for (std::size_t i = 0; i < snapshot.entries.size(); ++i) {
+          if (const auto* known = snapshot.entries.known(i)) {
+            auto entry = *known;
+            if (const auto* row = matchingRow(entry)) {
+              applyMedia(entry, *row);
+              touched = true;
+            }
+            facts.emplace_back(i, std::move(entry));
+          }
+        }
+        if (touched) {
+          snapshot.entries = snapshot.entries.withFacts(std::move(facts));
+        }
+      } else {
+        std::vector<DirectoryEntry> entries(snapshot.entries.begin(), snapshot.entries.end());
+        for (auto& entry : entries) {
+          if (const auto* row = matchingRow(entry)) {
+            applyMedia(entry, *row);
+            touched = true;
+          }
+        }
+        if (touched) {
+          snapshot.entries = std::move(entries);
+        }
+      }
+      if (touched) {
+        identities.rebase(snapshot.entries);
+        notify();
+      }
+    }
+    queueMedia();
+  }
+
   void stopScan() {
     if (scan) {
       scan->preparation.cancel();
@@ -570,6 +845,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     }
     factsRequested.clear();
     factsOrder.clear();
+    // Media requests and probes intentionally survive: a rescan keeps the location, and pending cells must not
+    // wait on a pipeline a churn cycle wiped. open() resets them for a new location.
     if (timer != 0) {
       g_source_remove(std::exchange(timer, 0));
     }
@@ -586,6 +863,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       network.reset();
     }
     stopScan();
+    // Navigation and destruction abandon the media pipeline with the location; open() builds a fresh cancellable.
+    g_cancellable_cancel(mediaCancellable.get());
     if (monitorToken) {
       monitorToken->cancel();
     }
@@ -657,7 +936,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     if (!scan->folder->isAdmin()) {
       queryFilesystem();
@@ -683,7 +962,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -938,7 +1217,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->listed(std::move(job.listing));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1068,7 +1347,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->linksFollowed(std::move(job.directoryLinks), std::move(job.icons));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1203,7 +1482,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->iconsRead(job.end, std::move(job.icons));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1404,7 +1683,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->sniffed(job.begin, job.types);
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1511,7 +1790,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -1574,7 +1853,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           g_list_free_full(infos, g_object_unref);
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -1638,6 +1917,21 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     if (snapshot.entries.isCatalogue() && !scan->directoryLinks.empty()) {
       snapshot.entries = snapshot.entries.withDirectoryLinks(scan->directoryLinks);
     }
+    // Media facts for names the listing no longer contains are stale; the probe cache keeps only listed names.
+    if (!mediaByName.empty()) {
+      std::unordered_set<std::string_view, NameHash, std::equal_to<>> listed;
+      listed.reserve(snapshot.entries.size());
+      for (std::size_t i = 0; i < snapshot.entries.size(); ++i) {
+        listed.insert(snapshot.entries.brief(i).name);
+      }
+      for (auto media = mediaByName.begin(); media != mediaByName.end();) {
+        if (!listed.contains(std::string_view(media->first))) {
+          media = mediaByName.erase(media);
+        } else {
+          ++media;
+        }
+      }
+    }
     unsniffed.clear();
     snapshot.contentTypesPending = !error && !scan->sniff->empty();
     const bool trim = std::max(replaced, snapshot.entries.size()) >= kHeapTrimEntries;
@@ -1683,7 +1977,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
 };
 
 luciole::DirectorySession::DirectorySession(
-    std::size_t entryLimit, IdResolver resolveId, LinkTargetCheck linksToDirectory
+    std::size_t entryLimit, IdResolver resolveId, LinkTargetCheck linksToDirectory, MediaFactsCheck mediaFacts
 )
     : m_state(std::make_shared<State>()) {
   m_state->entryLimit = entryLimit;
@@ -1691,6 +1985,7 @@ luciole::DirectorySession::DirectorySession(
   m_state->linksToDirectory = linksToDirectory ? std::move(linksToDirectory) : [](const std::string& path) {
     return luciole::linksToDirectory(path);
   };
+  m_state->mediaFacts = std::move(mediaFacts);
 }
 
 luciole::DirectorySession::~DirectorySession() {
@@ -1704,6 +1999,14 @@ void luciole::DirectorySession::open(const Location& location) {
   state->identities.clear();
   state->directoryLinkNames.clear();
   state->iconOverrides.clear();
+  state->mediaByName.clear();
+  // A new location restarts the media pipeline; the previous generation's requests and probes mean nothing here.
+  state->mediaCancellable.reset(g_cancellable_new());
+  state->mediaRequested.clear();
+  if (state->mediaIdle != 0) {
+    g_source_remove(std::exchange(state->mediaIdle, 0));
+  }
+  state->mediaRunning = false;
   state->snapshot.location = location;
   state->snapshot.entries = {};
   state->entriesAccessInvalidated = false;

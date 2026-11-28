@@ -38,6 +38,7 @@
 #include "render/scene/input_area.h"
 #include "render/scene/input_dispatcher.h"
 #include "render/scene/rect_node.h"
+#include "thumbnails/metadata_probe.h"
 #include "thumbnails/preview_service.h"
 #include "ui/browser/action_shortcuts.h"
 #include "ui/browser/file_icon.h"
@@ -106,7 +107,8 @@ BrowserPage::BrowserPage(
 )
     : m_connection(connection), m_renderer(renderer), m_textInput(textInput), m_animations(animations),
       m_surface(&surface), m_dispatcher(&dispatcher),
-      m_browser(settings.sort, settings.showHidden, settings.showBackups), m_icons(icons), m_thumbnails(thumbnails),
+      m_browser(settings.sort, settings.showHidden, settings.showBackups, &luciole::probeEntryMediaFacts),
+      m_icons(icons), m_thumbnails(thumbnails),
       m_listAdapter(
           m_browser, m_icons, m_thumbnails, luciole::ViewMode::List,
           [this] { return m_connection.keyboardModifiers(); },
@@ -122,6 +124,7 @@ BrowserPage::BrowserPage(
   if (m_preferences.settings()) {
     m_savedSettings = m_preferences.settings()->browser;
   }
+  m_miller.setMediaFactsCheck(&luciole::probeEntryMediaFacts);
   m_gridZoom = static_cast<std::size_t>(
       std::ranges::find(luciole::kGridIconSizes, settings.gridIconSize) - luciole::kGridIconSizes.begin()
   );
@@ -1655,6 +1658,24 @@ void BrowserPage::runAction(
       {Action::SortGroup, sort},
       {Action::SortPermissions, sort},
       {Action::SortLocation, sort},
+      {Action::SortDimensions, sort},
+      {Action::SortDuration, sort},
+      {Action::SortBitRate, sort},
+      {Action::SortAudioCodec, sort},
+      {Action::SortVideoCodec, sort},
+      {Action::SortDatePhotographed, sort},
+      {Action::SortWidth, sort},
+      {Action::SortHeight, sort},
+      {Action::SortOrientation, sort},
+      {Action::SortAlbum, sort},
+      {Action::SortArtist, sort},
+      {Action::SortGenre, sort},
+      {Action::SortReleaseYear, sort},
+      {Action::SortTrack, sort},
+      {Action::SortAspectRatio, sort},
+      {Action::SortColorSpace, sort},
+      {Action::SortFrameRate, sort},
+      {Action::SortPixelFormat, sort},
 
       {Action::Ascending, sort},
       {Action::Descending, sort},
@@ -1802,17 +1823,7 @@ void BrowserPage::openTerminal(const luciole::Location& target) {
 
 void BrowserPage::sortAction(Action action) {
   auto options = browser().model().sort();
-  const auto field = action == Action::SortName ? luciole::SortField::Name
-      : action == Action::SortType              ? luciole::SortField::Type
-      : action == Action::SortSize              ? luciole::SortField::Size
-      : action == Action::SortAccessed          ? luciole::SortField::Accessed
-      : action == Action::SortCreated           ? luciole::SortField::Created
-      : action == Action::SortOwner             ? luciole::SortField::Owner
-      : action == Action::SortGroup             ? luciole::SortField::Group
-      : action == Action::SortPermissions       ? luciole::SortField::Permissions
-      : action == Action::SortLocation          ? luciole::SortField::Location
-
-                                       : luciole::SortField::Modified;
+  const auto field = luciole::sortActionField(action);
   if (action == Action::Ascending || action == Action::Descending) {
     options.descending = action == Action::Descending;
   } else if (action == Action::FoldersFirst) {
