@@ -59,6 +59,7 @@
               nixpkgs.lib.makeBinPath [
                 pkgs.ffmpeg
                 pkgs.ffmpegthumbnailer
+                pkgs.bubblewrap
                 pkgs.poppler-utils
                 pkgs._7zz
               ]

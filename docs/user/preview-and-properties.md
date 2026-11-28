@@ -16,7 +16,13 @@ Select one item and press `Space`. Press `Space` or `Escape` to close it.
 
 In the quick preview, `Left` and `Right` step one item. `Up` and `Down` step one list item or one grid row.
 
-Images, video stills, the first PDF page and embedded audio artwork depend on installed thumbnailers. Video previews are still images, not playback. See [optional features](installation.md#optional-features).
+Images, video stills, the first PDF page and embedded audio artwork depend on available decoders and helpers. Video previews are still images, not playback. See [optional features](installation.md#optional-features).
+
+## Use custom thumbnailers
+
+Luciole reads the same `.thumbnailer` entries as GNOME Files. Put a user entry in `$XDG_DATA_HOME/thumbnailers` (normally `~/.local/share/thumbnailers`) or install a system entry in a `thumbnailers` directory on `$XDG_DATA_DIRS`. Register the file's MIME type with your system and restart Luciole after adding or changing an entry.
+
+Luciole reuses valid shared thumbnails first, then tries its built-in providers and any matching installed helper. Installed helpers need Bubblewrap and must write a PNG. Inside the sandbox they can read the source file and runtime files and write to a private output directory. If you change the command and want to regenerate a thumbnail Luciole already made, use **Settings → Thumbnails → Clear Cache**.
 
 ## Preview text and desktop entries
 

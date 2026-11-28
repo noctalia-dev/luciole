@@ -20,6 +20,7 @@ pkgs.mkShell {
     xdg-terminal-exec
     ffmpeg
     ffmpegthumbnailer
+    bubblewrap
     poppler-utils
     _7zz
   ];

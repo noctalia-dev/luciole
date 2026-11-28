@@ -310,7 +310,7 @@ SettingsDialog::SettingsDialog(
        {"All Locations", luciole::ThumbnailPolicy::All}},
       "All locations can generate thumbnails on mounted shares. Unmounted locations use cached thumbnails."
   );
-  addNumber(P::ThumbnailMaxFileMib, "Image/PDF Size Limit", {1, 1024}, "MiB");
+  addNumber(P::ThumbnailMaxFileMib, "Thumbnail Source Size Limit", {1, 1024}, "MiB");
   card("Cache");
   addNumber(P::ThumbnailCacheMib, "Disk Cache Limit", {16, 8192}, "MiB");
   m_section->addChild(

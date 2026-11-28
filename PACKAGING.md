@@ -109,6 +109,7 @@ In addition to linked-library runtime packages, ship or recommend the following 
 | `ffmpeg`, `ffprobe` | Media thumbnails and metadata. |
 | `ffmpegthumbnailer` | Recommended for shared video-thumbnail filmstrips; executable/runtime closure only, no development headers. |
 | `pdftoppm`, `pdfinfo` | PDF support, usually from Poppler utilities. |
+| `bwrap` (Bubblewrap) | Optional sandbox for installed XDG `.thumbnailer` helpers. Requires working namespace isolation. |
 | `7zz`, `7z` or `7za` | Encrypted 7z input; searched in that order. `LUCIOLE_7Z` can select an absolute executable path. |
 | `xdg-terminal-exec` | Recommended for automatic terminal selection; configured commands and supported terminals can also be used directly. |
 
