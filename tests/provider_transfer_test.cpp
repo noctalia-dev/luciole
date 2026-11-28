@@ -998,7 +998,6 @@ namespace {
   }
   // Copies and moves onto the phone: from local folders and within the phone, with conflicts, cancelling and Undo.
   void phoneWrites(const Location& root, const fs::path& local) {
-    TEST_CHECK(transferDeviceDestination(root));
     const auto folder = Location::fromPath((local / "moved").native());
     TransferService upload;
     TEST_CHECK(upload.start({{folder}, root, Copy}));
@@ -1132,7 +1131,15 @@ namespace {
       TEST_CHECK(cancelled.results().front().outcome == Cancelled || cancelled.results().front().outcome == Copied);
       TEST_CHECK(present(root.child("large.bin")));
 
-      phoneWrites(root, local);
+      if (transferDeviceDestination(root)) {
+        phoneWrites(root, local);
+      } else {
+        // Cameras are read-only destinations.
+        TransferService upload;
+        TEST_CHECK(upload.start({{Location::fromPath((local / "moved").native())}, root, Copy}));
+        wait(upload);
+        TEST_CHECK(upload.results().front().outcome == Failed && !present(root.child("moved")));
+      }
     }
     // Replace keeps the overwritten file for Undo until its history is dropped with the job.
     drainHistory();
