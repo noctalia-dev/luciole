@@ -190,10 +190,12 @@ void RenderContext::renderScene(RenderTarget& target, Node* sceneRoot, Node* ove
   const auto drawStart = std::chrono::steady_clock::now();
   {
     UiPhaseScope renderPhase(UiPhase::Render);
-    const auto sw = static_cast<float>(target.logicalWidth());
-    const auto sh = static_cast<float>(target.logicalHeight());
+    const float safeScale = renderScale > 0.0F ? renderScale : 1.0F;
     const auto bw = static_cast<float>(target.bufferWidth());
     const auto bh = static_cast<float>(target.bufferHeight());
+    // Project at the exact renderScale so logical positions map to fixed buffer pixels across resizes.
+    const float sw = bw / safeScale;
+    const float sh = bh / safeScale;
     for (const Node* root : {sceneRoot, overlay}) {
       if (root != nullptr) {
         renderNode(renderScale, root, Mat3::identity(), 1.0F, sw, sh, bw, bh, 0.0F, 0.0F, sw, sh, false, false, false);
@@ -364,7 +366,7 @@ void RenderContext::renderNode(
         m_textRenderer.draw(
             renderScale, sw, sh, 0.0F, 0.0F, text->text(), text->fontSize() * m_frameTextScale, shadowColor,
             shadowTransform, font, text->maxWidth(), text->maxLines(), text->textAlign(), text->ellipsize(),
-            text->useMarkup(), {bw / sw, bh / sh}
+            text->useMarkup(), {renderScale, renderScale}
         );
       }
       auto color = text->color();
@@ -372,7 +374,7 @@ void RenderContext::renderNode(
       m_textRenderer.draw(
           renderScale, sw, sh, 0.0F, 0.0F, text->text(), text->fontSize() * m_frameTextScale, color, worldTransform,
           font, text->maxWidth(), text->maxLines(), text->textAlign(), text->ellipsize(), text->useMarkup(),
-          {bw / sw, bh / sh}
+          {renderScale, renderScale}
       );
     }
     break;
@@ -463,8 +465,8 @@ void RenderContext::renderNode(
         CustomDrawContext{
             .surfaceWidth = sw,
             .surfaceHeight = sh,
-            .pixelScaleX = sw > 0.0F ? bw / sw : 1.0F,
-            .pixelScaleY = sh > 0.0F ? bh / sh : 1.0F,
+            .pixelScaleX = renderScale > 0.0F ? renderScale : 1.0F,
+            .pixelScaleY = renderScale > 0.0F ? renderScale : 1.0F,
             .transform = worldTransform,
             .opacity = effectiveOpacity,
             .width = node->width(),
