@@ -10,7 +10,7 @@ Find your symptom, then follow the link for the full steps.
 | No thumbnails for some image formats | The matching image loader is missing | Install the loaders listed under [Optional features](installation.md#optional-features) |
 | No thumbnails for videos or PDFs | FFmpeg or the Poppler utilities are missing | Install them, see [Optional features](installation.md#optional-features) |
 | An encrypted 7z archive cannot be opened | No system 7-Zip executable | Install 7-Zip, see [Supported inputs](archives.md#supported-inputs) |
-| An encrypted RAR archive cannot be opened | Encrypted RAR is not supported | Extract it with another tool |
+| An encrypted RAR archive cannot be opened | Encrypted RAR needs the 7-Zip command | Install 7-Zip (`7zz` or `7z`) |
 | Other applications still show a different Open and Save dialog | The portal backend is not selected | [Apply and check the file picker](file-picker.md#apply-and-check-the-file-picker) |
 | Luciole is not the default file manager | Installing it does not change defaults | Set it in your desktop's default applications |
 | A shortcut does nothing | Another command in the same scope uses it, or the chord is unassigned | See [Keyboard shortcuts](keybinds.md) |

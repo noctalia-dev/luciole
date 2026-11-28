@@ -12,9 +12,6 @@ namespace {
   [[noreturn]] void multipart() {
     throwFileError(FileErrorKind::Unsupported, "Multipart RAR archives are not supported yet.");
   }
-  [[noreturn]] void encrypted() {
-    throwFileError(FileErrorKind::Unsupported, "Encrypted RAR archives are not supported by the archive provider.");
-  }
   unsigned little16(std::span<const unsigned char> bytes, std::size_t position) {
     return bytes[position] | (static_cast<unsigned>(bytes[position + 1]) << 8);
   }
@@ -35,7 +32,8 @@ namespace {
     }
     invalid();
   }
-  void validateRar5(std::span<const unsigned char> bytes) {
+  // Returns true for an encryption header (headers encrypted with a password).
+  bool validateRar5(std::span<const unsigned char> bytes) {
     std::size_t position = 12; // Signature and header CRC32; libarchive verifies CRCs.
     const auto size = varint(bytes, position);
     if (!size || size > 2U * 1024U * 1024U) {
@@ -45,7 +43,7 @@ namespace {
     bytes = bytes.first(std::min(end, bytes.size()));
     const auto type = varint(bytes, position);
     if (type == 4) {
-      encrypted();
+      return true;
     }
     if (type != 1) {
       invalid();
@@ -60,6 +58,7 @@ namespace {
     if (archiveFlags & 3U) {
       multipart();
     }
+    return false;
   }
 } // namespace
 
@@ -85,14 +84,10 @@ luciole::archive_work::RarInput luciole::archive_work::validateRarInput(Input& i
     if (flags & 1U) {
       multipart();
     }
-    if (flags & 0x80U) {
-      encrypted();
-    }
-    return RarInput::Rar4;
+    return (flags & 0x80U) ? RarInput::Rar4Encrypted : RarInput::Rar4;
   }
   if (prefix[6] == 1 && count >= 8 && prefix[7] == 0) {
-    validateRar5(bytes);
-    return RarInput::Rar5;
+    return validateRar5(bytes) ? RarInput::Rar5Encrypted : RarInput::Rar5;
   }
   invalid();
 }

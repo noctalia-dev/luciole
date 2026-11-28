@@ -1452,6 +1452,12 @@ namespace {
       luciole::ArchiveService service;
       TEST_CHECK(service.inspect(location(source)));
       wait(service, pump);
+      if (reference.error == "Encrypted RAR") {
+        // Encrypted RAR goes to the 7-Zip provider; this synthetic member has damaged headers for 7-Zip.
+        TEST_CHECK(service.error() && !service.passwordRequest() && !service.catalog());
+        TEST_CHECK(fs::is_empty(fixture.root / "tmp"));
+        continue;
+      }
       if (!reference.error.empty()) {
         TEST_CHECK(service.error() && service.error()->kind == luciole::FileErrorKind::Unsupported);
         TEST_CHECK(
@@ -1632,8 +1638,9 @@ namespace {
       luciole::ArchiveService service;
       TEST_CHECK(service.inspect(location(source)));
       wait(service, pump);
-      TEST_CHECK(service.error() && service.error()->kind == luciole::FileErrorKind::Unsupported);
-      TEST_CHECK(service.error()->message.contains("Encrypted RAR") && !service.passwordRequest());
+      // Header-encrypted RAR is listed by 7-Zip, which rejects these truncated headers without a prompt.
+      TEST_CHECK(service.error() && service.error()->kind == luciole::FileErrorKind::InvalidArgument);
+      TEST_CHECK(!service.passwordRequest() && !service.catalog());
     }
   }
   void testEncryptedSevenZip(
@@ -1929,7 +1936,7 @@ namespace {
     luciole::archive_work::Passwords passwords;
     passwords.values.emplace_back("fixture-pass");
     const auto stamp = input.fingerprint();
-    const auto catalog = luciole::archive_work::sevenZipCatalog(input, work, passwords);
+    const auto catalog = luciole::archive_work::sevenZipCatalog(input, work, passwords, "7z");
     TEST_CHECK(catalog.size() == 3 && catalog[1].path == "folder/first.txt" && catalog[1].encrypted);
     TEST_CHECK(input.seek(0, SEEK_END) == static_cast<std::int64_t>(original.size()));
     const auto fd = input.duplicateSingle();
@@ -2034,7 +2041,7 @@ esac
       }
       bool failed = false;
       try {
-        luciole::archive_work::extractSevenZip(input, work, passwords, {"same.txt"}, true, 12, output.native());
+        luciole::archive_work::extractSevenZip(input, work, passwords, {"same.txt"}, true, 12, output.native(), "7z");
       } catch (const std::exception&) {
         failed = true;
       }
@@ -2058,7 +2065,7 @@ esac
       passwords.values.emplace_back("fixture-pass");
       std::optional<luciole::FileErrorKind> rejected;
       try {
-        (void)luciole::archive_work::sevenZipCatalog(input, work, passwords);
+        (void)luciole::archive_work::sevenZipCatalog(input, work, passwords, "7z");
       } catch (const luciole::FileErrorException& error) {
         rejected = error.error().kind;
       }
@@ -2078,7 +2085,7 @@ esac
     luciole::archive_work::Input input(location(source), work);
     luciole::archive_work::Passwords passwords;
     passwords.values.emplace_back("fixture-pass");
-    const auto members = luciole::archive_work::sevenZipCatalog(input, work, passwords);
+    const auto members = luciole::archive_work::sevenZipCatalog(input, work, passwords, "7z");
     TEST_CHECK(members.size() == 1 && members[0].path == "member");
     return 0;
   }

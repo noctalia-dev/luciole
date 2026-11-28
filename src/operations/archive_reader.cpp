@@ -29,6 +29,7 @@ namespace {
     std::unique_ptr<struct archive, decltype(&archive_read_free)> value{archive_read_new(), &archive_read_free};
     std::array<char, 65536> buffer{};
     std::optional<std::vector<SevenZipMember>> sevenzip;
+    std::string sevenzipType = "7z";
     std::size_t memberPosition = 0;
     std::unique_ptr<struct archive_entry, decltype(&archive_entry_free)> nativeEntry{
         archive_entry_new(), &archive_entry_free
@@ -56,8 +57,8 @@ namespace {
         requireArchive(archive_read_support_format_raw(value.get()), value.get(), work);
       } else if (rar != RarInput::None) {
         requireArchive(
-            rar == RarInput::Rar4 ? archive_read_support_format_rar(value.get())
-                                  : archive_read_support_format_rar5(value.get()),
+            rar == RarInput::Rar4 || rar == RarInput::Rar4Encrypted ? archive_read_support_format_rar(value.get())
+                                                                    : archive_read_support_format_rar5(value.get()),
             value.get(), work
         );
       } else if (xz) {
@@ -146,6 +147,12 @@ namespace {
           ),
           value.get(), work
       );
+      if (rar == RarInput::Rar4Encrypted || rar == RarInput::Rar5Encrypted) {
+        // Libarchive cannot read encrypted RAR headers; the listing needs the password.
+        sevenzipType = rar == RarInput::Rar4Encrypted ? "rar" : "rar5";
+        const Passwords empty;
+        sevenzip = sevenZipCatalog(input, work, passwords ? *passwords : empty, sevenzipType);
+      }
     }
     void unchanged() {
       if (xz) {
@@ -175,13 +182,14 @@ namespace {
       if (archive_read_has_encrypted_entries(value.get()) > 0) {
         if (format == ARCHIVE_FORMAT_7ZIP) {
           const Passwords empty;
-          sevenzip = sevenZipCatalog(input, work, keys ? *keys : empty);
+          sevenzip = sevenZipCatalog(input, work, keys ? *keys : empty, sevenzipType);
           return next(entry);
         }
         if (format == ARCHIVE_FORMAT_RAR || format == ARCHIVE_FORMAT_RAR_V5) {
-          throwFileError(
-              FileErrorKind::Unsupported, "Encrypted RAR archives are not supported by the archive provider."
-          );
+          const Passwords empty;
+          sevenzipType = format == ARCHIVE_FORMAT_RAR ? "rar" : "rar5";
+          sevenzip = sevenZipCatalog(input, work, keys ? *keys : empty, sevenzipType);
+          return next(entry);
         }
       }
       if (status == ARCHIVE_EOF) {
@@ -539,7 +547,7 @@ namespace {
       requireSpace(data, temporaryBytes);
     }
     const auto directory = (fs::path(stage) / ".7z").native();
-    extractSevenZip(reader.input, work, passwords, names, encrypted, largest, directory);
+    extractSevenZip(reader.input, work, passwords, names, encrypted, largest, directory, reader.sevenzipType);
     const auto missing = [] {
       throwFileError(FileErrorKind::InvalidArgument, "The 7-Zip command did not produce an expected member.");
     };
@@ -594,6 +602,7 @@ luciole::archive_work::Prepared luciole::archive_work::extract(
   }
   Reader reader(source, work, &passwords);
   reader.sevenzip = scan.sevenzip;
+  reader.sevenzipType = scan.sevenzipType;
   if (reader.original != contents->stamp) {
     throwFileError(FileErrorKind::Changed, "Archive changed before extraction.");
   }

@@ -45,7 +45,7 @@ Temporary storage follows `TMPDIR`, including private per-user folders configure
 |---|---|
 | ZIP, TAR, 7z, RAR | Depends on the archive capabilities available on your system |
 | Encrypted 7z | Needs a system 7-Zip executable |
-| Encrypted RAR | Not supported |
+| Encrypted RAR | Needs a system 7-Zip executable |
 | Split ZIP `name.zip.001`, `.002`, ... | Select `.001`, with all contiguous parts beside it |
 | Spanned `.z01` sets | Not supported; split-archive creation is not supported either |
 | `dump.sql.gz` (`.gz`, `.bz2`, `.xz`, `.zst` without `.tar`) | Browses and extracts as one file without the suffix; size is unknown until extracted |
