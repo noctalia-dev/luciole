@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <print>
 #include <stdexcept>
+#include <sys/mount.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -125,6 +128,57 @@ namespace {
     TEST_CHECK(service.snapshot().status == Status::Finished && service.snapshot().outsideTrash);
     TEST_CHECK(!fs::exists(folder) && read(fixture.root / "keep") == "preserve");
     TEST_CHECK(service.snapshot().results.size() == 1 && service.snapshot().results[0].outcome == Outcome::Deleted);
+  }
+  // A mount inside the deleted folder must survive: deletion refuses it instead of emptying it.
+  void mountInsideDeletion(Pump& pump) {
+    Fixture fixture;
+    const auto folder = fixture.root / "selected";
+    fs::create_directories(folder / "mounted");
+    write(folder / "own", "delete");
+    TEST_CHECK(::mount("tmpfs", (folder / "mounted").c_str(), "tmpfs", 0, "size=1M") == 0);
+    write(folder / "mounted/data", "on another filesystem");
+    luciole::DirectorySession session;
+    session.open(luciole::Location::fromPath(fixture.root.native()));
+    pump.until([&] { return session.snapshot().status != luciole::DirectoryStatus::Loading; });
+    const auto found =
+        std::ranges::find(session.snapshot().entries, std::string("selected"), &luciole::DirectoryEntry::name);
+    TEST_CHECK(found != session.snapshot().entries.end());
+    const auto selected = *found; // NOLINT(performance-unnecessary-copy-initialization)
+    luciole::EmptyTrashService service;
+    TEST_CHECK(service.deleteSelection({selected}));
+    pump.until([&] { return !service.busy(); });
+    TEST_CHECK(service.snapshot().status == Status::Finished);
+    TEST_CHECK(service.snapshot().results.size() == 1 && service.snapshot().results[0].outcome != Outcome::Deleted);
+    TEST_CHECK(read(folder / "mounted/data") == "on another filesystem");
+    TEST_CHECK(::umount((folder / "mounted").c_str()) == 0);
+  }
+  // Runs the mount check in a forked child with its own user and mount namespaces; skipped when they are unavailable.
+  void mountedChecks() {
+    const pid_t pid = ::fork();
+    TEST_CHECK(pid >= 0);
+    if (pid == 0) {
+      const auto uid = ::getuid();
+      const auto gid = ::getgid();
+      if (::unshare(CLONE_NEWUSER | CLONE_NEWNS) != 0) {
+        _exit(77);
+      }
+      std::ofstream("/proc/self/setgroups") << "deny";
+      std::ofstream("/proc/self/uid_map") << std::format("{} {} 1", uid, uid);
+      std::ofstream("/proc/self/gid_map") << std::format("{} {} 1", gid, gid);
+      if (::mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0) {
+        _exit(77);
+      }
+      Pump pump;
+      mountInsideDeletion(pump);
+      _exit(0);
+    }
+    int status = 0;
+    TEST_CHECK(::waitpid(pid, &status, 0) == pid && WIFEXITED(status));
+    if (WEXITSTATUS(status) == 77) {
+      std::println("Mount deletion check skipped: user and mount namespaces unavailable");
+      return;
+    }
+    TEST_CHECK(WEXITSTATUS(status) == 0);
   }
   void successfulEmptyAndNewArrivals(Pump& pump) {
     Fixture fixture;
@@ -381,6 +435,10 @@ namespace {
 
 int main(int argc, char** argv) {
   try {
+    // Forked first, while the process may still be single-threaded, as user namespaces require.
+    if (argc == 1) {
+      mountedChecks();
+    }
     Pump pump;
     if (argc == 2 && std::string_view(argv[1]) == "--selected-provider") {
       selectedDeletion(pump);
