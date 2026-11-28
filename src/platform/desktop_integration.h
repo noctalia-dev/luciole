@@ -63,6 +63,9 @@ namespace luciole {
     // Parents the window to a portal `parent_window` handle; call before initialize(). Only "wayland:"
     // handles take effect; `modal` asks the compositor to treat the window as a modal dialog of it.
     void setParent(std::string handle, bool modal);
+    // Finish modality before replying to a portal client, while retaining its imported parent.
+    void completeModal(std::function<void(bool)> ready);
+    bool modalReplyPending() const;
     // rendered runs after each drawn frame; frameDone after each completed frame callback and may destroy the surface.
     void setFrameCallbacks(std::function<void()> rendered, std::function<void()> frameDone);
 

@@ -23,6 +23,7 @@ namespace luciole {
   struct Bookmark;
   struct PinSlot;
   struct BrowserSettings;
+  struct Drive;
 } // namespace luciole
 
 class AnimationManager;
@@ -124,6 +125,7 @@ private:
   void resize(int width, bool persist);
   void openDrive(const std::string& key);
   void removeDrive(const std::string& key);
+  void beginDriveRemoval(const luciole::Drive& selected);
   void openDriveMenu(const std::string& key, float x, float y);
   // Recounts the trash for the trash place's empty or full icon.
   void refreshTrashAvailability();

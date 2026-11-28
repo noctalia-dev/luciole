@@ -164,6 +164,9 @@ SettingsDialog::SettingsDialog(
   );
   addBool(P::SingleClickLocationEdit, "Single-Click Location Bar to Edit");
   addBool(P::ConfirmPermanentDeletion, "Confirm Permanent Deletion");
+  addBool(
+      P::ConfirmDriveRemoval, "Confirm Drive Removal", "Ask before safely removing, ejecting or unmounting a drive"
+  );
   addBool(P::ShowPermanentDeletion, "Show Delete Permanently in Context Menus");
   addBool(P::SwitchToNewTab, "Switch to New Folder Tabs");
   addBool(P::RestoreLastWindow, "Restore Tabs from Last Closed Window");

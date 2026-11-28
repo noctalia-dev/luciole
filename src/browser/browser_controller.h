@@ -102,6 +102,7 @@ namespace luciole {
     void setExpandableFolders(bool enabled);
     void releaseLocation(const Location& root);
     bool expandableFolders() const { return m_tree != nullptr; }
+    bool treeLoading() const;
     bool toggleFolder(EntryId id);
     bool treeKey(bool expand);
     TreeRowInfo treeRow(EntryId id) const;

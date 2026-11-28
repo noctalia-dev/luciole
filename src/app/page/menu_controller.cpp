@@ -198,7 +198,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
         {.id = PasteInto,
          .label = "Paste into Folder",
          .enabled = !m_page.operationsBusy()
-             && luciole::transferLocationSupported(*singleLocation)
+             && luciole::transferDestinationSupported(*singleLocation)
              && luciole::entryAccess(*single).write != false,
          .glyph = "clipboard"}
     );
@@ -257,6 +257,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
   addSeparator(entries);
   if (!trash) {
     add(Action::Rename);
+    entries.back().label = one ? "Rename" : "Rename…";
     add(Action::CreateLink);
     add(Action::Compress);
     addSeparator(entries);

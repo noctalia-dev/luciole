@@ -220,9 +220,6 @@ luciole::FileIconCache::request(const FileIconSource& source, int pixels) {
     return found->second.image;
   }
   m_state->trim(true);
-  if (m_state->cache.size() >= kMaxEntries) {
-    return {};
-  }
   auto image = std::make_shared<FileIconImage>();
   m_state->cache.emplace(key, State::Item{image, ++m_state->clock});
   m_state->pending.push_back({m_state, source, image, pixels, m_state->generation, m_state->colorScheme});

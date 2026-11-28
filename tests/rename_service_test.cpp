@@ -195,6 +195,19 @@ namespace {
         && luciole::filenameStemLength("folder.name", true) == 11
         && luciole::filenameStemLength("trailing.", false) == 9
     );
+    // Repeated F2 toggles between selecting the stem and the full filename (including extension).
+    TEST_CHECK(luciole::nextRenameSelectionEnd("AGENTS.md", false, 0, 6) == 9);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("AGENTS.md", false, 0, 9) == 6);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("AGENTS.md", false, 2, 2) == 6);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("AGENTS.md", false, 1, 6) == 6);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("archive.tar.gz", false, 0, 11) == 14);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("archive.tar.gz", false, 0, 14) == 11);
+    TEST_CHECK(luciole::nextRenameSelectionEnd(".config.json", false, 0, 7) == 12);
+    TEST_CHECK(luciole::nextRenameSelectionEnd(".config.json", false, 0, 12) == 7);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("folder.name", true, 0, 11) == 11);
+    TEST_CHECK(luciole::nextRenameSelectionEnd(".bashrc", false, 0, 7) == 7);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("Makefile", false, 0, 8) == 8);
+    TEST_CHECK(luciole::nextRenameSelectionEnd("trailing.", false, 0, 9) == 9);
     if (::geteuid() != 0) {
       pump.prepare(service, fixture.root / "source");
       fs::permissions(fixture.root, fs::perms::owner_read | fs::perms::owner_exec);

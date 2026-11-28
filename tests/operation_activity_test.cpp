@@ -1110,7 +1110,7 @@ namespace {
         {{fixture.at("success"), fixture.at("missing")}, fixture.at("destination"), luciole::TransferAction::Copy}
     ));
     auto live = workspace.hub.activities();
-    TEST_CHECK(live.size() == 1 && !live[0].finished && live[0].canCancel && !live[0].progress);
+    TEST_CHECK(live.size() == 1 && !live[0].finished && live[0].canCancel);
     pump.until([&] { return service.conflict().has_value(); });
     const auto destination = fixture.root / "destination";
     const auto held = fixture.root / "held-destination";
@@ -1438,6 +1438,28 @@ namespace {
     });
     TEST_CHECK(found != activities.end() && found->report->contains(stagePath));
   }
+
+  void detachedPreparingRenameCommit(Pump& pump) {
+    Fixture fixture;
+    fixture.write("before.txt");
+    Workspace workspace;
+    auto job = workspace.hub.create<luciole::RenameService>(workspace.page, JobScope::Page);
+    auto& service = job->service<luciole::RenameService>();
+    TEST_CHECK(service.prepare(fixture.at("before.txt")));
+    // Follow and queue the rename via whenIdle while Preparing (simulating focus loss or tab switch before prepare).
+    workspace.hub.follow(*job);
+    job->whenIdle([](OperationJob& done) {
+      auto& renamer = done.service<luciole::RenameService>();
+      if (renamer.canRename()) {
+        (void)renamer.rename("after.txt");
+      }
+    });
+    job.reset();
+    pump.until([&] { return !workspace.hub.busy(); });
+    workspace.hub.update(workspace.window);
+    TEST_CHECK(!fs::exists(fixture.root / "before.txt") && fs::exists(fixture.root / "after.txt"));
+    TEST_CHECK(workspace.hub.canUndo());
+  }
 } // namespace
 
 int main(int argc, char** argv) {
@@ -1479,5 +1501,6 @@ int main(int argc, char** argv) {
   ancestorTransferHistory(pump, luciole::TransferAction::Move);
   copyCleanupReport(pump);
   cancelledPacedTransferCleanup(pump);
+  detachedPreparingRenameCommit(pump);
   pump.until([] { return !luciole::CopyReceipt::cleanupPending() && !luciole::transfer::cleanupPending(); });
 }

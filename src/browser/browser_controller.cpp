@@ -796,6 +796,7 @@ void luciole::BrowserController::setExpandableFolders(bool enabled) {
     publish(m_session.snapshot());
   }
 }
+bool luciole::BrowserController::treeLoading() const { return m_tree && m_query.empty() && m_tree->busy(); }
 bool luciole::BrowserController::toggleFolder(EntryId id) { return m_tree && m_query.empty() && m_tree->toggle(id); }
 luciole::TreeRowInfo luciole::BrowserController::treeRow(EntryId id) const {
   return m_tree && m_query.empty() ? m_tree->row(id) : TreeRowInfo{};

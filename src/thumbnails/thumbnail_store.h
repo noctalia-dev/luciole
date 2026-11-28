@@ -16,7 +16,8 @@ namespace luciole {
   // budget prunes the oldest regular PNGs regardless of author; clear() removes only Luciole-written ones.
   class ThumbnailStore {
   public:
-    // Completed writes gathered per worker batch; each batch ends with one budget scan of the cache.
+    // Completed writes gathered per worker batch; a batch rescans the cache's size only when its estimate may exceed
+    // the budget, the budget changed, or the last scan is a minute old.
     static constexpr std::size_t kMaxBatch = 64;
     ThumbnailStore();
     const std::filesystem::path& root() const { return m_root; }

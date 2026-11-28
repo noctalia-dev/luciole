@@ -866,7 +866,7 @@ namespace {
       std::mutex mu;
       std::condition_variable cv;
       std::vector<std::uint64_t> lengths;
-      bool firstEntered = false, firstReleased = false;
+      bool firstEntered = false, firstReleased = false, firstSynced = false;
       std::atomic<std::int64_t> clockVal{1'000'000'000};
       std::uint64_t written = 0;
       bool checkedShrunkRetry = false;
@@ -888,17 +888,27 @@ namespace {
                  }
                  cv.notify_all();
                  if (first) {
-                   std::unique_lock lock(mu);
-                   cv.wait(lock, [&] { return firstReleased; });
+                   {
+                     std::unique_lock lock(mu);
+                     cv.wait(lock, [&] { return firstReleased; });
+                   }
                    // 640 ms for 1 MiB shrinks window to 320 KiB.
                    clockVal.fetch_add(640'000'000);
                  } else {
                    clockVal.fetch_add(200'000'000);
                  }
-                 return ::sync_file_range(
+                 const int result = ::sync_file_range(
                      fd, static_cast<off_t>(offset), static_cast<off_t>(length),
                      SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER
                  );
+                 if (first) {
+                   {
+                     const std::scoped_lock lock(mu);
+                     firstSynced = true;
+                   }
+                   cv.notify_all();
+                 }
+                 return result;
                },
            .clockNs = [&] { return clockVal.load(); },
            .copyRange = [](int, int, std::size_t) -> ssize_t {
@@ -913,6 +923,9 @@ namespace {
                  firstReleased = true;
                }
                cv.notify_all();
+               // Range #0's sync has returned; the helper only has to publish it before a later write harvests it.
+               std::unique_lock lock(mu);
+               cv.wait(lock, [&] { return firstSynced; });
              }
              if (written >= kMiB + 256 * kKiB && written < kMiB + 320 * kKiB) {
                if (svc.bytes() > kMiB) {
@@ -922,9 +935,9 @@ namespace {
                    sawOversizedRetry = true;
                  }
                } else {
-                 // Take tiny short writes inside the same 128 KiB buffer until harvestIfDone() observes range #0.
+                 // Take 1-byte short writes inside the same 128 KiB buffer until harvestIfDone() observes range #0.
                  std::this_thread::yield();
-                 const auto n = ::write(outFd, data, std::min<std::size_t>(length, 1024));
+                 const auto n = ::write(outFd, data, 1);
                  if (n > 0) {
                    written += static_cast<std::uint64_t>(n);
                  }

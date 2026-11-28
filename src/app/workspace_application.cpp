@@ -376,7 +376,9 @@ void WorkspaceApplication::choose(
 }
 
 bool WorkspaceApplication::hasWindows() const {
-  return std::ranges::any_of(m_hosts, [](const auto& item) { return item.second->surface.isRunning(); });
+  return std::ranges::any_of(m_hosts, [](const auto& item) {
+    return item.second->surface.isRunning() || item.second->surface.modalReplyPending();
+  });
 }
 
 void WorkspaceApplication::focus(wl_surface* surface, bool entered) {
@@ -497,6 +499,10 @@ bool WorkspaceApplication::running() {
   }
   m_hub.update(m_focused);
   bool busy = (live ? m_hub.busy() : m_hub.shutdownPending()) || m_thumbnails.clearing() || m_pins.busy();
+  for (const auto& [id, host] : m_hosts) {
+    (void)id;
+    busy |= host->surface.modalReplyPending();
+  }
   for (auto& [id, page] : m_pages) {
     if (!live) {
       page->shutdown();
@@ -542,7 +548,7 @@ bool WorkspaceApplication::running() {
   if (live) {
     std::vector<luciole::WindowId> retiredHosts;
     for (const auto& [id, host] : m_hosts) {
-      if (host->closed && std::ranges::none_of(m_pages, [&](const auto& item) {
+      if (host->closed && !host->surface.modalReplyPending() && std::ranges::none_of(m_pages, [&](const auto& item) {
             return item.second->boundSurface() == &host->surface;
           })) {
         retiredHosts.push_back(id);
@@ -683,6 +689,9 @@ void WorkspaceApplication::keyboard(const KeyboardEvent& event) {
     const bool focusPrevious =
         luciole::keybindMatches(luciole::KeybindCommand::FocusPrevious, event.sym, event.modifiers);
     if (!page.overlay() && (focusNext || focusPrevious)) {
+      if (page.inlineRenameTab(focusPrevious)) {
+        return;
+      }
       (void)host.dispatcher.cycleTabFocus(focusPrevious);
       host.surface.requestRedraw();
       return;
@@ -831,6 +840,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     const bool forward = event.button == BTN_EXTRA || event.button == BTN_FORWARD;
     if (back || forward) {
       if (event.pressed && !host->pressedTab && !active.overlay()) {
+        active.commitInlineRename();
         auto target = window.active;
         for (auto tab : host->mounted) {
           if (m_pages.at(tab)->contains(x, y)) {
@@ -856,6 +866,9 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     }
   }
   if (stripPointer(*host, event, x, y)) {
+    if (event.type == PointerEvent::Type::Button && event.pressed) {
+      active.commitInlineRename();
+    }
     return;
   }
   cancelTabHoverScroll(*host);
@@ -865,6 +878,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
       && event.type == PointerEvent::Type::Button
       && event.pressed
       && event.button == BTN_LEFT) {
+    active.commitInlineRename();
     host->previewDragWidth = active.previewWidth();
     return;
   }
@@ -874,6 +888,7 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
       && event.type == PointerEvent::Type::Button
       && event.pressed
       && event.button == BTN_LEFT) {
+    active.commitInlineRename();
     host->resizing = true;
     host->resizeStart = window.fraction;
     return;
@@ -890,12 +905,16 @@ void WorkspaceApplication::pointer(const PointerEvent& event) {
     }
   }
   // Pane content goes to the page under the pointer; the chrome around the panes belongs to the active page.
-  auto target = m_model.windows().at(host->id).active;
+  const auto currentActive = m_model.windows().at(host->id).active;
+  auto target = currentActive;
   for (auto tab : host->mounted) {
     if (m_pages.at(tab)->contains(x, y)) {
       target = tab;
       break;
     }
+  }
+  if (event.type == PointerEvent::Type::Button && event.pressed && target != currentActive) {
+    m_pages.at(currentActive)->commitInlineRename();
   }
   host->pointerPage = target;
   m_pages.at(target)->pointer(event);
@@ -1661,18 +1680,27 @@ bool WorkspaceApplication::stripPointer(Host& host, const PointerEvent& event, f
       }
     }
   }
+  // With the tabs hidden the scroll view is too, and the whole strip outside the window controls is title bar.
+  const Node* titlebarArea = host.tabsHidden ? static_cast<const Node*>(host.strip) : host.tabScroll;
   if (event.type == PointerEvent::Type::Button
       && event.pressed
       && (event.button == BTN_LEFT || event.button == BTN_RIGHT)
-      && host.tabScroll
-      && host.tabScroll->containsScenePoint(x, y)) {
-    bool child = host.newTabButton && host.newTabButton->containsScenePoint(x, y);
-    for (const auto& [tab, button] : host.buttons) {
-      (void)tab;
-      float bx = 0.0F;
-      float by = 0.0F;
-      Node::absolutePosition(button, bx, by);
-      child |= x >= bx && x <= bx + button->width();
+      && titlebarArea != nullptr
+      && titlebarArea->containsScenePoint(x, y)) {
+    bool child = false;
+    if (host.tabsHidden) {
+      for (const auto& node : host.strip->children()) {
+        child |= node->visible() && node->containsScenePoint(x, y);
+      }
+    } else {
+      child = host.newTabButton && host.newTabButton->containsScenePoint(x, y);
+      for (const auto& [tab, button] : host.buttons) {
+        (void)tab;
+        float bx = 0.0F;
+        float by = 0.0F;
+        Node::absolutePosition(button, bx, by);
+        child |= x >= bx && x <= bx + button->width();
+      }
     }
     // The empty strip works as a title bar, as browsers' tab strips do: double-click toggles maximized and a right
     // click opens the compositor's window menu. A compositor that decorates the window may still draw no title bar.

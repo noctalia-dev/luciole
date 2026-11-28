@@ -22,6 +22,9 @@ public:
   VirtualGridView* focusedView() const;
   std::optional<std::size_t> columnAt(float x, float y) const;
   VirtualGridView* view(std::size_t index) const;
+  void setRenamingEntry(std::optional<luciole::EntryId> entry);
+  std::optional<LayoutRect> entryNameRect(luciole::EntryId id, float singleLineHeight = 0.0F) const;
+  LayoutRect viewportRect() const;
   std::function<std::uint32_t()> modifiers;
   std::function<bool()> keyboardFocus;
   std::function<bool(const luciole::Location&)> cut;
@@ -68,4 +71,5 @@ private:
   float m_resizePreferredWidth = 0;
   bool m_resizeFixedWidth = false;
   float m_layoutWidth = 0;
+  std::optional<luciole::EntryId> m_renamingEntry;
 };

@@ -28,6 +28,8 @@ namespace luciole {
     void setChangedCallback(std::function<void()> callback) { m_changed = std::move(callback); }
     std::size_t branches() const { return m_nodes.size(); }
     std::size_t loading() const;
+    // True while any expanded branch is still queued to start or loading its listing.
+    bool busy() const;
 
   private:
     struct Node;

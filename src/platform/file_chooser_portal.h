@@ -71,14 +71,17 @@ namespace luciole {
     void cancel();                                  // response 1
     void fail();                                    // response 2, empty results
     bool finished() const;
-    // Runs after a Close from the original sender has answered the call with 2.
+    // Delays all results until modal cleanup is acknowledged. The continuation owns the reply independently
+    // of this call; invoke it exactly once, with false when cleanup cannot complete. Empty means no barrier.
+    void setReplyBarrier(std::function<void(std::function<void(bool)>)> barrier);
+    // Runs after a Close from the original sender has queued response 2 through the reply barrier.
     void setCloseCallback(std::function<void()> callback);
 
   private:
     friend class FileChooserService;
     FileChooserCall(GDBusMethodInvocation* invocation, GDBusConnection* connection, std::string sender);
     bool exportRequest(const std::string& handle, GDBusNodeInfo* node);
-    void finish(unsigned response, GVariant* results);
+    void finish(unsigned response, GVariant* results, GDBusMethodInvocation* close = nullptr);
     static void closeCall(
         GDBusConnection* connection, const char* sender, const char* path, const char* interface, const char* method,
         GVariant* parameters, GDBusMethodInvocation* invocation, void* data
@@ -89,6 +92,7 @@ namespace luciole {
     std::string m_sender;
     unsigned m_registration = 0;
     std::function<void()> m_closeCallback;
+    std::function<void(std::function<void(bool)>)> m_replyBarrier;
   };
 
   // Owns org.freedesktop.impl.portal.desktop.luciole for one bus-activated chooser process.

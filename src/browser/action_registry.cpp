@@ -94,8 +94,15 @@ namespace {
     if (!c.clipboardAvailable || (!c.clipboardHasFiles && !c.clipboardHasImage)) {
       return unavailable("The clipboard has no files or image to paste.");
     }
-    if (!r.folder || !transferLocationSupported(*r.folder) || !c.query.empty() || !ready(c)) {
+    if (r.folder && r.folder->isDeviceRoot() && r.folder->uri().starts_with("mtp:")) {
+      return unavailable("Open a storage on the phone first.");
+    }
+    if (!r.folder || !transferDestinationSupported(*r.folder) || !c.query.empty() || !ready(c)) {
       return unavailable("Open an available local or supported remote folder first.");
+    }
+    // A pasted image is saved through local files only.
+    if (transferDeviceDestination(*r.folder) && !c.clipboardHasFiles) {
+      return unavailable("Images can only be pasted into folders on this computer.");
     }
     if (c.model.snapshot().metadata.access.write == false || c.model.snapshot().metadata.filesystem.readOnly == true) {
       return unavailable("Writing to this folder is not permitted.");

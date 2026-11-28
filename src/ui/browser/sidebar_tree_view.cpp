@@ -30,18 +30,23 @@ namespace {
     }
     void bind(
         const luciole::TreeRowInfo& info, const std::string& text, const std::string& glyph, bool selected,
-        bool hovered, float width
+        bool hovered, bool keyboardFocused, float width
     ) {
       const float prefix = std::min(static_cast<float>(info.depth) * 14.0F, std::max(0.0F, width - 110.0F)) + 18.0F;
       m_prefix->setMinWidth(prefix);
       m_prefix->setMaxWidth(prefix);
       m_arrow->setVisible(info.expandable);
       m_arrow->setGlyph(info.expanded ? "chevron-down" : Style::rtl() ? "chevron-left" : "chevron-right");
-      m_arrow->setColor(colorSpecFromRole(selected ? ColorRole::OnPrimary : ColorRole::OnSurfaceVariant));
+      const auto foreground = selected ? ColorRole::OnPrimary
+          : keyboardFocused            ? ColorRole::OnSecondary
+          : hovered                    ? ColorRole::OnHover
+                                       : ColorRole::OnSurfaceVariant;
+      m_arrow->setColor(colorSpecFromRole(foreground));
       setGlyph(glyph);
       setText(info.status.empty() ? text : text + " · " + info.status);
       setSelected(selected);
       setHoveredVisual(hovered);
+      setKeyboardFocusHint(keyboardFocused);
     }
 
   private:
@@ -59,12 +64,12 @@ public:
     const auto id = m_owner.m_model.rows()[index];
     const auto* entry = m_owner.m_model.entry(id);
     const auto glyph = m_owner.m_glyphs.find(id);
+    const bool keyboardFocused = m_owner.m_grid->focusArea()->focused() && m_owner.m_model.selection().focused == id;
     auto& button = static_cast<TreeButton&>(tile);
     button.bind(
         m_owner.m_tree.row(id), entry->displayName(), glyph == m_owner.m_glyphs.end() ? "folder" : glyph->second,
-        m_owner.m_current == entry->navigationLocation(), hovered, m_owner.width()
+        m_owner.m_current == entry->navigationLocation(), hovered, keyboardFocused, m_owner.width()
     );
-    button.setKeyboardFocusHint(m_owner.m_grid->focusArea()->focused() && m_owner.m_model.selection().focused == id);
   }
   std::string itemTooltip(std::size_t index) const override {
     const auto id = m_owner.m_model.rows()[index];

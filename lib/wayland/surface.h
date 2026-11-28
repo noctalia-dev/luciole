@@ -196,6 +196,7 @@ private:
   bool ensureRenderTargetReady();
   bool holdFirstFrameForPendingContent();
   void resizeRenderTarget();
+  std::uint32_t effectiveScaleNumerator() const noexcept;
 
   RenderContext* m_renderContext = nullptr;
   RenderTarget m_renderTarget;

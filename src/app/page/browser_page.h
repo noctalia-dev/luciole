@@ -155,6 +155,8 @@ public:
   void focusChanged(InputArea* focused);
   void windowFocusChanged(bool entered);
   bool completeLocationOnTab(std::uint32_t modifiers);
+  bool inlineRenameTab(bool reverse);
+  void commitInlineRename();
   bool sidebarKey(const KeyboardEvent& event);
   bool sidebarOverlays(float x, float y) const;
   void prepareSidebar(float width);
@@ -227,6 +229,7 @@ private:
   // Resizes, positions and arranges the dialog frame on its surface for the current window.
   void layoutDialogFrame();
   luciole::ActionContext actionContext() const;
+  luciole::ActionContext actionContextExcluding(const OperationJob* ignoreJob) const;
   luciole::ActionRequest actionRequest(bool withTargets) const override;
   luciole::ActionRequest requestFor(const std::vector<luciole::DirectoryEntry>& entries) const override;
   luciole::ActionState actionState(Action action, const luciole::ActionRequest& request) const override;
@@ -279,6 +282,15 @@ private:
   float rowIconSize() const override;
   void captureViewAnchor() override;
   void resetFileView() override;
+  void setRenamingEntry(std::optional<luciole::EntryId> entry, bool cancelGesture = false) override;
+  std::optional<LayoutRect> entryNameRect(luciole::EntryId id, float singleLineHeight) const override;
+  void ensureNameColumnVisible() override;
+  bool canInlineRenameInCurrentFolder(const OperationJob* ignoreJob) const override;
+  bool canInlineRename(const luciole::DirectoryEntry& entry, const OperationJob* ignoreJob) const override;
+  void refreshAfterRename(
+      const luciole::Location& source, std::optional<luciole::Location> revealDestination = std::nullopt
+  ) override;
+  void notifyTextInputChanged(TextInputClient& client) override;
 
   void operationProgressTick();
 
@@ -409,6 +421,8 @@ private:
   luciole::DriveMonitor& m_drives;
   luciole::FileLauncher m_launcher;
   std::vector<luciole::Location> m_revealTargets;
+  std::optional<std::uint64_t> m_revealScannedGeneration;
+  std::vector<std::uint32_t> m_swallowedInlineButtons;
   bool m_revealProperties = false;
   float m_pointerX = 0;
   float m_pointerY = 0;

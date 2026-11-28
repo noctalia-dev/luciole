@@ -233,6 +233,11 @@ const luciole::DirectoryEntry* luciole::DirectoryModel::entry(EntryId id) const 
   return &m_snapshot.entries[*source];
 }
 
+const luciole::DirectoryEntry* luciole::DirectoryModel::knownEntry(EntryId id) const {
+  const auto source = sourceOf(id);
+  return source ? m_snapshot.entries.known(*source) : nullptr;
+}
+
 void luciole::DirectoryModel::setMetadataRequestedCallback(
     std::function<void(std::size_t, EntryId, std::uint8_t)> callback
 ) {
@@ -276,7 +281,9 @@ std::string_view luciole::DirectoryModel::typeLabel(EntryId id) const {
   return *m_presentations[*source].typeLabel;
 }
 
-bool luciole::DirectoryModel::less(const SortItem& leftItem, const SortItem& rightItem) const {
+bool luciole::DirectoryModel::less(
+    const SortItem& leftItem, const SortItem& rightItem, std::vector<std::string>& tieUris
+) const {
   const auto left = leftItem.id;
   const auto right = rightItem.id;
   const auto& leftPresentation = *leftItem.presentation;
@@ -309,8 +316,15 @@ bool luciole::DirectoryModel::less(const SortItem& leftItem, const SortItem& rig
   }
   int comparison = std::strcmp(keyText(leftPresentation.sortKey), keyText(rightPresentation.sortKey));
   if (comparison == 0) {
-    comparison =
-        m_snapshot.entries.location(leftItem.source).uri().compare(m_snapshot.entries.location(rightItem.source).uri());
+    // Equal names are common in search results; resolve each location at most once per sort.
+    const auto uri = [&](std::uint32_t source) -> const std::string& {
+      auto& cached = tieUris[source];
+      if (cached.empty()) {
+        cached = m_snapshot.entries.location(source).uri();
+      }
+      return cached;
+    };
+    comparison = uri(leftItem.source).compare(uri(rightItem.source));
   }
   if (comparison == 0) {
     return left < right;
@@ -415,7 +429,10 @@ void luciole::DirectoryModel::rebuildProjection(bool resort) {
            entry.hidden, &m_presentations[source], m_snapshot.entries.known(source)}
       );
     }
-    std::ranges::sort(items, [this](const SortItem& left, const SortItem& right) { return less(left, right); });
+    std::vector<std::string> tieUris(m_snapshot.entries.size());
+    std::ranges::sort(items, [this, &tieUris](const SortItem& left, const SortItem& right) {
+      return less(left, right, tieUris);
+    });
     m_sortedSources.clear();
     m_sortedSources.reserve(items.size());
     m_rows.reserve(items.size());

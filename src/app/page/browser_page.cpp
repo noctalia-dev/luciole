@@ -218,6 +218,9 @@ void BrowserPage::focusMiller(std::size_t index, bool reveal) {
   if (!m_millerView || index >= m_miller.columns().size()) {
     return;
   }
+  if (index != m_miller.focused()) {
+    m_renameController.commitOrCancelInline();
+  }
   const bool changed = m_miller.focus(index);
   if (auto* view = m_millerView->focusedView()) {
     m_list = view;
@@ -249,6 +252,7 @@ BrowserPage::~BrowserPage() {
   m_launcher.setChangedCallback({});
   m_preview.setChangedCallback({});
   m_preview.clear();
+  m_renameController.cancelFileRename(false);
   closePopup();
   m_archiveController.close();
   unmount();
@@ -280,6 +284,7 @@ bool BrowserPage::initialize(const std::optional<std::string>& initialLocation) 
 
 void BrowserPage::revealItems(std::vector<luciole::Location> items, bool properties) {
   m_revealTargets = std::move(items);
+  m_revealScannedGeneration.reset();
   m_revealProperties = properties;
   focusFileList();
 }
@@ -378,6 +383,7 @@ void BrowserPage::leaveDrive(const luciole::Location& root) {
   };
   if (affected(m_browser)
       || std::ranges::any_of(m_miller.columns(), [&](const auto& column) { return affected(*column->browser); })) {
+    m_renameController.cancelFileRename(false);
     m_preview.clear();
     m_retiringPreview = root;
     m_previewController.hidePane();
@@ -483,7 +489,12 @@ const std::vector<luciole::Bookmark>* BrowserPage::draggedFolders() const { retu
 luciole::FileDropTarget BrowserPage::externalDrop(float x, float y, const std::vector<luciole::Bookmark>* pins) {
   m_dragDrop.clearExternalDrop();
   // A file picker returns files to its caller; it never receives transfers.
-  if (!m_visible || choosing() || overlay() || popup() || actionContext().operationsBusy) {
+  if (!m_visible
+      || choosing()
+      || overlay()
+      || popup()
+      || m_renameController.editingFile()
+      || actionContext().operationsBusy) {
     return {};
   }
   m_pointerX = x;
@@ -518,11 +529,16 @@ bool BrowserPage::owns(const Node* node) const {
 void BrowserPage::focusChanged(InputArea* focused) {
   if (m_list != nullptr && focused != m_list->focusArea()) {
     m_fileKeys.clearTypeahead();
+    if (!m_renameController.editingFile()) {
+      m_renameController.cancelPendingResume();
+    }
   }
   m_detailsHeader.focusChanged(focused);
 }
 
 bool BrowserPage::completeLocationOnTab(std::uint32_t modifiers) { return m_locationBar.completeOnTab(modifiers); }
+bool BrowserPage::inlineRenameTab(bool reverse) { return m_renameController.tabKey(reverse); }
+void BrowserPage::commitInlineRename() { m_renameController.commitOrCancelInline(); }
 bool BrowserPage::sidebarKey(const KeyboardEvent& event) { return m_sidebar.key(event); }
 bool BrowserPage::sidebarOverlays(float x, float y) const { return !overlay() && m_sidebar.drawerContains(x, y); }
 void BrowserPage::prepareSidebar(float width) {
@@ -721,6 +737,8 @@ void BrowserPage::prepare(LayoutRect bounds, bool active, bool roundCorner) {
 }
 
 void BrowserPage::deactivate() {
+  m_swallowedInlineButtons.clear();
+  m_renameController.commitOrCancelInline();
   m_sidebar.dismissDrawer();
   m_dragDrop.clearExternalDrop();
   m_previewController.hidePane();
@@ -876,6 +894,26 @@ void BrowserPage::pointer(const PointerEvent& event) {
     );
   }
   const bool page = input == &dispatcher();
+  if (page && event.type == PointerEvent::Type::Button) {
+    if (event.pressed) {
+      if (m_renameController.editingFile()) {
+        if (m_renameController.inlineContains(x, y)) {
+          if (event.button != BTN_LEFT || m_renameController.submittingFile()) {
+            if (!std::ranges::contains(m_swallowedInlineButtons, event.button)) {
+              m_swallowedInlineButtons.push_back(event.button);
+            }
+            return;
+          }
+        } else {
+          m_renameController.commitOrCancelInline();
+        }
+      } else {
+        m_renameController.cancelPendingResume();
+      }
+    } else if (std::erase(m_swallowedInlineButtons, event.button) > 0) {
+      return;
+    }
+  }
   if (page && sidebarOverlays(x, y) && !m_dragDrop.dragging()) {
     if (event.type == PointerEvent::Type::Button && event.pressed && event.button == BTN_MIDDLE && m_workspaceRequest) {
       (void)openInNewTab(x, y);
@@ -970,7 +1008,7 @@ void BrowserPage::pointer(const PointerEvent& event) {
 }
 
 std::optional<luciole::FileTooltipTarget> BrowserPage::fileTooltipAt(float x, float y) const {
-  if (!m_visible || overlay() || m_sidebar.drawerContains(x, y)) {
+  if (!m_visible || overlay() || m_renameController.editingFile() || m_sidebar.drawerContains(x, y)) {
     return std::nullopt;
   }
   const luciole::BrowserController* controller = &browser();
@@ -1079,7 +1117,10 @@ void BrowserPage::pointerOverlay(InputDispatcher& input, const PointerEvent& eve
 }
 
 bool BrowserPage::millerPointer(const PointerEvent& event, float x, float y) {
-  if (m_miller.enabled() && event.type == PointerEvent::Type::Button && event.pressed) {
+  if (m_miller.enabled()
+      && event.type == PointerEvent::Type::Button
+      && event.pressed
+      && !m_renameController.inlineContains(x, y)) {
     if (const auto column = m_millerView->columnAt(x, y)) {
       focusMiller(*column, false);
       m_miller.interact(*column);
@@ -1219,10 +1260,14 @@ void BrowserPage::keyboard(const KeyboardEvent& event) {
     m_chooser.open({});
     return;
   }
+  if (event.pressed && event.preedit) {
+    m_renameController.notePreeditKey();
+  }
   if (event.pressed && !event.preedit && shortcutKey(event)) {
     return;
   }
   if (m_fileKeys.typeKey(event)) {
+    m_renameController.cancelPendingResume();
     return;
   }
   dispatcher().keyEvent(event.sym, event.utf32, event.modifiers, event.pressed, event.preedit);
@@ -1254,7 +1299,10 @@ bool BrowserPage::dispatchShortcut(const KeyboardEvent& event, std::initializer_
 }
 
 bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
-  const bool editing = m_locationBar.textFocused();
+  if (m_renameController.key(event)) {
+    return true;
+  }
+  const bool editing = m_locationBar.textFocused() || m_renameController.editingFile();
   if (!editing && luciole::keybindMatches(luciole::KeybindCommand::AdministratorAccess, event.sym, event.modifiers)) {
     if (!event.repeat && !choosing()) {
       const auto request = actionRequest(true);
@@ -1321,6 +1369,7 @@ bool BrowserPage::shortcutKey(const KeyboardEvent& event) {
   if (m_list != nullptr
       && dispatcher().focusedArea() == m_list->focusArea()
       && (millerKey(event) || m_fileKeys.listKey(event))) {
+    m_renameController.cancelPendingResume();
     m_fileKeys.setKeyboardFocus(true);
     m_browserDirty = true;
     m_surface->requestUpdate();
@@ -1433,6 +1482,18 @@ luciole::ActionContext BrowserPage::actionContext() const {
   };
 }
 
+luciole::ActionContext BrowserPage::actionContextExcluding(const OperationJob* ignoreJob) const {
+  auto context = actionContext();
+  if (ignoreJob != nullptr) {
+    context.operationsBusy = m_hub.historyReplayBusy()
+        || m_transferController.pastePending()
+        || m_transferController.extractionPending()
+        || m_jobs.newest([ignoreJob](const OperationJob& job) { return &job != ignoreJob && job.pending(); })
+            != nullptr;
+  }
+  return context;
+}
+
 luciole::ActionRequest BrowserPage::actionRequest(bool withTargets) const {
   if (withTargets) {
     return luciole::ActionRegistry::capture(actionContext());
@@ -1468,9 +1529,24 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
     }
     const std::weak_ptr<int> lifetime = m_lifetime;
     if (browser().whenMetadataReady(std::move(ids), [this, lifetime, action, request] {
-          if (!lifetime.expired()) {
-            dispatchAction(action, request);
+          if (lifetime.expired()) {
+            return;
           }
+          if (action == Action::Rename && request.targets.size() == 1) {
+            const auto& selected = browser().model().selection().selected;
+            const auto* focused = dispatcher().focusedArea();
+            if (!active()
+                || overlay()
+                || popupSurface() != nullptr
+                || selected.size() != 1
+                || !selected.contains(request.targets.front().id)
+                || m_locationBar.textFocused()
+                || (m_list != nullptr && focused != nullptr && focused != m_list->focusArea())) {
+              m_statusBar.clearMessage();
+              return;
+            }
+          }
+          dispatchAction(action, request);
         })) {
       m_statusBar.setMessage("Reading item metadata…");
       return;
@@ -1487,6 +1563,9 @@ void BrowserPage::dispatchAction(Action action, const luciole::ActionRequest& re
   }
   m_statusBar.clearMessage();
   m_fileKeys.clearTypeahead();
+  if (!m_renameController.editingFile()) {
+    m_renameController.cancelPendingResume();
+  }
   const bool selectionAction = luciole::ActionRegistry::definition(action).scope == luciole::ActionScope::Selection;
   if (selectionAction) {
     if (m_miller.enabled()) {
@@ -1854,7 +1933,10 @@ void BrowserPage::actionError(std::string message) {
 
 void BrowserPage::setActionMessage(std::string message) { m_statusBar.setMessage(std::move(message)); }
 
-void BrowserPage::revealOnReload(std::vector<luciole::Location> targets) { m_revealTargets = std::move(targets); }
+void BrowserPage::revealOnReload(std::vector<luciole::Location> targets) {
+  m_revealTargets = std::move(targets);
+  m_revealScannedGeneration.reset();
+}
 
 void BrowserPage::leaveFolder() {
   if (m_miller.enabled() && m_miller.focused() > 0) {
@@ -1896,6 +1978,93 @@ void BrowserPage::resetFileView() {
   m_gridAdapter.onPointerCancel();
   m_viewAnchor.reset();
   m_list->scrollView().requestScrollToOffset(0);
+}
+
+void BrowserPage::setRenamingEntry(std::optional<luciole::EntryId> entry, bool cancelGesture) {
+  if (entry && cancelGesture) {
+    dispatcher().cancelPointerCapture();
+    if (m_list != nullptr) {
+      m_list->cancelPointerGesture();
+    }
+    m_listAdapter.onPointerCancel();
+    m_gridAdapter.onPointerCancel();
+  }
+  if (m_miller.enabled()) {
+    m_listAdapter.setRenamingEntry(std::nullopt);
+    m_gridAdapter.setRenamingEntry(std::nullopt);
+    if (m_millerView != nullptr) {
+      m_millerView->setRenamingEntry(entry);
+    }
+  } else {
+    if (m_millerView != nullptr) {
+      m_millerView->setRenamingEntry(std::nullopt);
+    }
+    m_listAdapter.setRenamingEntry(entry);
+    m_gridAdapter.setRenamingEntry(entry);
+  }
+}
+
+std::optional<LayoutRect> BrowserPage::entryNameRect(luciole::EntryId id, float singleLineHeight) const {
+  if (m_miller.enabled()) {
+    return m_millerView != nullptr ? m_millerView->entryNameRect(id, singleLineHeight) : std::nullopt;
+  }
+  if (m_viewMode == luciole::ViewMode::Grid) {
+    return m_gridAdapter.entryNameRect(id, singleLineHeight);
+  }
+  return m_listAdapter.entryNameRect(id, singleLineHeight);
+}
+
+void BrowserPage::ensureNameColumnVisible() {
+  if (!m_miller.enabled()) {
+    m_detailsHeader.revealNameColumn();
+  }
+}
+
+bool BrowserPage::canInlineRenameInCurrentFolder(const OperationJob* ignoreJob) const {
+  if (choosing()) {
+    return false;
+  }
+  const auto context = actionContextExcluding(ignoreJob);
+  const auto& model = browser().model();
+  return !context.operationsBusy && model.selectionAvailable() && model.snapshot().metadata.filesystem.readOnly != true;
+}
+
+bool BrowserPage::canInlineRename(const luciole::DirectoryEntry& entry, const OperationJob* ignoreJob) const {
+  return luciole::ActionRegistry::state(Action::Rename, actionContextExcluding(ignoreJob), requestFor({entry})).enabled;
+}
+
+void BrowserPage::refreshAfterRename(
+    const luciole::Location& source, std::optional<luciole::Location> revealDestination
+) {
+  const auto parent = source.parent();
+  const auto matches = [&](const luciole::BrowserController& controller, bool allowTreeDescendants) {
+    const auto& current = controller.model().snapshot().location;
+    if (!current) {
+      return false;
+    }
+    if (parent && *parent == *current) {
+      return true;
+    }
+    const bool descendants =
+        !controller.searchQuery().empty() || (allowTreeDescendants && controller.expandableFolders());
+    return descendants && source.isInside(*current);
+  };
+  if (revealDestination && matches(browser(), !m_miller.enabled())) {
+    revealOnReload({std::move(*revealDestination)});
+  }
+  if (m_miller.enabled()) {
+    for (const auto& column : m_miller.columns()) {
+      if (matches(*column->browser, false)) {
+        column->browser->refresh();
+      }
+    }
+  } else if (matches(m_browser, true)) {
+    m_browser.refresh();
+  }
+}
+
+void BrowserPage::notifyTextInputChanged(TextInputClient& client) {
+  m_textInput.notifyClientStateChanged(&client, TextInputChangeCause::Other);
 }
 
 bool BrowserPage::targetsCurrent(const std::vector<luciole::DirectoryEntry>& targets) {
@@ -2132,6 +2301,7 @@ void BrowserPage::showViewMode(luciole::ViewMode mode) {
   if (mode == m_viewMode) {
     return;
   }
+  m_renameController.commitOrCancelInline();
   m_viewAnchor.reset();
   if (m_list != nullptr) {
     captureViewAnchor();
@@ -2145,6 +2315,7 @@ void BrowserPage::setViewMode(luciole::ViewMode mode) {
   if (mode == m_viewMode) {
     return;
   }
+  m_renameController.commitOrCancelInline();
   // Taking focus from a text field would end its edit and drop the path being typed.
   if (m_list != nullptr && !m_locationBar.textFocused()) {
     dispatcher().setFocus(m_list->focusArea());
@@ -2353,9 +2524,11 @@ void BrowserPage::syncBrowser() {
   const auto& model = browser().model();
   const auto& snapshot = model.snapshot();
   if (m_locationBar.syncLocation(snapshot.location)) {
+    m_renameController.cancelFileRename(false);
     m_siblingCompletion.cancel();
     resetFileView();
   }
+  m_renameController.syncInlineTarget();
   if (auto restored = browser().takeRestoredViewport()) {
     m_pendingHistoryViewport = restored;
     m_viewAnchor.reset();
@@ -2436,6 +2609,7 @@ void BrowserPage::syncBrowser() {
   }
   m_list->setSelectedIndex(focus, false);
   m_list->notifyDataChanged();
+  m_renameController.applyPendingReveal();
   if (const auto reveal = m_fileKeys.takeReveal(); reveal && model.selection().focused == reveal) {
     const auto found = std::ranges::find(model.rows(), *reveal);
     if (found != model.rows().end()) {
@@ -2449,26 +2623,38 @@ void BrowserPage::syncBrowser() {
 void BrowserPage::revealPendingTargets() {
   const auto& model = browser().model();
   const auto& snapshot = model.snapshot();
-  if (!m_revealTargets.empty() && snapshot.status != luciole::DirectoryStatus::Loading) {
-    const auto targets = std::exchange(m_revealTargets, {});
-    const bool properties = std::exchange(m_revealProperties, false);
-    std::vector<luciole::EntryId> ids;
-    for (const auto id : model.rows()) {
-      if (const auto* entry = model.entry(id); entry && std::ranges::contains(targets, entry->location())) {
-        ids.push_back(id);
-      }
+  if (m_revealTargets.empty() || snapshot.status == luciole::DirectoryStatus::Loading) {
+    return;
+  }
+  const bool treeLoading = browser().treeLoading();
+  if (treeLoading && m_revealScannedGeneration == snapshot.generation) {
+    return;
+  }
+  m_revealScannedGeneration = snapshot.generation;
+  std::vector<luciole::EntryId> ids;
+  for (const auto id : model.rows()) {
+    if (const auto location = model.location(id); location && std::ranges::contains(m_revealTargets, *location)) {
+      ids.push_back(id);
     }
-    if (!ids.empty() && browser().model().replaceSelection(ids)) {
-      const auto found = std::ranges::find(model.rows(), ids.front());
+  }
+  if (ids.size() < m_revealTargets.size() && treeLoading) {
+    return;
+  }
+  m_revealTargets.clear();
+  m_revealScannedGeneration.reset();
+  const bool properties = std::exchange(m_revealProperties, false);
+  if (!ids.empty() && browser().model().replaceSelection(ids)) {
+    const auto found = std::ranges::find(model.rows(), ids.front());
+    if (found != model.rows().end()) {
       m_list->scrollToIndex(static_cast<std::size_t>(found - model.rows().begin()));
-      if (properties) {
-        const std::weak_ptr<int> lifetime = m_lifetime;
-        DeferredCall::callLater([this, lifetime] {
-          if (!lifetime.expired()) {
-            dispatchAction(Action::Properties);
-          }
-        });
-      }
+    }
+    if (properties) {
+      const std::weak_ptr<int> lifetime = m_lifetime;
+      DeferredCall::callLater([this, lifetime] {
+        if (!lifetime.expired()) {
+          dispatchAction(Action::Properties);
+        }
+      });
     }
   }
 }
@@ -2501,16 +2687,19 @@ void BrowserPage::prepareFrame(bool, bool layout) {
     buildScene();
   }
   if (std::exchange(m_restartMiller, false) && m_miller.enabled()) {
+    m_renameController.commitOrCancelInline();
     m_browser.duplicateFrom(m_miller.active());
     m_miller.clear();
     m_list = m_regularList;
   }
   if (m_viewMode == luciole::ViewMode::Miller && !m_miller.enabled()) {
+    m_renameController.commitOrCancelInline();
     m_miller.start(m_browser, m_savedSettings.millerShowParents);
     if (m_miller.enabled()) {
       m_browser.stop();
     }
   } else if (m_viewMode != luciole::ViewMode::Miller && m_miller.enabled()) {
+    m_renameController.commitOrCancelInline();
     m_browser.duplicateFrom(m_miller.active());
     m_browser.setDefaultViewMode(m_viewMode);
     m_miller.clear();
@@ -2664,8 +2853,14 @@ void BrowserPage::layoutFrame(Renderer& renderer) {
   m_sidebar.layoutResizeLine(renderer);
   m_dragDrop.layout(renderer);
   m_locationBar.layoutCompletions(renderer);
+  m_renameController.layoutInline(renderer);
+  if (auto* client = m_renameController.focusedTextInputClient()) {
+    m_textInput.notifyClientStateChanged(client, TextInputChangeCause::Other);
+  }
   m_thumbnails.endFrame();
-  m_sidebar.restoreFocus(m_popupSurface != nullptr || m_archiveController.open() || !m_active);
+  m_sidebar.restoreFocus(
+      m_popupSurface != nullptr || m_archiveController.open() || m_renameController.editingFile() || !m_active
+  );
   m_fileKeys.notifyStateChanged();
   if (placesLate) {
     m_surface->requestUpdate();
@@ -3028,6 +3223,7 @@ std::unique_ptr<Flex> BrowserPage::buildFilePane() {
   miller->requestUpdate = [this] { m_surface->requestUpdate(); };
   content->addChild(std::move(miller));
   content->addChild(m_detailsHeader.buildScrollbar());
+  m_renameController.buildInlineEditor(*content);
   return content;
 }
 
@@ -3095,6 +3291,7 @@ InputDispatcher& BrowserPage::dispatcher() { return *m_dispatcher; }
 bool BrowserPage::popupAvailable() { return !m_popupAvailable || m_popupAvailable(); }
 
 void BrowserPage::prepareOverlay() {
+  m_renameController.cancelFileRename(false);
   m_sidebar.dismissDrawer();
   closePopup();
   cancelDrag();
@@ -3300,6 +3497,7 @@ void BrowserPage::openPopup(
     std::unique_ptr<Flex> scene, Flex* content, ContextMenuControl* menu, PopupSurfaceConfig config,
     PopupDismiss dismiss
 ) {
+  m_renameController.commitOrCancelInline();
   m_fileKeys.clearTypeahead();
   m_locationBar.clearCompletions();
   dispatcher().setTextInputContext(nullptr, nullptr);

@@ -2,8 +2,6 @@
 
 #include "fs/name_matching.h"
 
-#include <algorithm>
-
 std::optional<std::string> luciole::selectionPatternProblem(const std::string& pattern) {
   if (pattern.empty()) {
     return "Enter a pattern.";

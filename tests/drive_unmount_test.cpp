@@ -476,7 +476,7 @@ int main() {
     const std::string fstabKey = "mount:" + fstabUri;
     const std::string trickyKey = "mount:" + trickyUri;
     const std::string remoteKey = "mount:smb://nas.local/share/";
-    const std::string blockKey = "volume:uuid-block";
+    const std::string blockKey = "volume:/dev/sda2";
 
     // 1. Single-mountpoint UDisks2 filesystem (e.g. btrfs with subvol=/@) escalates through UDisks2 D-Bus.
     nextUnmountReply = {

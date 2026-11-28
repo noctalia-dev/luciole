@@ -528,6 +528,11 @@ namespace {
     store.write(make(second, "source-two"), 128, budget, cancel.get());
     const auto two = store.root() / "normal" / luciole::ThumbnailStore::filename(second);
     TEST_CHECK(!fs::exists(one) && fs::exists(two) && fs::file_size(two) <= budget);
+    // Same budget again: the size estimate must still trigger a rescan and prune when the write would exceed it.
+    const auto third = luciole::Location::fromPath("/tmp/cache-three.png").uri();
+    store.write(make(third, "source-three"), 128, budget, cancel.get());
+    const auto three = store.root() / "normal" / luciole::ThumbnailStore::filename(third);
+    TEST_CHECK(!fs::exists(two) && fs::exists(three));
     TEST_CHECK(store.clear().empty());
   }
   void command(const std::vector<std::string>& args) {
@@ -594,6 +599,11 @@ namespace {
         {"ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=192x96:d=0.12", "-c:v", "mjpeg",
          "-threads", "1", intraVideo.native()}
     );
+    const auto largeCover = fixture.root / "large-cover.png";
+    command(
+        {"ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=lime:s=64x32", "-frames:v", "1",
+         largeCover.native()}
+    );
     const auto coveredVideo = fixture.root / "covered.mp4";
     command(
         {"ffmpeg",
@@ -603,22 +613,55 @@ namespace {
          "-i",
          pngPath.native(),
          "-i",
+         largeCover.native(),
+         "-i",
          longGop.native(),
          "-map",
          "0:v",
          "-map",
          "1:v",
+         "-map",
+         "2:v",
          "-c:v:0",
          "png",
          "-disposition:v:0",
          "attached_pic",
          "-c:v:1",
-         "copy",
+         "png",
          "-disposition:v:1",
+         "attached_pic",
+         "-c:v:2",
+         "copy",
+         "-disposition:v:2",
          "default",
          "-threads",
          "1",
          coveredVideo.native()}
+    );
+    // mkvmerge-style attachments: the conventional small_cover name outranks a larger unnamed picture.
+    const auto namedCoverVideo = fixture.root / "covered.mkv";
+    command(
+        {"ffmpeg",
+         "-nostdin",
+         "-v",
+         "error",
+         "-i",
+         longGop.native(),
+         "-attach",
+         largeCover.native(),
+         "-metadata:s:t:0",
+         "mimetype=image/png",
+         "-metadata:s:t:0",
+         "filename=poster.png",
+         "-attach",
+         pngPath.native(),
+         "-metadata:s:t:1",
+         "mimetype=image/png",
+         "-metadata:s:t:1",
+         "filename=small_cover.png",
+         "-c",
+         "copy",
+         namedCoverVideo.native()}
     );
     const auto audio = fixture.root / "artwork.mp3";
     command(
@@ -768,7 +811,10 @@ namespace {
     still = render(intraVideo, "video/x-msvideo");
     TEST_CHECK(still && still->width == 128 && still->height == 64 && still->rgba[2] > 220);
     still = render(coveredVideo, "video/mp4");
-    TEST_CHECK(still && still->width == 128 && still->height == 64 && still->rgba[2] > 220 && still->rgba[0] < 30);
+    // Unnamed covers: the largest wins over the first one and over the blue video frame.
+    TEST_CHECK(still && still->width == 128 && still->height == 64 && still->rgba[1] > 200 && still->rgba[0] < 60);
+    still = render(namedCoverVideo, "video/x-matroska");
+    TEST_CHECK(still && still->width == 128 && still->height == 64 && still->rgba[0] > 200 && still->rgba[1] < 100);
     still = render(document, "application/pdf");
     TEST_CHECK(still && still->width == 128 && still->height == 64 && still->rgba.front() > 220);
     still = render(audio, "audio/mpeg");

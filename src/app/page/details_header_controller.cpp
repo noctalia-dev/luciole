@@ -632,6 +632,16 @@ void DetailsHeaderController::sortBy(luciole::SortField field) {
   }
 }
 
+void DetailsHeaderController::revealNameColumn() {
+  if (m_page.viewMode() != luciole::ViewMode::List) {
+    return;
+  }
+  const float target = Style::rtl() ? std::max(0.0F, m_detailsColumns.contentWidth - m_viewport) : 0.0F;
+  if (m_detailsOffset != target) {
+    scrollDetails(target);
+  }
+}
+
 void DetailsHeaderController::cancelGesture() {
   if (m_columnDrag || m_columnResize) {
     m_page.dispatcher().cancelPointerCapture();

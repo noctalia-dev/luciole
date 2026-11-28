@@ -64,7 +64,11 @@ namespace luciole {
     const DirectorySnapshot& snapshot() const { return m_snapshot; }
     const std::vector<EntryId>& rows() const { return m_rows; }
     const DirectoryEntry* entry(EntryId id) const;
+    // Returns the entry only if its facts are already loaded, without requesting metadata.
+    const DirectoryEntry* knownEntry(EntryId id) const;
     std::optional<Location> location(EntryId id) const;
+    // The visible row of an ID, or nullopt when it is filtered out or absent.
+    std::optional<std::size_t> rowOf(EntryId id) const;
     bool visible(EntryId id) const { return rowOf(id).has_value(); }
     std::string_view typeLabel(EntryId id) const;
     const SortOptions& sort() const { return m_sort; }
@@ -111,8 +115,6 @@ namespace luciole {
     void notify() const;
     bool canSelect() const;
     std::optional<std::size_t> sourceOf(EntryId id) const;
-    // The visible row of an ID, or nullopt when it is filtered out or absent.
-    std::optional<std::size_t> rowOf(EntryId id) const;
     std::string_view filterText(std::size_t source) const;
     struct SortItem {
       EntryId id;
@@ -122,7 +124,7 @@ namespace luciole {
       const Presentation* presentation;
       const DirectoryEntry* entry;
     };
-    bool less(const SortItem& left, const SortItem& right) const;
+    bool less(const SortItem& left, const SortItem& right, std::vector<std::string>& tieUris) const;
 
     DirectorySnapshot m_snapshot;
     SortOptions m_sort;

@@ -170,6 +170,7 @@ void luciole::deleteProviderTree(const ProviderItem& root, const CancelToken& to
   root.requireCurrent(token);
   tree.push_back({ProviderItem(root.location(), token), std::nullopt});
   std::set<std::pair<std::string, std::string>> folders;
+  std::optional<std::string> rootFilesystem;
   for (std::size_t index = 0; index < tree.size(); ++index) {
     check(token);
     if (!tree[index].item.directory()) {
@@ -177,6 +178,11 @@ void luciole::deleteProviderTree(const ProviderItem& root, const CancelToken& to
     }
     tree[index].item.requireCurrent(token);
     const auto identity = *readFileIdentity(query(tree[index].item.location(), token, false).get());
+    // Refuse before deleting anything: a mounted filesystem inside the tree is never emptied.
+    if (identity.filesystem != rootFilesystem.value_or(identity.filesystem)) {
+      throwFileError(FileErrorKind::NotMounted, "Cannot permanently delete a folder containing a mount point.");
+    }
+    rootFilesystem = identity.filesystem;
     if (!folders.emplace(identity.filesystem, identity.file).second) {
       throwFileError(FileErrorKind::WouldRecurse, "The folder contains a filesystem cycle.");
     }

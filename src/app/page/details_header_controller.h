@@ -55,6 +55,8 @@ public:
   // Horizontal scroll offset of the details columns.
   float offset() const { return m_detailsOffset; }
   void setOffset(float offset) { m_detailsOffset = offset; }
+  // Scrolls horizontally so the Name column is visible (respecting LTR and RTL column placement).
+  void revealNameColumn();
   // True while a column is dragged or resized.
   bool gestureActive() const { return m_columnDrag || m_columnResize; }
   // Releases the pointer capture of a column drag or resize in progress.

@@ -62,6 +62,11 @@ std::size_t luciole::DirectoryTree::loading() const {
     return pair.second->started && pair.second->session.snapshot().status == DirectoryStatus::Loading;
   });
 }
+bool luciole::DirectoryTree::busy() const {
+  return std::ranges::any_of(m_nodes, [](const auto& pair) {
+    return !pair.second->started || pair.second->session.snapshot().status == DirectoryStatus::Loading;
+  });
+}
 luciole::TreeRowInfo luciole::DirectoryTree::row(EntryId id) const {
   TreeRowInfo result{.depth = m_model.treeDepth(id), .enabled = true, .status = {}};
   const auto* entry = m_model.entry(id);

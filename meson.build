@@ -348,6 +348,7 @@ platform_lib = static_library('luciole-platform',
   files(
     'src/platform/desktop_integration.cpp',
     'src/platform/file_chooser_portal.cpp',
+    'src/platform/modal_dialog.cpp',
     'src/platform/extraction_launcher.cpp',
     'src/platform/file_launcher.cpp',
     'src/platform/launch_activation.cpp',

@@ -59,11 +59,17 @@ namespace {
       .preferred_scale = preferredFractionalScale,
   };
 
-  std::uint32_t scaledExtent(std::uint32_t logical, float scale) noexcept {
+  constexpr std::uint32_t kFractionalScaleDenominator = 120U;
+
+  std::uint32_t scaledExtentForNumerator(std::uint32_t logical, std::uint32_t numerator) noexcept {
     if (logical == 0) {
       return 0;
     }
-    return std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::lround(static_cast<float>(logical) * scale)));
+    const auto safeNumerator = static_cast<std::uint64_t>(std::max(kFractionalScaleDenominator, numerator));
+    const std::uint64_t pixels =
+        (static_cast<std::uint64_t>(logical) * safeNumerator + (kFractionalScaleDenominator - 1U))
+        / kFractionalScaleDenominator;
+    return static_cast<std::uint32_t>(std::clamp<std::uint64_t>(pixels, 1U, std::numeric_limits<std::uint32_t>::max()));
   }
 
   std::vector<Surface*>& pendingRenderQueue() {
@@ -321,17 +327,21 @@ bool Surface::isRunning() const noexcept { return m_running; }
 
 void Surface::setDebugName(std::string name) { m_debugName = std::move(name); }
 
-float Surface::effectiveBufferScale() const noexcept {
+std::uint32_t Surface::effectiveScaleNumerator() const noexcept {
+  const auto integerNumerator = static_cast<std::uint32_t>(std::max(1, m_bufferScale)) * kFractionalScaleDenominator;
   if (m_fractionalScale != nullptr && m_viewport != nullptr) {
     if (m_preferredScaleNumerator > 0) {
-      return std::max(1.0F, static_cast<float>(m_preferredScaleNumerator) / 120.0F);
+      return std::max(kFractionalScaleDenominator, m_preferredScaleNumerator);
     }
     if (m_configuredScaleNumerator > 0) {
-      return std::max(1.0F, static_cast<float>(m_configuredScaleNumerator) / 120.0F);
+      return std::max(kFractionalScaleDenominator, m_configuredScaleNumerator);
     }
-    return static_cast<float>(std::max(1, m_bufferScale));
   }
-  return static_cast<float>(std::max(1, m_bufferScale));
+  return integerNumerator;
+}
+
+float Surface::effectiveBufferScale() const noexcept {
+  return static_cast<float>(effectiveScaleNumerator()) / static_cast<float>(kFractionalScaleDenominator);
 }
 
 void Surface::setConfiguredScaleNumerator(std::uint32_t numerator) noexcept {
@@ -360,11 +370,11 @@ void Surface::updateOutputScale(std::int32_t bufferScale, std::uint32_t configur
 }
 
 std::uint32_t Surface::bufferWidthFor(std::uint32_t logicalWidth) const noexcept {
-  return scaledExtent(logicalWidth, effectiveBufferScale());
+  return scaledExtentForNumerator(logicalWidth, effectiveScaleNumerator());
 }
 
 std::uint32_t Surface::bufferHeightFor(std::uint32_t logicalHeight) const noexcept {
-  return scaledExtent(logicalHeight, effectiveBufferScale());
+  return scaledExtentForNumerator(logicalHeight, effectiveScaleNumerator());
 }
 
 void Surface::handleFrameDone(void* data, wl_callback* callback, std::uint32_t callbackData) {
@@ -573,6 +583,24 @@ void Surface::applySurfaceScaleState() {
       if (m_width > kMaxViewportExtent || m_height > kMaxViewportExtent) {
         kLog.warn("skipping viewport destination with out-of-range size {}x{}", m_width, m_height);
       } else {
+        // Crop the ceiled buffer to the exact logical*scale extent so the compositor
+        // scales at a constant ratio across resizes instead of stretching the rounded buffer.
+        const auto bufferWidth = bufferWidthFor(m_width);
+        const auto bufferHeight = bufferHeightFor(m_height);
+        constexpr auto kMaxFixedExtent = static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max() >> 8);
+        if (bufferWidth <= kMaxFixedExtent && bufferHeight <= kMaxFixedExtent) {
+          const double exactScale =
+              static_cast<double>(effectiveScaleNumerator()) / static_cast<double>(kFractionalScaleDenominator);
+          const wl_fixed_t srcW = std::clamp(
+              wl_fixed_from_double(static_cast<double>(m_width) * exactScale), wl_fixed_from_int(1),
+              wl_fixed_from_int(static_cast<int>(bufferWidth))
+          );
+          const wl_fixed_t srcH = std::clamp(
+              wl_fixed_from_double(static_cast<double>(m_height) * exactScale), wl_fixed_from_int(1),
+              wl_fixed_from_int(static_cast<int>(bufferHeight))
+          );
+          wp_viewport_set_source(m_viewport, wl_fixed_from_int(0), wl_fixed_from_int(0), srcW, srcH);
+        }
         wp_viewport_set_destination(
             m_viewport, static_cast<std::int32_t>(m_width), static_cast<std::int32_t>(m_height)
         );

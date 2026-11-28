@@ -382,6 +382,48 @@ namespace {
     }
     erase(location, token);
   }
+  // Where an item is built before its final name appears. Providers stage in a private sibling folder and publish by
+  // moving out of it. Phones cannot all move between folders, so there the staged item and a replaced one are hidden
+  // siblings that publish by renaming in place, which every phone supports.
+  struct Staging {
+    Location item, previous;
+    std::optional<Location> folder;
+
+    static Staging create(const Location& parent, const CancelToken& token) {
+      const luciole::GString uuid(g_uuid_string_random());
+      const std::string id(uuid.get());
+      if (transferDeviceDestination(parent)) {
+        return {parent.child(".luciole-transfer-" + id), parent.child(".luciole-previous-" + id), std::nullopt};
+      }
+      auto folder = parent.child(".luciole-transfer-" + id);
+      mkdir(folder, token);
+      return {folder.child("item"), folder.child("previous"), std::move(folder)};
+    }
+    // Gives `from` the location `to` in the same folder.
+    void place(const Location& from, const Location& to, const CancelToken& token) const {
+      if (folder) {
+        rename(from, to, token);
+        return;
+      }
+      GError* error = nullptr;
+      const GioPtr<GFile> renamed(
+          g_file_set_display_name(gioFile(from).get(), to.basename()->c_str(), gioCancellable(token), &error)
+      );
+      if (!renamed) {
+        fail(error);
+      }
+    }
+    // Where leftover data can be inspected: the private folder, or the hidden sibling itself.
+    const Location& holder(const Location& part) const { return folder ? *folder : part; }
+    void discard() const {
+      if (folder) {
+        cleanup(*folder);
+        return;
+      }
+      cleanup(item);
+      cleanup(previous);
+    }
+  };
   struct Node {
     Location source, parent;
     TransferResult result;
@@ -998,7 +1040,8 @@ struct luciole::ProviderTransfer::State {
       }
       Fd nativeParent;
       transfer::Writeback::Volume* volume = nullptr;
-      if (const auto path = node.parent.nativePath()) {
+      // A phone's path is GVfs's stand-in folder, not a local disk to sync.
+      if (const auto path = transferDeviceDestination(node.parent) ? std::nullopt : node.parent.nativePath()) {
         nativeParent = checkedFd(::open(path->c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC));
         volume = &writeback.observe(
             nativeParent.get(), statFd(nativeParent.get()).st_dev, action == TransferAction::Move || existing
@@ -1014,14 +1057,12 @@ struct luciole::ProviderTransfer::State {
           }
         }
       };
-      // A private sibling stages the entire item before its final name becomes visible.
-      const luciole::GString uuid(g_uuid_string_random());
-      const auto stage = node.parent.child(std::string(".luciole-transfer-") + uuid.get());
-      mkdir(stage, token);
+      // The entire item is staged out of sight before its final name becomes visible.
+      const auto stage = Staging::create(node.parent, token);
       bool retain = false;
       std::shared_ptr<const ProviderCopyEffect> remoteProof;
       try {
-        const auto item = stage.child("item"), backup = stage.child("previous");
+        const auto &item = stage.item, &backup = stage.previous;
         auto tree = stageItem(node, item, token, bytes);
         remoteProof = prepareHistory(node, target, item, static_cast<bool>(existing), token);
         auto operation = operationHistory ? operationHistory->prepareProvider(node.source, target, item) : nullptr;
@@ -1032,20 +1073,21 @@ struct luciole::ProviderTransfer::State {
             validateParent();
           }
           unchanged(existing.get(), info(target, token).get());
-          rename(target, backup, token);
+          stage.place(target, backup, token);
         }
         try {
-          rename(item, target, token);
+          stage.place(item, target, token);
         } catch (...) {
           if (existing) {
             try {
-              rename(backup, target, CancelToken{});
+              stage.place(backup, target, CancelToken{});
             } catch (...) {
               retain = true;
               node.published = true;
               node.result.destination = backup;
               throwFileError(
-                  FileErrorKind::Other, "Publication failed; the previous destination remains in " + stage.uri()
+                  FileErrorKind::Other,
+                  "Publication failed; the previous destination remains in " + stage.holder(backup).uri()
               );
             }
           }
@@ -1080,7 +1122,7 @@ struct luciole::ProviderTransfer::State {
               retain = true;
               throwFileError(
                   error.error().kind,
-                  error.error().message + " Replacement data remains for inspection at " + stage.uri()
+                  error.error().message + " Replacement data remains for inspection at " + stage.holder(backup).uri()
               );
             }
           }
@@ -1092,7 +1134,7 @@ struct luciole::ProviderTransfer::State {
             : action == TransferAction::Link                 ? TransferOutcome::Linked
                                                              : TransferOutcome::Copied;
         node.result.error.reset();
-        cleanup(stage);
+        stage.discard();
         if (volume && (action == TransferAction::Move || existing)) {
           writeback.markDirty(*volume, node.result);
         }
@@ -1104,13 +1146,15 @@ struct luciole::ProviderTransfer::State {
         // After publication the stage holds the only copy of a replaced destination.
         if (!retain && node.published && existing) {
           retain = true;
-          error.message += " The previous destination remains in " + stage.uri();
+          error.message += " The previous destination remains in " + stage.holder(stage.previous).uri();
         }
         if (!retain) {
           try {
-            cleanup(stage);
+            stage.discard();
           } catch (...) {
-            throwFileError(FileErrorKind::Other, error.message + " Staging data remains in " + stage.uri());
+            throwFileError(
+                FileErrorKind::Other, error.message + " Staging data remains in " + stage.holder(stage.item).uri()
+            );
           }
         }
         throw FileErrorException(error);

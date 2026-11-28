@@ -6,7 +6,9 @@ Copy, move, create and rename files, and watch running jobs in the File Operatio
 
 Select items, press `Ctrl+C` to copy or `Ctrl+X` to cut, open the destination folder and press `Ctrl+V`. Paste is also in the context menus, including List view. Clipboard transfers and drag and drop work between Luciole windows and with other applications.
 
-Files on a phone or camera connected over MTP or PTP can be copied or cut into a local folder, by clipboard or drag and drop; dragging copies by default. Folders arrive file by file, so if the phone disconnects, the finished files stay and **Retry** copies only the rest. Copying or pasting onto the device is not supported. Unlock the phone and choose **File transfer** in its USB settings first.
+Files on a phone or camera connected over MTP or PTP can be copied or cut into a local folder, by clipboard or drag and drop; dragging copies by default. Folders arrive file by file, so if the phone disconnects, the finished files stay and **Retry** copies only the rest. Unlock the phone and choose **File transfer** in its USB settings first.
+
+Local files and folders can also be copied or moved onto a phone, and items moved or copied within the same phone. Open one of the phone's storages, such as **Internal shared storage**, first: the phone's top level only lists them. Each item is written under a hidden name and takes its real name only once it has fully arrived, so a cancelled or failed copy leaves nothing behind, and **Replace** removes the old file only after the new one is complete. Phones keep no modified dates for copied files; they show when the copy was made. Cameras, and copies between two different phones, are not supported, and clipboard images can only be pasted into local folders.
 
 When copying or moving to removable storage or mounted network shares, progress follows the destination's writeback rather than racing ahead into the page cache. On removable storage, File Operations also shows **Writing to device…** while the filesystem finishes writing. Wait for completion before ejecting the drive. If writing fails after a file appears in the destination, the report marks the transfer partial and lists any retained replacement.
 
@@ -15,6 +17,8 @@ To copy paths as text, use **Copy Location**: **Path** (`Ctrl+Alt+C`) or **URI**
 ## Administrator access
 
 Right-click a local folder, or the background of the current local folder, and choose **Open as Administrator**. **Alt+Shift+Enter** performs the same action for a selected folder, uses the current folder when nothing is selected, and returns an administrator pane to normal access. Change **Administrator Access** in Settings → Keybinds to rebind or disable it. Your desktop authentication agent asks for authorization when required. Luciole opens the folder through `admin:///`; the window continues running under your account.
+
+Cancelling authorization stops the remaining automatic requests for that folder load. Refresh or open the folder again to retry. Your desktop may report cancelled authorization as permission denied.
 
 The location bar shows **Administrator** (a shield badge in a small window). Click it, or choose **Return to Normal Access** in the folder background menu, to open the same folder with your ordinary permissions. Each pane has its own location. Returning one pane does not revoke cached system authorization or change another administrator pane. Running jobs continue until they finish or you cancel them in File Operations.
 
@@ -64,7 +68,7 @@ The folder background menu offers **New Folder** (`Ctrl+Shift+N`) and **New Docu
 
 ## Rename
 
-Press `F2` to rename one item. With several native items from one folder selected, it opens batch rename; check the preview before applying.
+Press `F2` to rename one item inline in List, Grid or Column view. The name is selected without its extension; press `F2` again to include the extension and toggle back. Use `Left` and `Right` to move within the text, `Up` and `Down` (or `Tab` and `Shift+Tab`) to commit and move directly to an adjacent item, `Enter` to confirm, and `Escape` to cancel. Clicking outside the editor commits a valid change and discards an invalid one. With several native items from one folder selected, `F2` opens batch rename; check the preview before applying.
 
 Choose **Regex** to replace every match of an ECMAScript regular expression. In **Replace**, `$1`, `$2` insert captured groups, `$&` the whole match and `$$` a dollar sign. With **Keep extensions** on, find `^IMG_(\d+)$` and replace with `Photo-$1` to turn `IMG_0042.jpg` into `Photo-0042.jpg`.
 

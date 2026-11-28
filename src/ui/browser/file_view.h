@@ -53,6 +53,10 @@ namespace luciole {
     void setDetailsColumnOrder(DetailsColumnOrder order) { m_columnOrder = order; }
     void setColumnActive(bool active) { m_columnActive = active; }
     void setPathEntry(std::optional<EntryId> entry) { m_pathEntry = entry; }
+    void setRenamingEntry(std::optional<EntryId> entry) { m_renamingEntry = entry; }
+    // Scene bounds of `id`'s filename label when bound to a live tile. `singleLineHeight` bounds wrapped grid labels
+    // to their first line so an inline single-line editor stays aligned to the top baseline.
+    std::optional<LayoutRect> entryNameRect(EntryId id, float singleLineHeight = 0.0F) const;
 
   private:
     struct TileState {
@@ -67,6 +71,7 @@ namespace luciole {
     const ViewMode m_mode;
     bool m_columnActive = true;
     std::optional<EntryId> m_pathEntry;
+    std::optional<EntryId> m_renamingEntry;
     std::function<std::uint32_t()> m_modifiers;
     std::function<bool()> m_focused;
     std::function<bool(const Location&)> m_cut;

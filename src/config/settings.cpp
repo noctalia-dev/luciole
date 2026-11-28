@@ -365,6 +365,7 @@ namespace {
           P::ConfirmPermanentDeletion, "confirm_permanent_deletion",
           [](S& s) -> auto& { return s.confirmPermanentDeletion; }
       ),
+      describe(P::ConfirmDriveRemoval, "confirm_drive_removal", [](S& s) -> auto& { return s.confirmDriveRemoval; }),
       describe(
           P::ShowPermanentDeletion, "show_permanent_deletion", [](S& s) -> auto& { return s.showPermanentDeletion; }
       ),

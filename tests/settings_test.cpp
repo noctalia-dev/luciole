@@ -161,6 +161,24 @@ namespace {
     fixture.write("config.toml", "[browser]\nconfirm_permanent_deletion = true\n");
     TEST_CHECK(restored.reload() && restored.settings().browser.confirmPermanentDeletion);
   }
+  void testDriveRemovalConfirmationPreference() {
+    Fixture fixture;
+    luciole::ConfigService service(fixture.paths());
+    TEST_CHECK(service.reload() && service.settings().browser.confirmDriveRemoval);
+    fixture.write("config.toml", "[browser]\nconfirm_drive_removal = false\n");
+    TEST_CHECK(service.reload() && !service.settings().browser.confirmDriveRemoval);
+    const std::array on{luciole::OverrideEdit{luciole::BrowserPreference::ConfirmDriveRemoval, true}};
+    TEST_CHECK(service.saveOverrides(on) == luciole::AtomicWriteState::Durable);
+    luciole::ConfigService restored(fixture.paths());
+    TEST_CHECK(restored.reload() && restored.settings().browser.confirmDriveRemoval);
+    const std::array reset{luciole::OverrideEdit{luciole::BrowserPreference::ConfirmDriveRemoval, std::nullopt}};
+    TEST_CHECK(restored.saveOverrides(reset) == luciole::AtomicWriteState::Durable);
+    TEST_CHECK(restored.reload() && !restored.settings().browser.confirmDriveRemoval);
+    fixture.write("config.toml", "[browser]\nconfirm_drive_removal = 'false'\n");
+    TEST_CHECK(!restored.reload() && !restored.settings().browser.confirmDriveRemoval);
+    fixture.write("config.toml", "[browser]\nconfirm_drive_removal = true\n");
+    TEST_CHECK(restored.reload() && restored.settings().browser.confirmDriveRemoval);
+  }
   void testPermanentDeletionMenuPreference() {
     Fixture fixture;
     luciole::ConfigService service(fixture.paths());
@@ -1844,6 +1862,7 @@ int main() {
     testNewTabPreference();
     testSingleClickLocationEditPreference();
     testDeletionConfirmationPreference();
+    testDriveRemovalConfirmationPreference();
     testPermanentDeletionMenuPreference();
     testRestoreLastWindowPreference();
     testSingleWindowPreference();

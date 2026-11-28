@@ -24,6 +24,7 @@ namespace luciole {
     DropAction dropAction = DropAction::Menu;
     bool singleClickLocationEdit = false;
     bool confirmPermanentDeletion = true;
+    bool confirmDriveRemoval = true;
     bool showPermanentDeletion = false;
     bool switchToNewTab = true;
     bool restoreLastWindow = false;
@@ -100,6 +101,7 @@ namespace luciole {
     DropAction,
     SingleClickLocationEdit,
     ConfirmPermanentDeletion,
+    ConfirmDriveRemoval,
     ShowPermanentDeletion,
     SwitchToNewTab,
     RestoreLastWindow,
@@ -211,6 +213,7 @@ namespace luciole {
     static constexpr PreferenceKey<luciole::DropAction> DropAction{Id::DropAction};
     static constexpr PreferenceKey<bool> SingleClickLocationEdit{Id::SingleClickLocationEdit};
     static constexpr PreferenceKey<bool> ConfirmPermanentDeletion{Id::ConfirmPermanentDeletion};
+    static constexpr PreferenceKey<bool> ConfirmDriveRemoval{Id::ConfirmDriveRemoval};
     static constexpr PreferenceKey<bool> ShowPermanentDeletion{Id::ShowPermanentDeletion};
     static constexpr PreferenceKey<bool> SwitchToNewTab{Id::SwitchToNewTab};
     static constexpr PreferenceKey<bool> RestoreLastWindow{Id::RestoreLastWindow};

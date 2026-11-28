@@ -29,6 +29,7 @@ typing_mode = "search"
 drop_action = "menu"
 switch_to_new_tab = true
 confirm_permanent_deletion = true
+confirm_drive_removal = true
 restore_last_window = false
 single_window = false
 compact_menus = true
@@ -94,6 +95,7 @@ All keys belong in `[browser]`. Dimensions are logical pixels. View, zoom and so
 | `drop_action` | `"menu"` | Drop without a modifier: `"menu"` opens a menu at the pointer, `"copy"` copies, `"move"` moves. `Ctrl`, `Shift` and `Alt` take priority; Trash, items from Trash and non-native folders keep fixed behavior |
 | `single_click_location_edit` | `false` | Edit the path with a single click on the current breadcrumb or unused space instead of a double-click |
 | `confirm_permanent_deletion` | `true` | Ask before permanently deleting, including `Shift+Delete` and selections in Trash; Empty Trash always asks |
+| `confirm_drive_removal` | `true` | Ask before Safely Remove, Eject or Unmount from the sidebar or its context menu |
 | `show_permanent_deletion` | `false` | Show Delete Permanently in context menus outside Trash; `Shift+Delete` and Trash actions work either way |
 | `switch_to_new_tab` | `true` | Switch to a folder opened in a new tab; disable to keep browsing the current tab |
 | `restore_last_window` | `false` | Reopen the tabs of the last closed window, once, in a new window or at startup without a location |
@@ -153,7 +155,7 @@ Name accepts `0` for automatic sizing or an integer from `160` through `16384`. 
 
 `"local"` skips network shares and FUSE mounts without a local disk, such as rclone, sshfs and gocryptfs. To get thumbnails on mounted shares such as `/mnt/media`, choose **Settings → Thumbnails → Show Thumbnails → All Locations**. Locations without a filesystem path stay cache-only; Luciole never downloads whole remote files for thumbnails.
 
-The size limit applies to image and PDF sources only. There is no pixel limit: the decoder's memory, CPU time and output limits decide, which admits phone photos up to about 200 megapixels. With `ffmpegthumbnailer` installed, new video thumbnails get its filmstrip edges; without it they stay plain. Settings can inspect and clear the cache, and existing shared thumbnails are reused.
+The size limit applies to image and PDF sources only. There is no pixel limit: the decoder's memory, CPU time and output limits decide, which admits phone photos up to about 200 megapixels. With `ffmpegthumbnailer` installed, new video thumbnails get its filmstrip edges; without it they stay plain. A video with an embedded cover image, such as one downloaded with `yt-dlp --embed-thumbnail`, shows that cover instead, without filmstrip edges. Settings can inspect and clear the cache, and existing shared thumbnails are reused.
 
 ## Other writable data
 

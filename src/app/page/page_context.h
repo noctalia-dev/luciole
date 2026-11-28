@@ -29,8 +29,10 @@ class DialogDropdown;
 class Flex;
 class InputDispatcher;
 class MillerView;
+class OperationJob;
 class PageJobs;
 class PopupSurface;
+class TextInputClient;
 class VirtualGridView;
 
 // Whether a click outside a popup closes it. Menus and popovers use OutsideClick; forms keep Explicit so typed input
@@ -153,6 +155,24 @@ public:
   virtual luciole::ViewMode viewMode() const = 0;
   virtual float gridIconSize() const = 0;
   virtual float rowIconSize() const = 0;
+  // Marks `entry` as being renamed inline so its underlying filename label stays hidden while the editor overlays it.
+  // Pass `cancelGesture` when starting or switching inline targets to cancel any active file-list pointer capture.
+  virtual void setRenamingEntry(std::optional<luciole::EntryId> entry, bool cancelGesture = false) = 0;
+  // Scene bounds of `id`'s filename label in the active file view, if currently bound to a visible tile.
+  virtual std::optional<LayoutRect> entryNameRect(luciole::EntryId id, float singleLineHeight = 0.0F) const = 0;
+  // Resets horizontal list scrolling when needed so the Name column is visible for inline rename.
+  virtual void ensureNameColumnVisible() = 0;
+  // True when inline rename can act on items in the current folder (excluding `ignoreJob` from busy checks).
+  virtual bool canInlineRenameInCurrentFolder(const OperationJob* ignoreJob) const = 0;
+  // True when `entry` satisfies ActionRegistry's single-item Rename rules (excluding `ignoreJob` from busy checks).
+  virtual bool canInlineRename(const luciole::DirectoryEntry& entry, const OperationJob* ignoreJob) const = 0;
+  // Refreshes every view showing `source` (including inactive Miller columns, search views, and expanded tree
+  // folders), optionally scheduling `revealDestination` in the active view before refreshing.
+  virtual void refreshAfterRename(
+      const luciole::Location& source, std::optional<luciole::Location> revealDestination = std::nullopt
+  ) = 0;
+  // Notifies Wayland text-input of an immediate surrounding-text or preedit-reset change on `client`.
+  virtual void notifyTextInputChanged(TextInputClient& client) = 0;
   // Keeps the first visible item in view across the next layout change.
   virtual void captureViewAnchor() = 0;
   // Shows `mode` without saving it anywhere.

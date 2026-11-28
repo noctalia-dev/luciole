@@ -138,6 +138,7 @@ namespace {
     case Kind::Unsupported:
     case Kind::ReadOnly:
     case Kind::NotEmpty:
+    case Kind::NotMounted:
     case Kind::InvalidArgument:
       return Outcome::Failed;
     default:
@@ -156,13 +157,19 @@ namespace {
     return {buffer.data(), static_cast<std::size_t>(count)};
   }
   // Deletes name inside parent through descriptors, so a path swapped in by another process is never followed.
-  void removeTree(int parent, const std::string& name) {
+  // A folder on another mount is refused rather than emptied.
+  void removeTree(int parent, const std::string& name, int root) {
     using namespace luciole::transfer;
     const bool folder = S_ISDIR(info(parent, name).st_mode);
     if (folder) {
       const auto fd = directory(parent, name);
+      if (!luciole::sameMount(fd.get(), root)) {
+        luciole::throwFileError(
+            luciole::FileErrorKind::NotMounted, "Cannot permanently delete a folder containing a mount point."
+        );
+      }
       for (const auto& child : children(fd.get())) {
-        removeTree(fd.get(), child);
+        removeTree(fd.get(), child, root);
       }
     }
     if (::unlinkat(parent, name.c_str(), folder ? AT_REMOVEDIR : 0) != 0) {
@@ -450,7 +457,7 @@ void luciole::EmptyTrashService::State::startEmpty(const std::shared_ptr<State>&
                   }
                 }
                 try {
-                  removeTree(parent.get(), name);
+                  removeTree(parent.get(), name, parent.get());
                   result.outcome = EmptyTrashOutcome::Deleted;
                 } catch (const std::exception&) {
                   result.error = currentFileError();

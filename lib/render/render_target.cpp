@@ -83,20 +83,6 @@ AsyncTextureCache* ScaledRenderer::asyncTextureCache() noexcept {
 
 float ScaledRenderer::renderScale() const noexcept { return currentScale(); }
 
-Vec2 ScaledRenderer::bufferScale() const noexcept {
-  if (m_target == nullptr
-      || m_target->logicalWidth() == 0
-      || m_target->logicalHeight() == 0
-      || m_target->bufferWidth() == 0
-      || m_target->bufferHeight() == 0) {
-    return Renderer::bufferScale();
-  }
-  return {
-      static_cast<float>(m_target->bufferWidth()) / static_cast<float>(m_target->logicalWidth()),
-      static_cast<float>(m_target->bufferHeight()) / static_cast<float>(m_target->logicalHeight())
-  };
-}
-
 std::uint64_t ScaledRenderer::textMetricsGeneration() const noexcept {
   if (m_context == nullptr) {
     return 0;

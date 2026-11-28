@@ -60,6 +60,9 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
   std::size_t skipped = 0;
   std::uint64_t nextId = std::uint64_t{1} << 63;
   std::function<void()> changed;
+  // Coalesces result publications after the first: each one re-sorts every result so far.
+  GSource* publishTimer = nullptr;
+  bool resultsPublished = false;
   std::shared_ptr<Scan> active;
 
   bool current(const std::shared_ptr<Scan>& scan) const {
@@ -71,7 +74,35 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
       callback();
     }
   }
+  void publishSoon() {
+    if (!std::exchange(resultsPublished, true)) {
+      notify();
+      return;
+    }
+    if (publishTimer != nullptr) {
+      return;
+    }
+    publishTimer = g_timeout_source_new(150);
+    g_source_set_callback(
+        publishTimer,
+        [](gpointer data) -> gboolean {
+          auto* owner = static_cast<State*>(data);
+          g_source_unref(std::exchange(owner->publishTimer, nullptr));
+          owner->notify();
+          return G_SOURCE_REMOVE;
+        },
+        this, nullptr
+    );
+    g_source_attach(publishTimer, g_main_context_default());
+  }
+  void stopPublishTimer() {
+    if (publishTimer != nullptr) {
+      g_source_destroy(publishTimer);
+      g_source_unref(std::exchange(publishTimer, nullptr));
+    }
+  }
   void cancel() {
+    stopPublishTimer();
     if (active) {
       g_cancellable_cancel(active->cancellable.get());
       active.reset();
@@ -87,6 +118,7 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
       scan->visited.clear();
       scan->current.reset();
       snapshot.status = DirectoryStatus::Ready;
+      stopPublishTimer();
       notify();
       return;
     }
@@ -158,8 +190,8 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
                     {owner.snapshot.entries, DirectoryEntries(std::move(request->scan->entries))}
                 );
                 request->scan->entries.clear();
+                owner.publishSoon();
               }
-              owner.notify();
               owner.batch(request->scan);
             }
           }
@@ -178,16 +210,22 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
     if (hidden && !scan->showHidden) {
       return;
     }
-    const auto parent = gioFile(scan->current->location);
-    const GioPtr<GFile> child(g_file_get_child(parent.get(), name));
-    const GString uri(g_file_get_uri(child.get()));
-    const auto location = Location::fromUri(uri.get());
     const auto type = fileType(g_file_info_get_file_type(info));
     if (!scan->showBackups && isEditorBackup(name, type)) {
       return;
     }
     const bool symlink = readIsSymlink(info);
-    if (type == FileType::Directory && !symlink) {
+    const bool folder = type == FileType::Directory && !symlink;
+    const char* display = g_file_info_get_display_name(info);
+    const GString fallback(display == nullptr ? g_filename_display_name(name) : nullptr);
+    std::string displayName = display != nullptr ? display : fallback.get();
+    const bool match = foldedDisplayText(displayName).contains(scan->query);
+    // Most scanned entries neither match nor need descending; skip building their location.
+    if (!folder && !match) {
+      return;
+    }
+    const auto location = scan->current->location.child(name);
+    if (folder) {
       const char* identity = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_ID_FILE);
       const char* filesystem = g_file_info_get_attribute_string(info, G_FILE_ATTRIBUTE_ID_FILESYSTEM);
       const auto key =
@@ -200,12 +238,10 @@ struct luciole::RecursiveSearch::State : std::enable_shared_from_this<State> {
         }
       }
     }
-    const char* display = g_file_info_get_display_name(info);
-    const GString fallback(display == nullptr ? g_filename_display_name(name) : nullptr);
-    std::string displayName = display != nullptr ? display : fallback.get();
-    if (!foldedDisplayText(displayName).contains(scan->query)) {
+    if (!match) {
       return;
     }
+    const auto parent = gioFile(scan->current->location);
     const GString relative(g_file_get_relative_path(gioFile(*scan->root).get(), parent.get()));
     const GString parentName(g_filename_display_name(relative && *relative.get() != '\0' ? relative.get() : "."));
     DirectoryEntry entry{
@@ -272,6 +308,7 @@ void luciole::RecursiveSearch::start(
       .incrementalResults = true
   };
   state->skipped = 0;
+  state->resultsPublished = false;
   state->notify();
   state->next(scan);
 }

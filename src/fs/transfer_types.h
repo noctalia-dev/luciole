@@ -10,9 +10,14 @@
 namespace luciole {
   // Verified transfer backends; this check never performs remote I/O.
   bool transferLocationSupported(const Location& location);
-  // Items on an MTP phone or PTP camera, below the device root. GVfs reads them reliably but cannot stage or
-  // replace files there, so transfers only copy or move them into local folders.
+  // Items on an MTP phone or PTP camera, below the device root. They copy or move into local folders, and onto the
+  // same phone.
   bool transferDeviceSource(const Location& location);
+  // A folder on an MTP phone below its top level, which only lists the phone's storages and cannot be written.
+  // Files from local folders or the same phone can be published there.
+  bool transferDeviceDestination(const Location& location);
+  // Folders a transfer can publish into, for at least some sources.
+  bool transferDestinationSupported(const Location& location);
   // Whether a transfer can read `source` and publish it in `destination`; never performs remote I/O.
   bool transferSupported(const Location& source, const Location& destination);
 

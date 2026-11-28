@@ -58,6 +58,7 @@ namespace {
          {P::SingleClickLocationEdit, false},
          {P::SwitchToNewTab, true},
          {P::ConfirmPermanentDeletion, true},
+         {P::ConfirmDriveRemoval, true},
          {P::SidebarTree, false},
          {P::ShowNetwork, true},
          {P::ExpandableFolders, true}}
@@ -73,6 +74,7 @@ namespace {
          {P::SingleClickLocationEdit, true},
          {P::SwitchToNewTab, false},
          {P::ConfirmPermanentDeletion, false},
+         {P::ConfirmDriveRemoval, false},
          {P::SidebarTree, true},
          {P::ShowNetwork, false},
          {P::ExpandableFolders, false}}
@@ -123,6 +125,7 @@ namespace {
         && loaded->browser.singleClickLocationEdit
         && !loaded->browser.switchToNewTab
         && !loaded->browser.confirmPermanentDeletion
+        && !loaded->browser.confirmDriveRemoval
         && loaded->browser.gridIconSize == 64
         && loaded->browser.thumbnails.policy == luciole::ThumbnailPolicy::All
         && loaded->browser.thumbnails.cacheMiB == 64

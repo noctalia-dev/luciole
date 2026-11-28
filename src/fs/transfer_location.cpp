@@ -68,7 +68,24 @@ bool luciole::transferDeviceSource(const Location& location) {
   return (scheme == "mtp" || scheme == "gphoto2") && !location.isDeviceRoot();
 }
 
+bool luciole::transferDeviceDestination(const Location& location) {
+  return plainScheme(location) == "mtp" && !location.isDeviceRoot();
+}
+
+bool luciole::transferDestinationSupported(const Location& location) {
+  return transferLocationSupported(location) || transferDeviceDestination(location);
+}
+
 bool luciole::transferSupported(const Location& source, const Location& destination) {
+  if (transferDeviceDestination(destination)) {
+    const auto a = parsed(source), b = parsed(destination);
+    const bool samePhone = transferDeviceSource(source)
+        && a
+        && b
+        && std::string_view(g_uri_get_scheme(a.get())) == g_uri_get_scheme(b.get())
+        && g_strcmp0(g_uri_get_host(a.get()), g_uri_get_host(b.get())) == 0;
+    return samePhone || (plainScheme(source) == "file" && transferLocationSupported(source));
+  }
   return transferLocationSupported(destination)
       && (transferLocationSupported(source) || (transferDeviceSource(source) && destination.isNative()));
 }

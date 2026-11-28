@@ -645,12 +645,27 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             } else if (error != nullptr) {
               request->scan->accessError = fileError(*error);
             }
+            if (request->scan->folder->isAdmin()) {
+              if (info) {
+                state->queryFilesystem();
+              } else {
+                request->scan->filesystemPending = false;
+                request->scan->filesystemError = request->scan->accessError;
+              }
+            }
             state->metadataCompleted();
           }
           g_clear_error(&error);
         },
         new Request{.state = weak_from_this(), .scan = scan}
     );
+    if (!scan->folder->isAdmin()) {
+      queryFilesystem();
+    }
+  }
+
+  void queryFilesystem() {
+    const auto file = gioFile(*snapshot.location);
     g_file_query_filesystem_info_async(
         file.get(), kFilesystemAttributes, G_PRIORITY_DEFAULT, scan->cancellable.get(),
         [](GObject* source, GAsyncResult* result, gpointer data) {
@@ -896,7 +911,10 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       if (!monitor) {
         watch();
       }
-      queryMetadata();
+      // Each administrator request can authorize separately, so listing must succeed before metadata starts.
+      if (!scan->folder->isAdmin()) {
+        queryMetadata();
+      }
       enumerate();
     }
     notify();
@@ -1648,6 +1666,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       invalidateMetadata(false);
     } else {
       publishMetadata();
+      if (scan->folder->isAdmin()) {
+        queryMetadata();
+      }
     }
     const auto published = scan;
     notify();

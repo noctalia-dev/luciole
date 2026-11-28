@@ -2,6 +2,7 @@
 
 #include "app/drive_removal.h"
 #include "app/operation_hub.h"
+#include "app/page/active_popup.h"
 #include "app/page/drag_drop_controller.h"
 #include "app/page/menu_controller.h"
 #include "app/page/page_context.h"
@@ -22,7 +23,9 @@
 #include "ui/browser/action_shortcuts.h"
 #include "ui/browser/places_sidebar.h"
 #include "ui/builders.h"
+#include "ui/dialogs/dialog_chrome.h"
 #include "ui/palette.h"
+#include "wayland/popup_surface.h"
 #include "wayland/toplevel_surface.h"
 
 #include <algorithm>
@@ -215,9 +218,75 @@ void SidebarController::openDrive(const std::string& key) {
 
 void SidebarController::removeDrive(const std::string& key) {
   const auto* drive = m_drives.find(key);
-  if (drive == nullptr || !drive->root || m_removingDrive) {
+  if (drive == nullptr
+      || !drive->root
+      || drive->removal == luciole::DriveRemoval::None
+      || m_removingDrive
+      || m_page.activePopup().kind() == ActivePopup::Kind::DriveRemoval) {
     return;
   }
+  if (!m_page.settings().confirmDriveRemoval) {
+    beginDriveRemoval(*drive);
+    return;
+  }
+  if (!m_page.popupAvailable()) {
+    return;
+  }
+  const auto closed = std::make_shared<bool>(false);
+  const auto dismiss = [this] { m_page.dismissPopup(); };
+  Button* cancel = nullptr;
+  Label* title = nullptr;
+  auto root = ui::column(
+      {.align = FlexAlign::Stretch},
+      luciole::dialogHeader(
+          std::format("{} “{}”?", luciole::driveRemovalLabel(drive->removal), drive->label), "player-eject", dismiss,
+          &title
+      ),
+      ui::label(
+          {.text = "Files on this drive will no longer be available.",
+           .maxWidth = m_page.dialogWidth(DialogWidth::Small) - 24.0F,
+           .maxLines = 4}
+      ),
+      ui::row(
+          {.justify = FlexJustify::End, .gap = Style::spaceSm},
+          ui::button({.out = &cancel, .text = "Cancel", .variant = ButtonVariant::Ghost, .onClick = dismiss}),
+          ui::button(
+              {.text = std::string(luciole::driveRemovalLabel(drive->removal)),
+               .onClick = [this, selected = *drive, closed] {
+                 if (std::exchange(*closed, true)) {
+                   return;
+                 }
+                 m_page.dismissPopup();
+                 beginDriveRemoval(selected);
+               }}
+          )
+      )
+  );
+  title->setUseMarkup(false);
+  title->setMaxLines(2);
+  title->setEllipsize(TextEllipsize::Middle);
+  luciole::applyDialogStyle(*root);
+  m_page.showDialog(std::move(root), DialogWidth::Small);
+  if (m_page.popupSurface()) {
+    m_page.activePopup().bind(ActivePopup::Kind::DriveRemoval, [closed] { *closed = true; });
+    m_page.popupDispatcher().setFocus(cancel->inputArea());
+  }
+}
+
+void SidebarController::beginDriveRemoval(const luciole::Drive& selected) {
+  const auto* drive = m_drives.find(selected.key);
+  if (m_removingDrive) {
+    return;
+  }
+  if (!drive
+      || !drive->root
+      || drive->root != selected.root
+      || drive->removal != selected.removal
+      || drive->label != selected.label) {
+    m_page.actionError("This drive changed or is no longer available. Try again.");
+    return;
+  }
+  const auto key = selected.key;
   const auto root = *drive->root;
   auto verb = std::string(luciole::driveRemovalLabel(drive->removal));
   std::ranges::transform(verb, verb.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

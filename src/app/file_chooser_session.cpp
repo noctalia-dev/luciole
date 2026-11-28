@@ -87,6 +87,7 @@ FileChooserSession::FileChooserSession(
 }
 
 FileChooserSession::~FileChooserSession() {
+  m_call->setReplyBarrier({});
   m_nameLookup.cancel();
   m_typeToken.cancel();
   m_saveToken.cancel();
@@ -213,6 +214,13 @@ std::unique_ptr<Node> FileChooserSession::attach(
   m_surface = &surface;
   m_dispatcher = &dispatcher;
   m_close = std::move(close);
+  m_call->setReplyBarrier([surface = &surface, alive = std::weak_ptr(m_lifetime)](auto ready) {
+    if (alive.expired()) {
+      ready(false);
+      return;
+    }
+    surface->completeModal(std::move(ready));
+  });
   m_call->setCloseCallback(m_close);
   page.setChooser(
       {.open = [this](const std::vector<luciole::DirectoryEntry>& targets) { open(targets); },

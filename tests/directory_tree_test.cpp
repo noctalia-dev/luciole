@@ -158,8 +158,9 @@ namespace {
         && !tree.row(luciole::DirectoryTree::maxBranches + 1).status.empty()
     );
     tree.refresh();
-    TEST_CHECK(tree.loading() <= luciole::DirectoryTree::maxLoading);
-    wait([&] { return tree.loading() == 0; });
+    TEST_CHECK(tree.busy() && tree.loading() <= luciole::DirectoryTree::maxLoading);
+    wait([&] { return !tree.busy(); });
+    TEST_CHECK(tree.loading() == 0);
     tree.clear();
     TEST_CHECK(tree.branches() == 0);
     drain();

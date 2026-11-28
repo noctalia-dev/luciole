@@ -67,6 +67,35 @@ VirtualGridView* MillerView::view(std::size_t index) const {
   return found == m_views.end() ? nullptr : found->second.grid;
 }
 VirtualGridView* MillerView::focusedView() const { return view(m_columns.focused()); }
+void MillerView::setRenamingEntry(std::optional<luciole::EntryId> entry) {
+  if (m_renamingEntry == entry) {
+    return;
+  }
+  m_renamingEntry = entry;
+  for (std::size_t i = 0; i < m_columns.columns().size(); ++i) {
+    const auto found = m_views.find(m_columns.columns()[i]->id);
+    if (found == m_views.end()) {
+      continue;
+    }
+    found->second.adapter->setRenamingEntry(i == m_columns.focused() ? m_renamingEntry : std::nullopt);
+  }
+}
+std::optional<LayoutRect> MillerView::entryNameRect(luciole::EntryId id, float singleLineHeight) const {
+  if (m_columns.focused() >= m_columns.columns().size()) {
+    return std::nullopt;
+  }
+  const auto found = m_views.find(m_columns.columns()[m_columns.focused()]->id);
+  return found == m_views.end() ? std::nullopt : found->second.adapter->entryNameRect(id, singleLineHeight);
+}
+LayoutRect MillerView::viewportRect() const {
+  if (m_viewport == nullptr) {
+    return {};
+  }
+  float x = 0.0F;
+  float y = 0.0F;
+  Node::absolutePosition(m_viewport, x, y);
+  return {x, y, m_viewport->width(), m_viewport->height()};
+}
 std::optional<std::size_t> MillerView::columnAt(float x, float y) const {
   if (!visible() || !m_viewport->containsScenePoint(x, y)) {
     return std::nullopt;
@@ -305,6 +334,7 @@ void MillerView::synchronize() {
     }
     view.adapter->setActivationMode(activationMode);
     view.adapter->setColumnActive(i == m_columns.focused());
+    view.adapter->setRenamingEntry(i == m_columns.focused() ? m_renamingEntry : std::nullopt);
     std::optional<luciole::EntryId> path;
     if (i + 1 < m_columns.columns().size() && model.selection().selected.size() == 1) {
       const auto id = *model.selection().selected.begin();

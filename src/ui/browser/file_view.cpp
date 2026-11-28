@@ -107,7 +107,7 @@ namespace {
         const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool ring, bool hovered,
         luciole::DetailsColumns columns, luciole::DetailsColumnOrder order, bool cut, bool path, float iconSize,
         luciole::BrowsePresentation presentation, bool readOnly, const luciole::TreeRowInfo& tree,
-        std::string_view folderSize
+        std::string_view folderSize, bool renaming
     ) {
       m_tree = tree;
       m_treePrefix->setVisible(tree.enabled);
@@ -118,9 +118,9 @@ namespace {
       m_columns = columns;
       m_columnOrder = order;
       m_icon->setOpacity(cut ? 0.4F : entry.hidden ? kHiddenIconOpacity : 1.0F);
-      for (auto* label : {m_name, m_parent}) {
-        label->setOpacity(entry.hidden && !selected ? kHiddenTextOpacity : 1.0F);
-      }
+      const float textOpacity = entry.hidden && !selected ? kHiddenTextOpacity : 1.0F;
+      m_name->setOpacity(renaming ? 0.0F : textOpacity);
+      m_parent->setOpacity(textOpacity);
       const bool directory = entry.type == luciole::FileType::Directory;
       m_arrow->setVisible(m_miller && directory);
       m_arrow->setParticipatesInLayout(m_miller && directory);
@@ -151,7 +151,8 @@ namespace {
       }
       m_name->setColor(colorSpecFromRole(path ? ColorRole::Primary : ColorRole::OnSurface));
       m_background->setFill(
-          !selected && (hovered || path) ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec()
+          !selected && !renaming && (hovered || path) ? colorSpecFromRole(ColorRole::SurfaceContainerHigh)
+                                                      : clearColorSpec()
       );
       if (ring) {
         m_background->setBorder(colorSpecFromRole(ColorRole::Primary), Style::focusRingWidth);
@@ -197,6 +198,32 @@ namespace {
     void setThumbnailVisible(bool visible) { m_icon->setThumbnailVisible(visible); }
     void releaseFile(Renderer& renderer) { m_icon->releaseFile(renderer); }
     bool contentContains(float x) const { return x >= m_contentStart && x <= m_contentEnd; }
+    LayoutRect nameSceneRect() const {
+      float x = 0.0F;
+      float y = 0.0F;
+      Node::absolutePosition(m_name, x, y);
+      float w = std::max(m_name->width(), m_nameColumn->width());
+      if (m_miller) {
+        float rowX = 0.0F;
+        float rowY = 0.0F;
+        Node::absolutePosition(this, rowX, rowY);
+        const float arrowReserve = m_arrow->visible() ? (m_arrow->width() + Style::spaceSm) : 0.0F;
+        if (Style::rtl()) {
+          const float leftEdge = rowX + Style::spaceSm + arrowReserve;
+          const float rightEdge = x + w;
+          if (rightEdge > leftEdge) {
+            x = leftEdge;
+            w = rightEdge - leftEdge;
+          }
+        } else {
+          const float rightEdge = rowX + width() - Style::spaceSm - arrowReserve;
+          if (rightEdge > x) {
+            w = rightEdge - x;
+          }
+        }
+      }
+      return {x, y, w, m_name->height()};
+    }
 
   private:
     void updateContentSpan() {
@@ -277,11 +304,13 @@ namespace {
 
     void bind(
         const luciole::DirectoryEntry& entry, std::string_view typeLabel, bool selected, bool ring, bool hovered,
-        float iconSize, bool cut, luciole::BrowsePresentation presentation, bool readOnly
+        float iconSize, bool cut, luciole::BrowsePresentation presentation, bool readOnly, bool renaming
     ) {
       m_icon->setOpacity(cut ? 0.4F : entry.hidden ? kHiddenIconOpacity : 1.0F);
-      for (auto* label : {m_name, m_parent, m_captions[0], m_captions[1], m_captions[2]}) {
-        label->setOpacity(entry.hidden && !selected ? kHiddenTextOpacity : 1.0F);
+      const float textOpacity = entry.hidden && !selected ? kHiddenTextOpacity : 1.0F;
+      m_name->setOpacity(renaming ? 0.0F : textOpacity);
+      for (auto* label : {m_parent, m_captions[0], m_captions[1], m_captions[2]}) {
+        label->setOpacity(textOpacity);
       }
       m_presentation = presentation;
       m_iconSize = iconSize;
@@ -312,7 +341,7 @@ namespace {
       m_name->setMaxWidth(std::max(0.0F, width() - Style::spaceSm * 2));
       m_name->setColor(colorSpecFromRole(ColorRole::OnSurface));
       m_background->setFill(
-          !selected && hovered ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec()
+          !selected && !renaming && hovered ? colorSpecFromRole(ColorRole::SurfaceContainerHigh) : clearColorSpec()
       );
       if (ring) {
         m_background->setBorder(colorSpecFromRole(ColorRole::Primary), Style::focusRingWidth);
@@ -349,6 +378,13 @@ namespace {
   public:
     void setThumbnailVisible(bool visible) { m_icon->setThumbnailVisible(visible); }
     void releaseFile(Renderer& renderer) { m_icon->releaseFile(renderer); }
+    LayoutRect nameSceneRect(float singleLineHeight) const {
+      float x = 0.0F;
+      float y = 0.0F;
+      Node::absolutePosition(m_name, x, y);
+      const float h = singleLineHeight > 0.0F ? std::min(m_name->height(), singleLineHeight) : m_name->height();
+      return {x, y, m_name->width(), h};
+    }
 
   private:
     Box* m_background = nullptr;
@@ -381,10 +417,11 @@ void luciole::FileViewAdapter::bindDecoration(Node& decoration, const VirtualGri
   const auto& model = m_browser.model();
   std::vector<std::uint8_t> selected(((layout.itemCount + layout.columns - 1) / layout.columns) * layout.columns, 0);
   for (std::size_t i = 0; i < layout.itemCount && layout.firstIndex + i < model.rows().size(); ++i) {
+    const auto id = model.rows()[layout.firstIndex + i];
+    const bool renaming = m_renamingEntry && id == *m_renamingEntry;
     const auto col = i % layout.columns;
     const auto visual = (i / layout.columns) * layout.columns + (layout.rtl ? layout.columns - col - 1 : col);
-    selected[visual] =
-        m_columnActive && model.selection().selected.contains(model.rows()[layout.firstIndex + i]) ? 1 : 0;
+    selected[visual] = m_columnActive && !renaming && model.selection().selected.contains(id) ? 1 : 0;
   }
   decoration.setVisible(std::ranges::any_of(selected, [](auto value) { return value != 0; }));
   static_cast<SelectionContour&>(decoration)
@@ -399,8 +436,24 @@ std::string luciole::FileViewAdapter::itemTooltip(std::size_t index) const {
     return {};
   }
   const auto id = model.rows()[index];
+  if (m_renamingEntry && id == *m_renamingEntry) {
+    return {};
+  }
   const auto* entry = model.entry(id);
   return entry != nullptr ? std::format("{}\n{}", entry->displayName(), model.typeLabel(id)) : std::string{};
+}
+
+std::optional<LayoutRect> luciole::FileViewAdapter::entryNameRect(EntryId id, float singleLineHeight) const {
+  for (const auto& [tile, state] : m_tiles) {
+    if (state.entry != id || !tile->visible()) {
+      continue;
+    }
+    if (m_mode == ViewMode::Grid) {
+      return static_cast<const FileTile*>(tile)->nameSceneRect(singleLineHeight);
+    }
+    return static_cast<const FileRow*>(tile)->nameSceneRect();
+  }
+  return std::nullopt;
 }
 
 void luciole::FileViewAdapter::setTileVisible(Node& tile, bool visible) {
@@ -476,11 +529,13 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
     const bool selected = m_columnActive && model.selection().selected.contains(id);
     // The keyboard cursor stays visible inside a multi-selection; a lone selected item shows only its fill.
     const auto& selection = model.selection();
-    const bool ring = m_focused() && selection.focused == id && (!selected || selection.selected.size() != 1);
+    const bool renaming = m_renamingEntry && id == *m_renamingEntry;
+    const bool ring =
+        !renaming && m_focused() && selection.focused == id && (!selected || selection.selected.size() != 1);
     if (m_mode == ViewMode::Grid) {
       static_cast<FileTile&>(tile).bind(
           *entry, model.typeLabel(id), selected, ring, hovered, m_gridIconSize, m_cut && m_cut(entry->location()),
-          m_presentation, readOnly
+          m_presentation, readOnly, renaming
       );
     } else {
       std::string folderSize;
@@ -496,7 +551,8 @@ void luciole::FileViewAdapter::bindTile(Node& tile, std::size_t index, bool, boo
           m_cut && m_cut(entry->location()), m_pathEntry == id && !m_columnActive,
           m_mode == ViewMode::Miller ? millerRowIconSize(m_presentation, m_rowIconSize)
                                      : fileRowIconSize(m_rowIconSize),
-          m_presentation, readOnly, m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}, folderSize
+          m_presentation, readOnly, m_mode == ViewMode::List ? m_browser.treeRow(id) : TreeRowInfo{}, folderSize,
+          renaming
       );
     }
   }
