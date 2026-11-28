@@ -127,9 +127,13 @@ bool luciole::measurableSource(const Location& source) {
 std::optional<luciole::SourceEstimate> luciole::estimateSource(
     const Location& source, const CancelToken& token, const std::function<void(const SourceEstimate&)>& publish
 ) {
+  // GVfs gives a phone a FUSE path when gvfsd-fuse runs, which the native walk refuses as a network filesystem.
+  if (transferDeviceSource(source)) {
+    return estimateGioSource(source, token, publish);
+  }
   const auto path = source.nativePath();
   if (!path) {
-    return transferDeviceSource(source) ? std::optional(estimateGioSource(source, token, publish)) : std::nullopt;
+    return {};
   }
   if (networkFilesystem(*path)) {
     return {};
