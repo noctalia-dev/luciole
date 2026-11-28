@@ -189,6 +189,32 @@ namespace {
     TEST_CHECK(!R::current(context, request, luciole::ActionScope::Targets));
   }
 
+  // Files paste into a phone storage and its folders, but not at the top level that only lists the storages, and a
+  // clipboard image is saved only into local folders.
+  void testPhonePaste() {
+    luciole::DirectoryModel model;
+    auto data = snapshot();
+    data.location = luciole::Location::fromUri("mtp://Pixel_10/Internal%20shared%20storage/Download");
+    model.applySnapshot(data);
+    luciole::ActionContext c{
+        .model = model, .context = 13, .query = {}, .pinned = {}, .clipboardAvailable = true, .clipboardHasFiles = true
+    };
+    TEST_CHECK(R::state(A::PasteFiles, c, R::capture(c)).enabled);
+    c.clipboardHasFiles = false;
+    c.clipboardHasImage = true;
+    const auto image = R::state(A::PasteFiles, c, R::capture(c));
+    TEST_CHECK(!image.enabled && image.reason.contains("Images"));
+    c.clipboardHasFiles = true;
+    data.location = luciole::Location::fromUri("mtp://Pixel_10/");
+    ++data.generation;
+    model.applySnapshot(data);
+    const auto top = R::state(A::PasteFiles, c, R::capture(c));
+    TEST_CHECK(!top.enabled && top.reason.contains("storage"));
+    data.location = luciole::Location::fromUri("gphoto2://Canon_EOS/store_00010001/DCIM");
+    ++data.generation;
+    model.applySnapshot(data);
+    TEST_CHECK(!R::state(A::PasteFiles, c, R::capture(c)).enabled);
+  }
   void testFileClipboardActions() {
     luciole::DirectoryModel model;
     auto data = snapshot();
@@ -242,7 +268,7 @@ namespace {
     });
     ++data.generation;
     model.applySnapshot(data);
-    // Phone files copy and cut like other files; pastes into the phone stay refused.
+    // Phone files copy and cut like other files, and files paste into the phone.
     TEST_CHECK(R::state(A::CopyFiles, c, R::capture(c)).enabled && R::state(A::CutFiles, c, R::capture(c)).enabled);
     {
       luciole::DirectoryModel phone;
@@ -257,7 +283,7 @@ namespace {
           .clipboardAvailable = true,
           .clipboardHasFiles = true
       };
-      TEST_CHECK(!R::state(A::PasteFiles, p, R::capture(p)).enabled);
+      TEST_CHECK(R::state(A::PasteFiles, p, R::capture(p)).enabled);
       test::editEntries(folder, [&](auto& entries) {
         for (auto& item : entries) {
           item.place = folder.location->child(item.name);
@@ -1303,6 +1329,7 @@ int main() {
     testEmptyTrashAvailability();
     testLinkActions();
     testFileClipboardActions();
+    testPhonePaste();
     testPendingActionFacts();
     testPreviewActions();
     testCapabilitiesAndTargets();

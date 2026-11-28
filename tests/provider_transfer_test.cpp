@@ -946,6 +946,32 @@ namespace {
         gioFile(location).get(), text.data(), text.size(), nullptr, false, G_FILE_CREATE_NONE, nullptr, nullptr, &error
     ));
   }
+  std::string fetch(const Location& location) {
+    char* data = nullptr;
+    gsize size = 0;
+    if (!g_file_load_contents(gioFile(location).get(), nullptr, &data, &size, nullptr, nullptr)) {
+      return {};
+    }
+    std::string text(data, size);
+    g_free(data);
+    return text;
+  }
+  // Names in `folder` left by staging, which a finished or cancelled transfer must never leave behind.
+  bool staged(const Location& folder) {
+    const GioPtr<GFileEnumerator> entries(g_file_enumerate_children(
+        gioFile(folder).get(), "standard::name", G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
+    ));
+    while (entries) {
+      const GioPtr<GFileInfo> entry(g_file_enumerator_next_file(entries.get(), nullptr, nullptr));
+      if (!entry) {
+        break;
+      }
+      if (std::string_view(g_file_info_get_name(entry.get())).starts_with(".luciole-")) {
+        return true;
+      }
+    }
+    return false;
+  }
   bool present(const Location& location) {
     const GioPtr<GFileInfo> found(g_file_query_info(
         gioFile(location).get(), "standard::type", G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, nullptr, nullptr
@@ -969,6 +995,76 @@ namespace {
       }
     }
     g_file_delete(gioFile(location).get(), nullptr, nullptr);
+  }
+  // Copies and moves onto the phone: from local folders and within the phone, with conflicts, cancelling and Undo.
+  void phoneWrites(const Location& root, const fs::path& local) {
+    TEST_CHECK(transferDeviceDestination(root));
+    const auto folder = Location::fromPath((local / "moved").native());
+    TransferService upload;
+    TEST_CHECK(upload.start({{folder}, root, Copy}));
+    wait(upload);
+    TEST_CHECK(upload.results().front().outcome == Copied);
+    TEST_CHECK(fetch(root.child("moved").child("Camera").child("IMG_0002.jpg")) == "second photo");
+
+    // Replace swaps in the new file only once it has fully arrived; Keep Both picks a free name.
+    write(local / "note café.txt", "from the computer");
+    const auto note = Location::fromPath((local / "note café.txt").native());
+    TransferService replace;
+    TEST_CHECK(replace.start({{note}, root, Copy}));
+    wait(replace, [](const auto&) { return Replace; });
+    TEST_CHECK(
+        replace.results().front().outcome == Copied && fetch(root.child("note café.txt")) == "from the computer"
+    );
+    TransferService both;
+    TEST_CHECK(both.start({{note}, root, Copy}));
+    wait(both, [](const auto&) { return KeepBoth; });
+    TEST_CHECK(fetch(root.child("note café (1).txt")) == "from the computer");
+    TEST_CHECK(fetch(root.child("note café.txt")) == "from the computer");
+
+    // A cancelled upload leaves nothing behind, and an existing file it would replace stays as it was.
+    write(local / "large.bin", std::string(32U << 20U, 'Y'));
+    put(root.child("large.bin"), "kept");
+    TransferService cancelled;
+    TEST_CHECK(cancelled.start({{Location::fromPath((local / "large.bin").native())}, root, Copy}));
+    cancelled.cancel();
+    wait(cancelled, [](const auto&) { return Replace; });
+    const auto outcome = cancelled.results().front().outcome;
+    TEST_CHECK(outcome == Cancelled || outcome == Copied);
+    if (outcome == Cancelled) {
+      TEST_CHECK(fetch(root.child("large.bin")) == "kept");
+    }
+
+    // Within the phone: Copy keeps the original, Move removes it.
+    TransferService within;
+    TEST_CHECK(within.start({{root.child("note café (1).txt")}, root.child("DCIM"), Copy}));
+    wait(within);
+    TEST_CHECK(within.results().front().outcome == Copied);
+    TEST_CHECK(present(root.child("DCIM").child("note café (1).txt")) && present(root.child("note café (1).txt")));
+    TransferService moved;
+    TEST_CHECK(moved.start({{root.child("note café (1).txt")}, root.child("moved"), Move}));
+    wait(moved);
+    TEST_CHECK(moved.results().front().outcome == Moved);
+    TEST_CHECK(present(root.child("moved").child("note café (1).txt")) && !present(root.child("note café (1).txt")));
+
+    // Moving from the computer removes the local file once it has arrived; Undo of a copy removes it again.
+    write(local / "to-phone.txt", "moving");
+    TransferService cut;
+    TEST_CHECK(cut.start({{Location::fromPath((local / "to-phone.txt").native())}, root, Move}));
+    wait(cut);
+    TEST_CHECK(cut.results().front().outcome == Moved && !fs::exists(local / "to-phone.txt"));
+    TEST_CHECK(fetch(root.child("to-phone.txt")) == "moving");
+    write(local / "undo.txt", "undo me");
+    TransferService recorded;
+    recorded.useOperationHistory();
+    TEST_CHECK(recorded.start({{Location::fromPath((local / "undo.txt").native())}, root, Copy}));
+    wait(recorded);
+    TEST_CHECK(recorded.results().front().outcome == Copied && present(root.child("undo.txt")));
+    TransferService undo;
+    TEST_CHECK(undo.replayCopy(recorded.takeCopyReceipt()));
+    wait(undo);
+    TEST_CHECK(!present(root.child("undo.txt")) && fs::exists(local / "undo.txt"));
+
+    TEST_CHECK(!staged(root) && !staged(root.child("DCIM")) && !staged(root.child("moved")));
   }
   // Copies and moves from an MTP or PTP device folder into a local folder. `device` is a writable scratch folder
   // on a connected device; fixtures are written there with GIO and removed afterwards.
@@ -1036,10 +1132,7 @@ namespace {
       TEST_CHECK(cancelled.results().front().outcome == Cancelled || cancelled.results().front().outcome == Copied);
       TEST_CHECK(present(root.child("large.bin")));
 
-      TransferService upload;
-      TEST_CHECK(upload.start({{Location::fromPath((local / "moved").native())}, root, Copy}));
-      wait(upload);
-      TEST_CHECK(upload.results().front().outcome == Failed && !present(root.child("moved")));
+      phoneWrites(root, local);
     }
     // Replace keeps the overwritten file for Undo until its history is dropped with the job.
     drainHistory();
@@ -1116,12 +1209,22 @@ int main(int argc, char** argv) {
     for (const auto* uri :
          {"mtp://SAMSUNG_Android_R58M/Internal%20storage/DCIM/photo.jpg", "gphoto2://Canon_EOS/store_00010001/DCIM"}) {
       const auto item = Location::fromUri(uri);
-      // Devices are read-only sources: never a destination, and only towards local folders.
+      // Device items copy into local folders, never onto network ones.
       TEST_CHECK(transferDeviceSource(item) && !transferLocationSupported(item));
       TEST_CHECK(transferSupported(item, local));
       TEST_CHECK(!transferSupported(item, Location::fromUri("sftp://example.invalid/upload")));
-      TEST_CHECK(!transferSupported(local, item));
     }
+    // Phones accept local files and their own, below the top level that lists their storages; cameras accept nothing.
+    const auto phoneFolder = Location::fromUri("mtp://SAMSUNG_Android_R58M/Internal%20storage/Download");
+    const auto camera = Location::fromUri("gphoto2://Canon_EOS/store_00010001/DCIM");
+    TEST_CHECK(transferDeviceDestination(phoneFolder) && transferDestinationSupported(phoneFolder));
+    TEST_CHECK(transferDeviceDestination(Location::fromUri("mtp://SAMSUNG_Android_R58M/Internal%20storage")));
+    TEST_CHECK(!transferDestinationSupported(Location::fromUri("mtp://SAMSUNG_Android_R58M/")));
+    TEST_CHECK(!transferDestinationSupported(camera) && !transferSupported(local, camera));
+    TEST_CHECK(transferSupported(local, phoneFolder) && transferSupported(photo, phoneFolder));
+    TEST_CHECK(!transferSupported(Location::fromUri("mtp://Pixel_10/Internal%20storage/a.jpg"), phoneFolder));
+    TEST_CHECK(!transferSupported(Location::fromUri("sftp://example.invalid/a"), phoneFolder));
+    TEST_CHECK(!transferSupported(camera, phoneFolder));
     for (const auto* uri :
          {"mtp://SAMSUNG_Android_R58M/", "mtp://user:secret@SAMSUNG_Android_R58M/DCIM", "mtp:///DCIM"}) {
       TEST_CHECK(!transferDeviceSource(Location::fromUri(uri)));

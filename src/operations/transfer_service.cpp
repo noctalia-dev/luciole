@@ -34,6 +34,12 @@
 namespace {
   using namespace luciole::transfer;
 
+  // Provider history keeps its storage on network destinations. Phones cannot all move it between folders, and
+  // application history verifies them by object identity instead.
+  bool keepsProviderHistory(const luciole::TransferRequest& request) {
+    return !request.destination.isNative() && !luciole::transferDeviceDestination(request.destination);
+  }
+
   struct Job {
     explicit Job(luciole::TransferRequest transfer) : request(std::move(transfer)) {}
     luciole::TransferRequest request;
@@ -1290,7 +1296,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
                     const auto answer = owner->gate.ask(std::move(conflict), token, [owner] { State::notify(owner); });
                     return answer ? answer->choice : TransferConflictChoice::Cancel;
                   },
-                  &work, !retry && !administrator && !job->request.destination.isNative() && !operationHistory
+                  &work, !retry && !administrator && keepsProviderHistory(job->request) && !operationHistory
               )
             : retry ? retryJob(*job, work, owner->meter)
                     : runFirst(*job, work, owner->meter);

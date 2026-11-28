@@ -198,7 +198,7 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
         {.id = PasteInto,
          .label = "Paste into Folder",
          .enabled = !m_page.operationsBusy()
-             && luciole::transferLocationSupported(*singleLocation)
+             && luciole::transferDestinationSupported(*singleLocation)
              && luciole::entryAccess(*single).write != false,
          .glyph = "clipboard"}
     );
