@@ -311,7 +311,6 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     std::optional<BrowseCatalogue> catalogue;
     bool factsRunning = false;
     std::unordered_map<std::size_t, std::uint8_t> factsInFlight;
-    bool mediaRunning = false;
     GioPtr<GFile> parent;
     // Shared by every entry of the scan; each entry's location is this folder's child.
     std::shared_ptr<const Location> folder;
@@ -351,6 +350,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   struct Request {
     std::weak_ptr<State> state;
     std::shared_ptr<Scan> scan;
+    // Media completions publish against the open location, surviving scan generations; facts completions use scan.
+    std::optional<luciole::Location> location;
   };
 
   DirectorySnapshot snapshot;
@@ -400,6 +401,10 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   };
   std::unordered_map<std::size_t, std::uint64_t> mediaRequested;
   guint mediaIdle = 0;
+  // The media pipeline outlives scan generations: rescans cancel the listing passes but keep pending requests and
+  // in-flight probes, so churn cannot stall publication.
+  bool mediaRunning = false;
+  GioPtr<GCancellable> mediaCancellable{g_cancellable_new()};
   // Names of the published links that lead to folders. A rescan keeps them there until its own pass checks again.
   std::unordered_set<std::string, NameHash, std::equal_to<>> directoryLinkNames;
   // Icons that replace the listing's own: a link's target icon, a folder's custom icon. A rescan keeps them until its
@@ -423,6 +428,14 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void requestFacts(std::size_t index, std::uint64_t id, std::uint8_t details) {
+    if ((details & EntryDetails::Media) != 0) {
+      // The media pipeline handles churn and rescans itself; only fact queries stay gated below. A media-only
+      // request still falls through so catalogue rows queue the base facts the probe needs.
+      if (index < snapshot.entries.size() && snapshot.entries.brief(index).id == id) {
+        requestMedia(index, id);
+      }
+      details = static_cast<std::uint8_t>(details & ~EntryDetails::Media);
+    }
     if (!scan
         || scan->enumerating
         || dirty
@@ -431,10 +444,6 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
         || snapshot.entries.brief(index).id != id) {
       return;
     }
-    if ((details & EntryDetails::Media) != 0) {
-      requestMedia(index, id);
-    }
-    details = static_cast<std::uint8_t>(details & ~EntryDetails::Media);
     if (!snapshot.entries.isCatalogue() || factsRequested.size() >= 1024) {
       return;
     }
@@ -558,7 +567,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             }
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(task, job.release(), [](gpointer data) { delete static_cast<Job*>(data); });
     g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
@@ -623,7 +632,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void queueMedia() {
-    if (mediaRequested.empty() || mediaIdle != 0 || (scan && scan->mediaRunning)) {
+    if (mediaRequested.empty() || mediaIdle != 0 || mediaRunning) {
       return;
     }
     mediaIdle = g_idle_add_full(
@@ -641,17 +650,16 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void prepareMedia() {
-    if (!scan
-        || scan->enumerating
-        || scan->mediaRunning
-        || dirty
-        || mediaRequested.empty()
-        || snapshot.status != DirectoryStatus::Ready) {
+    // Churn and rescans must not gate probing: the probe revalidates the file's stamps and publication
+    // revalidates by name, so batches build and publish through both.
+    if (mediaRunning || mediaRequested.empty() || snapshot.status != DirectoryStatus::Ready || !snapshot.location) {
       return;
     }
     auto job = std::make_unique<MediaJob>();
     job->entries = snapshot.entries;
-    job->folder = scan->path;
+    const GString folderPath(g_file_get_path(gioFile(*snapshot.location).get()));
+    const bool local = folderPath != nullptr;
+    job->folder = local ? std::string(folderPath.get()) : std::string();
     job->probe = mediaFacts;
     std::unordered_map<std::size_t, std::uint64_t> waiting;
     while (!mediaRequested.empty() && job->rows.size() < kMediaBatch) {
@@ -683,7 +691,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           .facts = {}
       };
       const std::string_view type = row.contentType;
-      row.eligible = scan->local
+      row.eligible = local
           && !known->metadataFailed
           && !known->symlink
           && known->type == FileType::Regular
@@ -709,17 +717,21 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       mediaRead(*job);
       return;
     }
-    scan->mediaRunning = true;
+    mediaRunning = true;
     auto* task = g_task_new(
-        nullptr, scan->cancellable.get(),
+        nullptr, mediaCancellable.get(),
         [](GObject*, GAsyncResult* result, gpointer data) {
           const std::unique_ptr<Request> request(static_cast<Request*>(data));
           auto& job = *static_cast<MediaJob*>(g_task_get_task_data(G_TASK(result)));
-          if (const auto state = request->state.lock(); state && state->scan == request->scan) {
+          // Navigation replaces the location and abandons in-flight probes; rescans keep it and let them publish.
+          if (const auto state = request->state.lock(); state
+              && state->snapshot.location
+              && request->location
+              && *state->snapshot.location == *request->location) {
             state->mediaRead(job);
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = {}, .location = snapshot.location}
     );
     g_task_set_task_data(task, job.release(), [](gpointer data) { delete static_cast<MediaJob*>(data); });
     g_task_run_in_thread(task, [](GTask* task, gpointer, gpointer data, GCancellable* cancellable) {
@@ -752,29 +764,50 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
   }
 
   void mediaRead(MediaJob& job) {
-    scan->mediaRunning = false;
-    std::unordered_map<std::size_t, const MediaRow*> byIndex;
+    mediaRunning = false;
+    const bool cancelled = g_cancellable_is_cancelled(mediaCancellable.get()) != FALSE;
+    // Publication matches by name (rescans reorder the listing, so batch indexes are stale by the time probes
+    // return); an eligible row applies only while its stamps still match.
+    std::unordered_map<std::string_view, const MediaRow*, NameHash, std::equal_to<>> byName;
     for (const auto& row : job.rows) {
       if (row.facts) {
-        byIndex.emplace(row.index, &row);
+        byName.emplace(row.name, &row);
         // Retain even a superseded scan's probe: the stamp retires it if the file changed again.
         if (row.eligible) {
           auto stamp = row.stamp;
           stamp.facts = row.facts;
           mediaByName.insert_or_assign(row.name, stamp);
         }
+      } else if (!cancelled) {
+        // A batch cancelled between probes drops its remaining rows here; re-request them so pending cells
+        // never wait on a run that silently ended.
+        mediaRequested.emplace(row.index, row.id);
       }
     }
     const bool catalogue = snapshot.entries.isCatalogue();
+    const auto matchingRow = [&](const DirectoryEntry& entry) -> const MediaRow* {
+      const auto found = byName.find(entry.name);
+      if (found == byName.end()) {
+        return nullptr;
+      }
+      const MediaFact current{
+          .type = entry.type,
+          .size = entry.size,
+          .modifiedSeconds = entry.modifiedSeconds,
+          .contentRevision = entry.contentRevision,
+          .facts = {}
+      };
+      return !found->second->eligible || found->second->stamp.sameStamp(current) ? found->second : nullptr;
+    };
     bool touched = false;
-    if (!dirty && !byIndex.empty() && (!catalogue || snapshot.entries.sameCatalogue(job.entries))) {
+    if (!byName.empty() && (!catalogue || snapshot.entries.sameCatalogue(job.entries))) {
       if (catalogue) {
         std::vector<std::pair<std::size_t, DirectoryEntry>> facts;
         for (std::size_t i = 0; i < snapshot.entries.size(); ++i) {
           if (const auto* known = snapshot.entries.known(i)) {
             auto entry = *known;
-            if (const auto found = byIndex.find(i); found != byIndex.end()) {
-              applyMedia(entry, *found->second);
+            if (const auto* row = matchingRow(entry)) {
+              applyMedia(entry, *row);
               touched = true;
             }
             facts.emplace_back(i, std::move(entry));
@@ -785,9 +818,9 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
         }
       } else {
         std::vector<DirectoryEntry> entries(snapshot.entries.begin(), snapshot.entries.end());
-        for (const auto& [index, row] : byIndex) {
-          if (index < entries.size() && entries[index].id == row->id && entries[index].name == row->name) {
-            applyMedia(entries[index], *row);
+        for (auto& entry : entries) {
+          if (const auto* row = matchingRow(entry)) {
+            applyMedia(entry, *row);
             touched = true;
           }
         }
@@ -812,10 +845,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
     }
     factsRequested.clear();
     factsOrder.clear();
-    if (mediaIdle != 0) {
-      g_source_remove(std::exchange(mediaIdle, 0));
-    }
-    mediaRequested.clear();
+    // Media requests and probes intentionally survive: a rescan keeps the location, and pending cells must not
+    // wait on a pipeline a churn cycle wiped. open() resets them for a new location.
     if (timer != 0) {
       g_source_remove(std::exchange(timer, 0));
     }
@@ -832,6 +863,8 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
       network.reset();
     }
     stopScan();
+    // Navigation and destruction abandon the media pipeline with the location; open() builds a fresh cancellable.
+    g_cancellable_cancel(mediaCancellable.get());
     if (monitorToken) {
       monitorToken->cancel();
     }
@@ -895,7 +928,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_file_query_filesystem_info_async(
         file.get(), kFilesystemAttributes, G_PRIORITY_DEFAULT, scan->cancellable.get(),
@@ -914,7 +947,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -1166,7 +1199,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->listed(std::move(job.listing));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1296,7 +1329,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->linksFollowed(std::move(job.directoryLinks), std::move(job.icons));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1431,7 +1464,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->iconsRead(job.end, std::move(job.icons));
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1632,7 +1665,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
             state->sniffed(job.begin, job.types);
           }
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
     g_task_set_task_data(
         task,
@@ -1739,7 +1772,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           }
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -1802,7 +1835,7 @@ struct luciole::DirectorySession::State : std::enable_shared_from_this<State> {
           g_list_free_full(infos, g_object_unref);
           g_clear_error(&error);
         },
-        new Request{.state = weak_from_this(), .scan = scan}
+        new Request{.state = weak_from_this(), .scan = scan, .location = {}}
     );
   }
 
@@ -1946,6 +1979,13 @@ void luciole::DirectorySession::open(const Location& location) {
   state->directoryLinkNames.clear();
   state->iconOverrides.clear();
   state->mediaByName.clear();
+  // A new location restarts the media pipeline; the previous generation's requests and probes mean nothing here.
+  state->mediaCancellable.reset(g_cancellable_new());
+  state->mediaRequested.clear();
+  if (state->mediaIdle != 0) {
+    g_source_remove(std::exchange(state->mediaIdle, 0));
+  }
+  state->mediaRunning = false;
   state->snapshot.location = location;
   state->snapshot.entries = {};
   state->entriesAccessInvalidated = false;

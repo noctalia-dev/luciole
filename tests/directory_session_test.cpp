@@ -1078,6 +1078,61 @@ namespace {
     TEST_CHECK(probes.load() == 2);
   }
 
+  void testMediaFactsUnderChurn(Pump& pump) {
+    Fixture fixture;
+    fixture.write("song.mp3", "audio");
+    fixture.write("notes.txt", "text");
+    std::atomic<int> probes = 0;
+    DirectorySession session(0, {}, {}, [&probes](const std::string& path, const std::string&, GCancellable*) {
+      ++probes;
+      if (path.ends_with(".mp3")) {
+        return luciole::EntryMedia{.durationMicros = 12'000'000U, .bitsPerSecond = 128'000U};
+      }
+      return luciole::EntryMedia{};
+    });
+    session.open(fixture.location());
+    ready(pump, session);
+    // Sustained monitor events keep dirty true while rescans replace the listing; media facts must still resolve.
+    std::atomic<bool> storming = true;
+    std::thread storm([&] {
+      for (int tick = 0; tick < 250 && storming.load(); ++tick) {
+        fixture.write(std::format("churn{}", tick % 6));
+        std::this_thread::sleep_for(10ms);
+      }
+      storming.store(false);
+    });
+    const auto resolve = [&](const std::string& name) -> std::optional<std::size_t> {
+      const auto& entries = session.snapshot().entries;
+      for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (entries.brief(i).name == name) {
+          return i;
+        }
+      }
+      return std::nullopt;
+    };
+    pump.until([&] {
+      for (const auto name : {"song.mp3", "notes.txt"}) {
+        if (const auto index = resolve(name)) {
+          session.requestMetadata(*index, session.snapshot().entries.brief(*index).id, luciole::EntryDetails::Media);
+        }
+      }
+      const auto song = resolve("song.mp3");
+      const auto notes = resolve("notes.txt");
+      const auto* songEntry = song ? session.snapshot().entries.known(*song) : nullptr;
+      const auto* notesEntry = notes ? session.snapshot().entries.known(*notes) : nullptr;
+      return songEntry
+          && notesEntry
+          && (songEntry->queriedDetails & luciole::EntryDetails::Media) != 0
+          && (notesEntry->queriedDetails & luciole::EntryDetails::Media) != 0;
+    });
+    storming.store(false);
+    storm.join();
+    TEST_CHECK(probes.load() >= 1);
+    const auto song = resolve("song.mp3");
+    const auto* songEntry = session.snapshot().entries.known(*song);
+    TEST_CHECK(songEntry->media && songEntry->media->durationMicros == 12'000'000U);
+  }
+
   void testCatalogueContinuity() {
     Fixture fixture;
     for (int i = 0; i < 600; ++i) {
@@ -1245,6 +1300,7 @@ int main() {
     testBrowseCatalogue(pump);
     testCatalogueContinuity();
     testMediaFacts(pump);
+    testMediaFactsUnderChurn(pump);
     std::println("directory session checks passed");
     return 0;
   } catch (const std::exception& error) {
