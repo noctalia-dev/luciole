@@ -276,8 +276,10 @@ namespace {
     // it to decoded frames. Files without a usable cover fall through to the frame loop.
     if (probe.cover) {
       if (auto cover = embeddedCover(source, *probe.cover, probe.coverPacket, side, cancel, output, deadline)) {
-        // A cover is already the intended artwork: skip the filmstrip border added to decoded frames.
-        return std::move(*cover);
+        // Browsing thumbnails decorate covers like sampled frames, so every video in a folder looks alike.
+        return purpose == luciole::ThumbnailPurpose::Thumbnail
+            ? videoFilmstrip(std::move(*cover), side, cancel, output.parent_path(), deadline)
+            : std::move(*cover);
       }
     }
     const auto& duration = probe.duration;
