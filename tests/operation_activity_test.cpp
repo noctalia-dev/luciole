@@ -179,8 +179,8 @@ namespace {
       TEST_CHECK(devService.resolve(devService.conflict()->id, luciole::TransferConflictChoice::Replace));
       pump.until([&] { return devService.flushPhase() == luciole::TransferFlush::Device; });
       const auto devActivity = devWorkspace.hub.activities().front();
-      TEST_CHECK(devActivity.state == ActivityState::Working && devActivity.summary != "Writing to device…");
-      TEST_CHECK(devActivity.detail && !devActivity.detail->meters.empty());
+      TEST_CHECK(devActivity.state == ActivityState::Working && devActivity.summary == "Writing to device…");
+      TEST_CHECK(devActivity.meters.empty());
       TEST_CHECK(devActivity.canCancel && devWorkspace.hub.cancelActivity(devJob->id()));
       devRelease.release();
       pump.until([&] { return !devService.busy(); });
@@ -263,36 +263,22 @@ namespace {
     TEST_CHECK(service.start({{fixture.at("payload")}, fixture.at("destination"), luciole::TransferAction::Copy}));
     pump.until([&] { return service.flushPhase() == luciole::TransferFlush::Final; });
     const auto activity = workspace.hub.activities().front();
-    TEST_CHECK(activity.detail.has_value());
-    TEST_CHECK(activity.detail && activity.detail->itemsTotal == 1 && activity.detail->items == 1);
-    TEST_CHECK(activity.detail && activity.detail->filesTotal == 1 && activity.detail->files == 1);
-    TEST_CHECK(
-        activity.detail
-        && activity.detail->bytesTotal == activity.detail->bytes
-        && activity.detail->bytes > 0
-        && !activity.detail->estimating
-    );
+    const auto measured = service.progress();
+    TEST_CHECK(measured.total == 1 && measured.completed == 1);
+    TEST_CHECK(measured.filesTotal == 1 && measured.files == 1);
+    TEST_CHECK(measured.bytesTotal == measured.bytes && measured.bytes > 0 && !measured.estimating);
     // The writeback phase has no measurable denominator: the row shows its flush summary instead of
     // meters, and the bar stays indeterminate, because a full bar would claim a write that has not landed yet.
-    TEST_CHECK(activity.detail && activity.detail->meters.empty());
-    TEST_CHECK(activity.summary == "Writing to device…");
-    // The current item always starts its own line; nothing is in flight once the device write lands,
-    // so the field cannot appear at that moment.
-    TEST_CHECK(
-        activity.detail
-        && (activity.detail->meters.contains("Now:") ? activity.detail->meters.contains("\nNow:") : true)
-    );
-    TEST_CHECK(activity.detail && activity.detail->info.contains("Transferred"));
+    TEST_CHECK(activity.meters.empty() && activity.summary == "Writing to device…");
+    TEST_CHECK(activity.info.contains("Transferred"));
     TEST_CHECK(!activity.progress);
     release.release();
     pump.until([&] { return !service.busy(); });
     // A finished job keeps its measured fields and gains the elapsed time; live meters belong to
     // a running job, so its row still shows the summary.
     const auto done = workspace.hub.activities().front();
-    TEST_CHECK(done.detail.has_value() && done.state == ActivityState::Succeeded);
-    TEST_CHECK(done.detail && done.detail->meters.empty());
-    TEST_CHECK(done.detail && done.detail->elapsedMs.has_value());
-    TEST_CHECK(done.detail && done.detail->info.contains("Elapsed") && done.detail->info.contains("Transferred"));
+    TEST_CHECK(done.state == ActivityState::Succeeded && done.meters.empty());
+    TEST_CHECK(done.info.contains("Elapsed") && done.info.contains("Transferred"));
   }
 
   void batchRenameHistory(Pump& pump) {

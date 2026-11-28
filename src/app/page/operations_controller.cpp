@@ -188,11 +188,13 @@ void OperationsController::act(std::uint64_t id, ActivityAction action) {
   }
 }
 
-// The hub's snapshot for one job: live, or the captured one once it finished.
-const luciole::JobActivity* findActivity(const std::vector<luciole::JobActivity>& activities, std::uint64_t id) {
-  const auto found = std::ranges::find(activities, id, &luciole::JobActivity::id);
-  return found == activities.end() ? nullptr : &*found;
-}
+namespace {
+  // The hub's snapshot for one job: live, or the captured one once it finished.
+  const luciole::JobActivity* findActivity(const std::vector<luciole::JobActivity>& activities, std::uint64_t id) {
+    const auto found = std::ranges::find(activities, id, &luciole::JobActivity::id);
+    return found == activities.end() ? nullptr : &*found;
+  }
+} // namespace
 
 void OperationsController::details(std::uint64_t id) {
   const auto report = m_hub.activityReport(id);
@@ -275,7 +277,7 @@ void OperationsController::refreshDetails() {
     return;
   }
   m_detailsLive = !shown->finished;
-  const std::string info = shown->detail && !shown->detail->info.empty() ? shown->detail->info : shown->summary;
+  const std::string& info = shown->info.empty() ? shown->summary : shown->info;
   m_infoLabel->setText(info);
   m_infoLabel->setVisible(!info.empty());
   m_infoLabel->setParticipatesInLayout(!info.empty());

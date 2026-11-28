@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <format>
 #include <glib.h>
 #include <string_view>
@@ -226,7 +227,8 @@ namespace {
     text += std::format("{:<13}{}", label, value);
   }
   // Everything the transfer measured, including the elapsed time of a finished attempt.
-  std::string infoText(const luciole::TransferProgress& measured, bool done, std::optional<std::int64_t> elapsedMs) {
+  std::string
+  infoText(const luciole::TransferProgress& measured, bool done, std::optional<std::chrono::milliseconds> elapsed) {
     std::string text;
     if (measured.estimating) {
       addField(
@@ -246,8 +248,8 @@ namespace {
     } else {
       addField(text, "Transferred", sizeText(measured.bytes));
     }
-    const std::optional<std::uint64_t> speed = done && elapsedMs && *elapsedMs > 0 && measured.bytes
-        ? std::optional<std::uint64_t>(measured.bytes * 1000U / static_cast<std::uint64_t>(*elapsedMs))
+    const std::optional<std::uint64_t> speed = done && elapsed && elapsed->count() > 0 && measured.bytes
+        ? std::optional<std::uint64_t>(measured.bytes * 1000U / static_cast<std::uint64_t>(elapsed->count()))
         : measured.bytesPerSecond;
     if (speed && *speed) {
       addField(text, "Speed", sizeText(*speed) + "/s");
@@ -263,8 +265,8 @@ namespace {
       addField(text, "Source items", std::format("{} of {}", measured.completed, measured.total));
     }
     if (done) {
-      if (elapsedMs) {
-        addField(text, "Elapsed", timeText(static_cast<std::uint64_t>(*elapsedMs / 1000)));
+      if (elapsed) {
+        addField(text, "Elapsed", timeText(static_cast<std::uint64_t>(elapsed->count() / 1000)));
       }
     } else if (
         measured.bytesTotal
@@ -283,31 +285,6 @@ namespace {
     }
     return text;
   }
-  // Meters for a transfer: live line for the row while running, full info for the dialog once done.
-  std::optional<luciole::JobDetail> transferDetail(const luciole::TransferService& service, bool done) {
-    const auto measured = service.progress();
-    luciole::JobDetail detail;
-    detail.bytes = measured.bytes;
-    detail.bytesTotal = measured.bytesTotal;
-    detail.bytesPerSecond = measured.bytesPerSecond;
-    detail.files = measured.files;
-    detail.filesTotal = measured.filesTotal;
-    detail.items = measured.completed;
-    detail.itemsTotal = measured.total;
-    detail.current = measured.current;
-    detail.estimating = measured.estimating;
-    detail.partial = measured.partial;
-    if (done) {
-      if (const auto elapsed = service.elapsed()) {
-        detail.elapsedMs = elapsed->count();
-      }
-    }
-    detail.info = infoText(measured, done, detail.elapsedMs);
-    // A finished row and the terminal device sync keep their summary text; meters describe streaming work.
-    detail.meters =
-        done || service.flushPhase() == luciole::TransferFlush::Final ? std::string() : metersText(measured);
-    return detail;
-  }
   void transfer(const OperationJob& job, JobActivity& activity, bool details) {
     const auto& service = job.service<luciole::TransferService>();
     activity.title = service.action() == luciole::TransferAction::Copy ? "Copy files"
@@ -316,28 +293,29 @@ namespace {
     if (job.historyReplay() != HistoryReplay::None) {
       activity.title = (job.historyReplay() == HistoryReplay::Undo ? "Undo: " : "Redo: ") + activity.title;
     }
+    const auto measured = service.progress();
     if (job.running()) {
-      activity.detail = transferDetail(service, false);
-      if (service.flushPhase() == luciole::TransferFlush::Final) {
+      activity.info = infoText(measured, false, {});
+      if (service.flushPhase() != luciole::TransferFlush::None) {
         activity.state = ActivityState::Working;
         activity.summary = "Writing to device…";
         return;
       }
+      activity.meters = metersText(measured);
       activity.state = service.bytes() || service.completed() ? ActivityState::Working : ActivityState::Preparing;
       activity.summary = std::format(
           "{} transferred · {} of {} source items", sizeText(service.bytes()), service.completed(), service.total()
       );
       // A measured byte total divides the job far more finely than item counts, but a fraction only
       // appears once bytes have actually moved.
-      const bool moving = activity.detail && activity.detail->bytes > 0;
-      if (moving && activity.detail->bytesTotal && *activity.detail->bytesTotal) {
-        const auto total = static_cast<double>(*activity.detail->bytesTotal);
-        activity.progress = std::min(1.0F, static_cast<float>(static_cast<double>(*activity.detail->bytes) / total));
+      if (measured.bytes && measured.bytesTotal && *measured.bytesTotal) {
+        const auto total = static_cast<double>(*measured.bytesTotal);
+        activity.progress = std::min(1.0F, static_cast<float>(static_cast<double>(measured.bytes) / total));
       } else if (service.completed() && service.total()) {
         activity.progress = static_cast<float>(service.completed()) / static_cast<float>(service.total());
       }
     } else {
-      activity.detail = transferDetail(service, true);
+      activity.info = infoText(measured, true, service.elapsed());
       transferResults(activity, service.results(), details);
       activity.canRetry = service.retryable() > 0;
       if (details && !service.report().empty()) {
