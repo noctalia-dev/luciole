@@ -18,6 +18,7 @@
 #include "fs/directory_entries.h"
 #include "fs/drive_monitor.h"
 #include "fs/file_metadata.h"
+#include "fs/gio_interop.h"
 #include "platform/desktop_integration.h"
 #include "render/animation/animation_manager.h"
 #include "ui/browser/action_shortcuts.h"
@@ -42,6 +43,13 @@ SidebarController::SidebarController(
     : m_page(page), m_pins(pins), m_drives(drives), m_preferences(preferences), m_animations(animations),
       m_menus(menus), m_renamer(renamer), m_properties(properties), m_drags(drags) {}
 
+namespace {
+  // Without GVfs's recent backend the place could only show an error.
+  bool shownRecent(const luciole::BrowserSettings& settings) {
+    return settings.showRecent && luciole::uriSchemeSupported("recent");
+  }
+} // namespace
+
 void SidebarController::load(const luciole::BrowserSettings& settings) {
   m_sidebarWidth = settings.sidebarWidth;
   m_state.setPreferred(settings.showSidebar);
@@ -50,6 +58,7 @@ void SidebarController::load(const luciole::BrowserSettings& settings) {
   m_sidebarTree = settings.sidebarTree;
   m_showDrives = settings.showDrives;
   m_showNetwork = settings.showNetwork;
+  m_showRecent = shownRecent(settings);
   m_showToggle = settings.showSidebarButton;
 }
 
@@ -75,6 +84,12 @@ void SidebarController::applySettings(
     m_showNetwork = settings.showNetwork;
     if (m_places) {
       m_places->setShowNetwork(m_showNetwork);
+    }
+  }
+  if (force || before.showRecent != settings.showRecent) {
+    m_showRecent = shownRecent(settings);
+    if (m_places) {
+      m_places->setShowRecent(m_showRecent);
     }
   }
   if (force || before.sidebarWidth != settings.sidebarWidth) {
@@ -179,6 +194,7 @@ void SidebarController::configureCallbacks() {
   m_places->setTreeEnabled(m_sidebarTree);
   m_places->setShowDrives(m_showDrives);
   m_places->setShowNetwork(m_showNetwork);
+  m_places->setShowRecent(m_showRecent);
   m_places->setOpenCallback([this](const luciole::Location& location) {
     m_page.setActionMessage({});
     m_page.browser().open(location);

@@ -108,6 +108,10 @@ std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luc
     add(Action::EmptyTrash);
     addSeparator(entries);
   }
+  if (request.folder == luciole::Location::recent()) {
+    add(Action::ClearRecent);
+    addSeparator(entries);
+  }
   if (m_page.hasOtherPane()) {
     auto shortcut = luciole::keybindShortcutLabel(luciole::KeybindCommand::ClosePane);
     entries.push_back(
@@ -137,7 +141,10 @@ std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luc
   entries.back().label = "Sort";
   entries.back().hasSubmenu = true;
   add(Action::Refresh);
-  if (request.folder && !request.folder->isTrash() && *request.folder != luciole::Location::network()) {
+  if (request.folder
+      && !request.folder->isTrash()
+      && !request.folder->isRecent()
+      && *request.folder != luciole::Location::network()) {
     add(m_pins.contains(*request.folder) ? Action::UnpinCurrent : Action::PinCurrent);
   }
   add(Action::ReloadPins);
@@ -148,7 +155,70 @@ std::vector<ContextMenuControlEntry> MenuController::folderMenuEntries(const luc
   return entries;
 }
 
+// Run entries for a native program, launcher or script with execute permission; others are opened instead.
+void MenuController::addRunEntries(
+    std::vector<ContextMenuControlEntry>& entries, const luciole::ActionRequest& request,
+    const luciole::DirectoryEntry& file
+) const {
+  const auto location = file.location();
+  if (!location.isNative() || (file.type != luciole::FileType::Regular && !file.symlink)) {
+    return;
+  }
+  const bool launcher = location.basename().value_or("").ends_with(".desktop");
+  const auto execute = luciole::entryAccess(file).execute;
+  if (execute == true || (!execute && file.details.mode && (*file.details.mode & 0111U) != 0) || launcher) {
+    entries.push_back(actionEntry(Action::RunProgram, request));
+    if (!launcher) {
+      entries.push_back(actionEntry(Action::RunInTerminal, request));
+    }
+  }
+}
+
+// Recent items stand for files elsewhere: the menu works on those files, or removes items from the list.
+std::vector<ContextMenuControlEntry>
+MenuController::recentItemMenuEntries(const luciole::ActionRequest& request) const {
+  std::vector<ContextMenuControlEntry> entries;
+  const auto add = [&](Action action) { entries.push_back(actionEntry(action, request)); };
+  const auto* single =
+      request.targets.size() == 1 ? m_page.browser().model().entry(request.targets.front().id) : nullptr;
+  add(Action::Open);
+  add(Action::OpenWith);
+  if (single != nullptr && single->recentTarget()) {
+    addRunEntries(entries, request, single->atRecentTarget());
+  }
+  if (single != nullptr) {
+    add(Action::QuickPreview);
+    if (single->isFolderLink()) {
+      entries.push_back({.id = OpenIn, .label = "Open In", .hasSubmenu = true, .glyph = "folders"});
+    }
+  }
+  addSeparator(entries);
+  add(Action::CopyFiles);
+  entries.push_back({.id = CopyLocation, .label = "Copy Location", .hasSubmenu = true, .glyph = "file-text"});
+  if (single != nullptr) {
+    add(Action::ContainingFolder);
+  }
+  addSeparator(entries);
+  // Archives extract beside their file, as they do in its own folder.
+  if (m_page.actionState(Action::ExtractHere, request).enabled) {
+    if (single != nullptr) {
+      add(Action::BrowseArchive);
+    }
+    add(Action::ExtractHere);
+    add(Action::ExtractTo);
+  }
+  add(Action::Compress);
+  addSeparator(entries);
+  add(Action::RemoveFromRecent);
+  addSeparator(entries);
+  add(Action::Properties);
+  return entries;
+}
+
 std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const luciole::ActionRequest& request) const {
+  if (request.folder && request.folder->isRecent()) {
+    return recentItemMenuEntries(request);
+  }
   std::vector<ContextMenuControlEntry> entries;
   const auto add = [&](Action action) { entries.push_back(actionEntry(action, request)); };
   const auto& model = m_page.browser().model();
@@ -163,19 +233,8 @@ std::vector<ContextMenuControlEntry> MenuController::itemMenuEntries(const lucio
     add(Action::OpenAdmin);
   }
   add(Action::OpenWith);
-  if (single
-      && singleLocation->isNative()
-      && !trash
-      && (single->type == luciole::FileType::Regular || single->symlink)) {
-    const auto execute = luciole::entryAccess(*single).execute;
-    if (execute == true
-        || (!execute && single->details.mode && (*single->details.mode & 0111U) != 0)
-        || singleLocation->basename().value_or("").ends_with(".desktop")) {
-      add(Action::RunProgram);
-      if (!singleLocation->basename().value_or("").ends_with(".desktop")) {
-        add(Action::RunInTerminal);
-      }
-    }
+  if (single && !trash) {
+    addRunEntries(entries, request, *single);
   }
   if (!trash && m_page.actionState(Action::Scripts, request).enabled) {
     add(Action::Scripts);
@@ -483,6 +542,22 @@ void MenuController::openPlaceMenu(const luciole::Bookmark& bookmark, float x, f
     return;
   }
   std::vector<ContextMenuControlEntry> entries{{.id = 1, .label = "Open", .glyph = "folder-open"}};
+  if (bookmark.location == luciole::Location::recent()) {
+    entries.push_back({.label = "", .separator = true});
+    entries.push_back({.id = 9, .label = "Hide Recent", .glyph = "eye-off"});
+    showContextMenu(
+        std::move(entries),
+        [this](int action) {
+          if (action == 1) {
+            m_page.browser().open(luciole::Location::recent());
+          } else if (action == 9) {
+            m_preferences.submit({{luciole::BrowserPreference::ShowRecent, false}});
+          }
+        },
+        {x, y, 1, 1}
+    );
+    return;
+  }
   if (bookmark.location == luciole::Location::network()) {
     entries.push_back({.label = "", .separator = true});
     entries.push_back({.id = 9, .label = "Hide Network", .glyph = "eye-off"});

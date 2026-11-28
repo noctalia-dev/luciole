@@ -29,6 +29,8 @@ private:
   void showScripts(const luciole::ActionRequest& request, luciole::ScriptListing listing, bool loading);
   void openScriptsFolder(const luciole::ActionRequest& request);
   bool current(const luciole::ActionRequest& request) const;
+  // The file a target names: a Recent item's own file, so it runs as from that file's folder.
+  luciole::Location fileOf(const luciole::ActionTarget& target) const;
   PageContext& m_page;
   SubmenuController& m_submenus;
   WaylandConnection& m_connection;

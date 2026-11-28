@@ -200,7 +200,7 @@ luciole::SidebarTreeView::~SidebarTreeView() {
   m_tree.setChangedCallback({});
 }
 void luciole::SidebarTreeView::setRoots(
-    const PinService& pins, const std::vector<Drive>& drives, bool showNetwork, bool trashFull
+    const PinService& pins, const std::vector<Drive>& drives, bool showRecent, bool showNetwork, bool trashFull
 ) {
   DirectorySnapshot snapshot;
   snapshot.status = DirectoryStatus::Ready;
@@ -209,6 +209,30 @@ void luciole::SidebarTreeView::setRoots(
   m_pinIndices.clear();
   m_glyphs.clear();
   m_pinCount = pins.bookmarks().size();
+  const auto addRoot = [&](const Location& target, const std::string& label, const std::string& glyph) {
+    const auto& uri = target.uri();
+    if (roots.contains(uri)) {
+      return;
+    }
+    const auto prior = m_rootIds.find(uri);
+    const auto id = prior == m_rootIds.end() ? m_nextRoot++ : prior->second;
+    roots.emplace(uri, id);
+    m_glyphs.emplace(id, glyph);
+    DirectoryEntry entry{
+        .id = id,
+        .place = target,
+        .name = {},
+        .type = FileType::Directory,
+        .size = {},
+        .modifiedSeconds = {},
+    };
+    entry.setDisplayName(label);
+    entries.push_back(std::move(entry));
+  };
+  const auto recentAfter = showRecent ? pinBeforeRecent(pins.bookmarks()) : std::nullopt;
+  if (showRecent && !recentAfter) {
+    addRoot(Location::recent(), "Recent", "history");
+  }
   for (std::size_t i = 0; i < pins.bookmarks().size(); ++i) {
     const auto& pin = pins.bookmarks()[i];
     const auto prior = m_rootIds.find(pin.location.uri());
@@ -235,27 +259,10 @@ void luciole::SidebarTreeView::setRoots(
     };
     entry.setDisplayName(pin.label);
     entries.push_back(std::move(entry));
-  }
-  const auto addRoot = [&](const Location& target, const std::string& label, const std::string& glyph) {
-    const auto& uri = target.uri();
-    if (roots.contains(uri)) {
-      return;
+    if (recentAfter == i) {
+      addRoot(Location::recent(), "Recent", "history");
     }
-    const auto prior = m_rootIds.find(uri);
-    const auto id = prior == m_rootIds.end() ? m_nextRoot++ : prior->second;
-    roots.emplace(uri, id);
-    m_glyphs.emplace(id, glyph);
-    DirectoryEntry entry{
-        .id = id,
-        .place = target,
-        .name = {},
-        .type = FileType::Directory,
-        .size = {},
-        .modifiedSeconds = {},
-    };
-    entry.setDisplayName(label);
-    entries.push_back(std::move(entry));
-  };
+  }
   const auto addDriveRoot = [&](const Drive& drive) {
     addRoot(drive.activation ? *drive.activation : *drive.root, drive.label, driveGlyph(drive));
   };

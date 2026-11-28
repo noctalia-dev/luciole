@@ -13,6 +13,9 @@ namespace luciole {
     std::string glyphName;
   };
 
+  // The pin the Recent row follows: Home when it is pinned; nullopt puts Recent first.
+  std::optional<std::size_t> pinBeforeRecent(const std::vector<Bookmark>& pins);
+
   // Read platform user-directory configuration once at startup, outside Render.
   std::vector<UserPlace> configuredUserPlaces();
 

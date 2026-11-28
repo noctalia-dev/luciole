@@ -10,6 +10,7 @@
 #include "browser/tab_workspace.h"
 #include "config/state_store.h"
 #include "core/timer_manager.h"
+#include "fs/recent_files.h"
 #include "thumbnails/thumbnail_service.h"
 #include "ui/palette.h"
 
@@ -186,6 +187,7 @@ private:
   luciole::PinService m_pins;
   // Declared before m_pages, which read it.
   luciole::FolderViewService m_folderViews;
+  luciole::RecentFiles m_recentFiles;
   std::vector<luciole::SavedWindow> m_savedWindows;
   std::optional<std::vector<luciole::SavedWindow>> m_pendingWindows;
   luciole::DriveMonitor m_drives;

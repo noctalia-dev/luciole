@@ -318,7 +318,7 @@ void MillerView::synchronize() {
     view.adapter->setPresentation(presentation, snapshot.metadata.filesystem.readOnly);
     view.adapter->setRowIconSize(iconSize);
     const bool context = (column.browser->searchRecursive() && !column.browser->searchQuery().empty())
-        || (snapshot.location && snapshot.location->isTrash());
+        || (snapshot.location && (snapshot.location->isTrash() || snapshot.location->isRecent()));
     const float rowHeight =
         luciole::fileRowHeight(presentation, context, luciole::millerRowIconSize(presentation, iconSize));
     if (rowHeight != view.rowHeight) {

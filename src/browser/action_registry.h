@@ -74,6 +74,8 @@ namespace luciole {
     UnpinCurrent,
     ReloadPins,
     EmptyTrash,
+    RemoveFromRecent,
+    ClearRecent,
     SelectAll,
     InvertSelection,
     SelectPattern,
@@ -122,6 +124,8 @@ namespace luciole {
     bool canBack = false, canForward = false, canUp = false;
     bool operationsBusy = false;
     bool pinsEditable = false, pinsBusy = false, canEmptyTrash = false;
+    // The shared recent list is not being rewritten.
+    bool canEditRecent = true;
     std::function<bool(const Location&)> pinned;
     ViewMode viewMode = ViewMode::List;
     bool showSidebar = true;
@@ -136,6 +140,9 @@ namespace luciole {
     // Per-folder views are on, and the current folder has its own sort or view mode.
     bool folderViews = false, folderViewCustomized = false;
   };
+  // Actions Recent offers: browsing, and those that work on each listed item's file or edit the list. The rest would
+  // act on the list as if it were a folder.
+  bool recentAction(BrowserAction action);
   // Actions a file chooser window offers: browsing, selection and New Folder. Everything else would act on files or
   // leave the chooser.
   bool chooserAction(BrowserAction action);

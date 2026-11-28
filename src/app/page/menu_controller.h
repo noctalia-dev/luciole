@@ -81,6 +81,11 @@ private:
   // The file menu of the empty area, or of the request's targets.
   std::vector<ContextMenuControlEntry> folderMenuEntries(const luciole::ActionRequest& request) const;
   std::vector<ContextMenuControlEntry> itemMenuEntries(const luciole::ActionRequest& request) const;
+  std::vector<ContextMenuControlEntry> recentItemMenuEntries(const luciole::ActionRequest& request) const;
+  void addRunEntries(
+      std::vector<ContextMenuControlEntry>& entries, const luciole::ActionRequest& request,
+      const luciole::DirectoryEntry& file
+  ) const;
   void showOpenInMenu(const luciole::ActionRequest& request);
   // Path and URI of the request's targets, or of its folder when `targets` is false.
   void showCopyLocationMenu(const luciole::ActionRequest& request, bool targets);

@@ -431,6 +431,24 @@ namespace {
              "Remote", "Network"}
         )
     );
+    // Recent follows Home once shown, and is a row, not a pin.
+    sidebar.setShowRecent(true);
+    TEST_CHECK(
+        sidebarLabels(sidebar)
+        == std::vector<std::string>(
+            {"Places", "Home", "Recent", "Trash", "Drives", "File System", "Games", "Arch ISO", "Debian ISO",
+             "Backup.zip", "Remote", "Network"}
+        )
+    );
+    TEST_CHECK(!pins.contains(luciole::Location::recent()));
+    // Without a Home pin, Recent leads Places.
+    const luciole::Bookmark homePin{
+        .label = "Home", .location = luciole::Location::fromPath(g_get_home_dir()), .iconName = {}
+    };
+    const luciole::Bookmark otherPin{.label = "Other", .location = luciole::Location::fromPath("/srv"), .iconName = {}};
+    TEST_CHECK(luciole::pinBeforeRecent({otherPin, homePin}) == 1);
+    TEST_CHECK(!luciole::pinBeforeRecent({otherPin}));
+    sidebar.setShowRecent(false);
     // With no network shares, hiding Network also omits the empty Remote heading.
     sidebar.setShowNetwork(false);
     TEST_CHECK(

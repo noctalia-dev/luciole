@@ -40,6 +40,10 @@ A place's **Move Up** and **Move Down** carry it across a separator. The folder 
 
 Choose **Change Icon…** in a bookmark's context menu and pick a [Tabler icon](https://tabler.io/icons). The icon is not shared with other applications. Choose **Reset to Default** to restore the standard icon.
 
+## Recent
+
+**Recent** follows **Home** in Places (or comes first when Home is not pinned) and lists the files you used last. It is not a pin: it cannot be moved, renamed or unpinned. **Hide Recent** in its context menu or **Settings → Appearance → Sidebar → Show Recent** hides or restores it. See [Recent](recent.md).
+
 ## Show or hide Network
 
 In the flat sidebar, the **Remote** section lists **Network** followed by mounted and configured network shares, and appears whenever it has at least one row. In the folder tree, **Network**, mounted shares and configured system automounts appear at the end of **Folders**. **Settings → Appearance → Sidebar → Show Network** or Network's **Hide Network** menu item hides or restores **Network** in both sidebar modes while keeping mounted and configured shares visible. See [network folders](network.md).

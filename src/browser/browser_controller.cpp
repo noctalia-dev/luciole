@@ -134,6 +134,10 @@ void luciole::BrowserController::setDefaultSort(SortOptions sort) {
   m_defaultSort = sort;
   applyFolderView(false);
 }
+void luciole::BrowserController::setRecentSort(SortOptions sort) {
+  m_recentSort = sort;
+  applyFolderView(false);
+}
 std::optional<luciole::FolderView> luciole::BrowserController::folderView() const {
   if (m_folderViews == nullptr || m_history.empty()) {
     return std::nullopt;
@@ -142,7 +146,8 @@ std::optional<luciole::FolderView> luciole::BrowserController::folderView() cons
 }
 void luciole::BrowserController::applyFolderView(bool viewMode) {
   const auto view = folderView();
-  m_model.setSort(view && view->sort ? *view->sort : m_defaultSort);
+  m_model.setSort(view && view->sort ? *view->sort : fallbackSort());
+  m_sortedForRecent = !m_history.empty() && m_history[m_historyIndex].location.isRecent();
   if (!viewMode || m_history.empty() || m_defaults.mode == ViewMode::Miller) {
     return;
   }
@@ -151,6 +156,9 @@ void luciole::BrowserController::applyFolderView(bool viewMode) {
   m_history[m_historyIndex].viewport.mode = mode;
 }
 void luciole::BrowserController::reapplyFolderView() { applyFolderView(true); }
+const luciole::SortOptions& luciole::BrowserController::fallbackSort() const {
+  return !m_history.empty() && m_history[m_historyIndex].location.isRecent() ? m_recentSort : m_defaultSort;
+}
 std::optional<luciole::BrowseViewport> luciole::BrowserController::takeRestoredViewport() {
   return std::exchange(m_restoredViewport, std::nullopt);
 }
@@ -188,7 +196,8 @@ void luciole::BrowserController::loadVisit() {
   const auto destination = m_history[m_historyIndex].location;
   const auto query = m_history[m_historyIndex].query;
   m_viewport = m_history[m_historyIndex].viewport;
-  if (folderView()) {
+  // Entering or leaving Recent changes the sort even without per-folder views.
+  if (folderView() || destination.isRecent() != m_sortedForRecent) {
     // The listing is replaced next, so the re-sort need not be published.
     m_publishing = true;
     applyFolderView(true);
@@ -836,6 +845,16 @@ void luciole::BrowserController::activate(EntryId id) {
     } else {
       showMessage("Restore this item before opening it.");
     }
+  } else if (location.isRecent()) {
+    // A Recent item opens its file, or enters its folder.
+    if (const auto* target = entry->recentTarget(); target && entry->type == FileType::Directory) {
+      open(*target);
+    } else if (target && m_fileActivated) {
+      const auto callback = m_fileActivated;
+      callback(*target);
+    } else {
+      showMessage("This recent item no longer names a file.");
+    }
   } else if (entry->symlink) {
     queryFileType(
         location, m_activation->token,
@@ -905,6 +924,8 @@ void luciole::BrowserController::duplicateFrom(BrowserController& source) {
   }
   m_defaults = source.m_defaults;
   m_defaultSort = source.m_defaultSort;
+  m_recentSort = source.m_recentSort;
+  m_sortedForRecent = source.m_sortedForRecent;
   m_folderViews = source.m_folderViews;
   m_searchRecursive = source.m_searchRecursive;
   m_history = source.m_history;

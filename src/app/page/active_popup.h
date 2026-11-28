@@ -16,6 +16,7 @@ public:
     Settings,
     PatternSelection,
     EmptyTrash,
+    ClearRecent,
     CreateItem,
     Link,
     BatchRename,

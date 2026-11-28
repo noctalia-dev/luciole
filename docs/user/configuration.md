@@ -110,6 +110,8 @@ All keys belong in `[browser]`. Dimensions are logical pixels. View, zoom and so
 | `sidebar_tree` | `false` | Sidebar folder tree |
 | `show_drives` | `true` | Show drives, removable devices and network shares in the sidebar |
 | `show_network` | `true` | Show Network in the sidebar |
+| `show_recent` | `true` | Show Recent in the sidebar when the system can list recent files. See [Recent](recent.md) |
+| `remember_recent` | `true` | Add files opened or picked in Luciole to the shared recent files list |
 | `expandable_folders` | `false` | Expand folders within List view |
 | `show_preview` | `true` | Show the side preview when space permits |
 | `chooser_show_preview` | `false` | Show the side preview in file picker windows; toggling it there changes only this key |
@@ -164,6 +166,7 @@ The size limit applies to image and PDF sources only. There is no pixel limit: t
 - **Per-folder view and sort:** `$XDG_STATE_HOME/luciole/folder_views.toml`. Luciole keeps the 4096 most recently changed folders.
 - **Thumbnails:** the shared `$XDG_CACHE_HOME/thumbnails/` cache, default `~/.cache/thumbnails/`.
 - **Custom actions:** the [scripts directory](scripts.md).
+- **Recent files:** the shared `$XDG_DATA_HOME/recently-used.xbel`, default `~/.local/share/recently-used.xbel`. Luciole adds opened files and edits it when you remove or clear items. See [Recent](recent.md).
 - **Palette:** an optional `colors.toml` beside the settings files, written by Noctalia's [Luciole template](https://docs.noctalia.dev/noctalia/templates/official/luciole/). See [Packaging](../../PACKAGING.md#configuration-and-writable-data) for ownership and installation.
 
 Pinned folders are shared with GTK applications and file dialogs, and Luciole refuses to edit a read-only or symlinked bookmarks file.

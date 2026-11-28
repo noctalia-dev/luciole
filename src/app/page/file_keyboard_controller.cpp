@@ -176,7 +176,10 @@ bool FileKeyboardController::commandKey(const KeyboardEvent& event) {
     const bool trash = luciole::keybindMatches(luciole::KeybindCommand::Trash, event.sym, event.modifiers);
     if (permanently || trash) {
       const auto& folder = m_page.browser().model().snapshot().location;
-      if (permanently || (folder && (folder->isTrash() || folder->isAdmin()))) {
+      // In Recent, deleting removes items from the list; the files themselves stay.
+      if (folder && folder->isRecent()) {
+        m_page.dispatchAction(Action::RemoveFromRecent);
+      } else if (permanently || (folder && (folder->isTrash() || folder->isAdmin()))) {
         m_page.dispatchAction(Action::DeletePermanently);
       } else {
         m_page.dispatchAction(Action::Trash);

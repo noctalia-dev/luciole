@@ -68,6 +68,15 @@ std::vector<luciole::UserPlace> luciole::configuredUserPlaces() {
   return result;
 }
 
+std::optional<std::size_t> luciole::pinBeforeRecent(const std::vector<Bookmark>& pins) {
+  const char* home = g_get_home_dir();
+  if (home == nullptr || !g_path_is_absolute(home)) {
+    return std::nullopt;
+  }
+  const auto found = std::ranges::find(pins, Location::fromPath(home), &Bookmark::location);
+  return found == pins.end() ? std::nullopt : std::optional<std::size_t>(found - pins.begin());
+}
+
 struct luciole::PinService::State : std::enable_shared_from_this<State> {
   struct Result {
     bool ready = false;

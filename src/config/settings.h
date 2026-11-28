@@ -60,6 +60,9 @@ namespace luciole {
     bool sidebarTree = false;
     bool showDrives = true;
     bool showNetwork = true;
+    bool showRecent = true;
+    // Add the files Luciole opens or chooses to the recent list other applications share.
+    bool rememberRecent = true;
     bool expandableFolders = false;
     bool showPreview = true;
     // File picker windows keep their own preview visibility and layout.
@@ -146,6 +149,8 @@ namespace luciole {
     SidebarTree,
     ShowDrives,
     ShowNetwork,
+    ShowRecent,
+    RememberRecent,
     ExpandableFolders,
     ShowPreview,
     ChooserShowPreview,
@@ -258,6 +263,8 @@ namespace luciole {
     static constexpr PreferenceKey<bool> SidebarTree{Id::SidebarTree};
     static constexpr PreferenceKey<bool> ShowDrives{Id::ShowDrives};
     static constexpr PreferenceKey<bool> ShowNetwork{Id::ShowNetwork};
+    static constexpr PreferenceKey<bool> ShowRecent{Id::ShowRecent};
+    static constexpr PreferenceKey<bool> RememberRecent{Id::RememberRecent};
     static constexpr PreferenceKey<bool> ExpandableFolders{Id::ExpandableFolders};
     static constexpr PreferenceKey<bool> ShowPreview{Id::ShowPreview};
     static constexpr PreferenceKey<bool> ChooserShowPreview{Id::ChooserShowPreview};

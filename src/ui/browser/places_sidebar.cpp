@@ -239,7 +239,8 @@ void luciole::PlacesSidebar::sync(std::optional<Location> current) {
   for (auto& row : m_rows) {
     const bool selected = !highlighted
         && (m_current == row.bookmark.location
-            || (row.bookmark.location == Location::trash() && m_current && m_current->isTrash()));
+            || (row.bookmark.location == Location::trash() && m_current && m_current->isTrash())
+            || (row.bookmark.location == Location::recent() && m_current && m_current->isRecent()));
     row.button->setSelected(selected);
     highlighted = highlighted || selected;
   }
@@ -512,7 +513,10 @@ void luciole::PlacesSidebar::addRow(
         m_open(bookmark.location);
       }
     } else if (luciole::keybindMatches(luciole::KeybindCommand::Rename, key.sym, key.modifiers)) {
-      if (m_rename && !bookmark.location.isTrash() && bookmark.location != Location::network()) {
+      if (m_rename
+          && !bookmark.location.isTrash()
+          && bookmark.location != Location::network()
+          && bookmark.location != Location::recent()) {
         m_rename(bookmark);
       }
     } else if (luciole::keybindMatches(luciole::KeybindCommand::ContextMenu, key.sym, key.modifiers)) {
@@ -589,6 +593,11 @@ void luciole::PlacesSidebar::setShowDrives(bool showDrives) {
     invalidate();
   }
 }
+void luciole::PlacesSidebar::setShowRecent(bool showRecent) {
+  if (std::exchange(m_showRecent, showRecent) != showRecent) {
+    invalidate();
+  }
+}
 void luciole::PlacesSidebar::setShowNetwork(bool showNetwork) {
   if (std::exchange(m_showNetwork, showNetwork) != showNetwork) {
     invalidate();
@@ -640,7 +649,7 @@ void luciole::PlacesSidebar::rebuild() {
         return target && !m_pins.contains(*target);
       });
     }
-    m_tree->setRoots(m_pins, drives, m_showNetwork, m_trashFull);
+    m_tree->setRoots(m_pins, drives, m_showRecent, m_showNetwork, m_trashFull);
     m_tree->sync(m_current, m_showHidden);
     return;
   }
@@ -674,6 +683,13 @@ void luciole::PlacesSidebar::rebuild() {
   m_separatorDrag.reset();
   content->addChild(makeListDropIndicator(1.0F, &m_separatorIndicator));
   const auto& pins = m_pins.bookmarks();
+  const auto recentAfter = m_showRecent ? pinBeforeRecent(pins) : std::nullopt;
+  const auto addRecent = [&] {
+    addRow({.label = "Recent", .location = Location::recent(), .iconName = {}}, "history", std::nullopt);
+  };
+  if (m_showRecent && !recentAfter) {
+    addRecent();
+  }
   const SeparatorGaps gaps(m_pins);
   for (std::size_t i = 0; i < pins.size(); ++i) {
     const auto separator = gaps.separatorAbove(i);
@@ -692,6 +708,9 @@ void luciole::PlacesSidebar::rebuild() {
     m_rows.back().separator = separator;
     m_rows.back().separatorButton = line.button;
     m_rows.back().separatorLine = line.line;
+    if (recentAfter == i) {
+      addRecent();
+    }
   }
   const auto addSectionHeading = [&](const std::string& title) {
     content->addChild(ui::column({.align = FlexAlign::Stretch, .paddingV = Style::spaceXs}, ui::separator({})));

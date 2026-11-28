@@ -26,6 +26,8 @@ std::vector<luciole::Breadcrumb> luciole::locationBreadcrumbs(const Location& lo
       label = "Network";
     } else if (location.isTrash()) {
       label = "Trash";
+    } else if (location.isRecent()) {
+      label = "Recent";
     } else if (current->isAdmin()) {
       label = "File System";
     } else if (current->isNative()) {

@@ -51,7 +51,8 @@ namespace luciole {
     std::optional<FileIdentity> identity;   // Only when it is not a local device and inode pair.
     std::string parentDisplayName;
     std::optional<TrashInfo> trash;
-    std::optional<Location> target; // Provider shortcut destination; never replaces the entry operation address.
+    // Provider shortcut destination, or the file a Recent item stands for; never replaces the entry operation address.
+    std::optional<Location> target;
   };
 
   // Local providers' entity tag and identity as numbers; the text forms are rebuilt exactly on request.
@@ -96,6 +97,11 @@ namespace luciole {
     // Presentation text; equals the name unless the provider reports another.
     const std::string& displayName() const;
     const Location* shortcutTarget() const;
+    // The file a Recent item stands for: opening, copying, dragging and choosing use it, while removing the item only
+    // forgets it. Null outside Recent.
+    const Location* recentTarget() const;
+    // This Recent item as an entry for its file, keeping its facts; call only when recentTarget() is set.
+    DirectoryEntry atRecentTarget() const;
     // Folder-like provider shortcuts navigate to their destination, retaining their own listing identity.
     bool isFolderLink() const;
     Location navigationLocation() const;
