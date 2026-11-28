@@ -528,6 +528,11 @@ namespace {
     store.write(make(second, "source-two"), 128, budget, cancel.get());
     const auto two = store.root() / "normal" / luciole::ThumbnailStore::filename(second);
     TEST_CHECK(!fs::exists(one) && fs::exists(two) && fs::file_size(two) <= budget);
+    // Same budget again: the size estimate must still trigger a rescan and prune when the write would exceed it.
+    const auto third = luciole::Location::fromPath("/tmp/cache-three.png").uri();
+    store.write(make(third, "source-three"), 128, budget, cancel.get());
+    const auto three = store.root() / "normal" / luciole::ThumbnailStore::filename(third);
+    TEST_CHECK(!fs::exists(two) && fs::exists(three));
     TEST_CHECK(store.clear().empty());
   }
   void command(const std::vector<std::string>& args) {

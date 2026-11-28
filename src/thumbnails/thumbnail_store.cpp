@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <fcntl.h>
 #include <format>
 #include <gdk-pixbuf/gdk-pixbuf.h>
+#include <mutex>
 #include <ranges>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -20,6 +22,21 @@ namespace {
     return side <= 128 ? "normal" : side <= 256 ? "large" : side <= 512 ? "x-large" : "xx-large";
   }
   constexpr std::array kSides{128, 256, 512, 1024};
+  // The cache size found by the last full scan plus Luciole's writes since, so most batches skip rescanning a
+  // shared cache that can hold hundreds of thousands of files. Other applications' writes are seen at the next scan.
+  struct CacheEstimate {
+    std::mutex mutex;
+    std::filesystem::path root;
+    std::uint64_t budget = 0;
+    std::uint64_t bytes = 0;
+    std::chrono::steady_clock::time_point scanned;
+    bool valid = false;
+  };
+  CacheEstimate& cacheEstimate() {
+    static CacheEstimate estimate;
+    return estimate;
+  }
+  constexpr auto kRescanInterval = std::chrono::seconds(60);
   bool safeDirectory(const std::filesystem::path& path) {
     if (::mkdir(path.c_str(), 0700) < 0 && errno != EEXIST) {
       return false;
@@ -185,6 +202,7 @@ void luciole::ThumbnailStore::writeBatch(
   }
   std::array<bool, 4> prepared{};
   bool written = false;
+  std::uint64_t writtenBytes = 0;
   for (const auto& entry : thumbnails) {
     if (g_cancellable_is_cancelled(cancellable)) {
       break;
@@ -226,15 +244,35 @@ void luciole::ThumbnailStore::writeBatch(
         && !g_cancellable_is_cancelled(cancellable)
         && ::rename(pattern.c_str(), (folder / filename(uri->second)).c_str()) == 0) {
       written = true;
+      writtenBytes += png->size();
     } else {
       (void)::unlink(pattern.c_str());
     }
   }
-  if (written) {
-    prune(budget);
+  if (!written) {
+    return;
   }
+  {
+    auto& estimate = cacheEstimate();
+    const std::scoped_lock lock(estimate.mutex);
+    if (estimate.valid
+        && estimate.root == m_root
+        && estimate.budget == budget
+        && std::chrono::steady_clock::now() - estimate.scanned < kRescanInterval
+        && writtenBytes <= budget - std::min(budget, estimate.bytes)) {
+      // Counts replacements of existing thumbnails as growth, so this errs towards an earlier rescan.
+      estimate.bytes += writtenBytes;
+      return;
+    }
+  }
+  prune(budget);
 }
 std::string luciole::ThumbnailStore::clear() {
+  {
+    auto& estimate = cacheEstimate();
+    const std::scoped_lock lock(estimate.mutex);
+    estimate.valid = false;
+  }
   for (const auto& file : cachedFiles(m_root)) {
     const auto bytes = readThumbnailFile(file.path, 8U * 1024U * 1024U);
     if (!bytes) {
@@ -258,18 +296,24 @@ void luciole::ThumbnailStore::prune(std::uint64_t budget) {
   for (const auto& file : files) {
     bytes += file.bytes;
   }
-  if (bytes <= budget) {
-    return;
-  }
-  std::ranges::sort(files, [](const CachedFile& a, const CachedFile& b) {
-    return std::tie(a.modified.tv_sec, a.modified.tv_nsec) < std::tie(b.modified.tv_sec, b.modified.tv_nsec);
-  });
-  for (const auto& file : files) {
-    if (bytes <= budget) {
-      break;
+  if (bytes > budget) {
+    std::ranges::sort(files, [](const CachedFile& a, const CachedFile& b) {
+      return std::tie(a.modified.tv_sec, a.modified.tv_nsec) < std::tie(b.modified.tv_sec, b.modified.tv_nsec);
+    });
+    for (const auto& file : files) {
+      if (bytes <= budget) {
+        break;
+      }
+      if (::unlink(file.path.c_str()) == 0) {
+        bytes -= file.bytes;
+      }
     }
-    if (::unlink(file.path.c_str()) == 0) {
-      bytes -= file.bytes;
-    }
   }
+  auto& estimate = cacheEstimate();
+  const std::scoped_lock lock(estimate.mutex);
+  estimate.root = m_root;
+  estimate.budget = budget;
+  estimate.bytes = bytes;
+  estimate.scanned = std::chrono::steady_clock::now();
+  estimate.valid = true;
 }
