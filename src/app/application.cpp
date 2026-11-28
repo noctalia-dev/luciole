@@ -109,6 +109,7 @@ int luciole::runApplication(const std::optional<std::string>& initialLocation, S
   // threshold would otherwise grow and leave them in the heap (measured: 14 MiB less at 100,000 entries).
   mallopt(M_MMAP_THRESHOLD, 128 * 1024);
 #endif
+  initLogFile();
   initLogLevelFromEnvironment();
   std::optional<luciole::Location> location;
   try {
