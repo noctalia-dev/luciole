@@ -3,6 +3,7 @@
 #include "fs/location.h"
 #include "fs/transfer_types.h"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -39,6 +40,16 @@ namespace luciole {
     TransferAction action = TransferAction::Move;
     bool allowMerge = true; // Archive publication keeps its separate all-or-nothing folder policy.
   };
+  // Byte and item measurement of one running transfer, read on the main loop.
+  struct TransferProgress {
+    std::uint64_t bytes = 0;
+    std::size_t completed = 0, total = 0;
+    std::optional<std::uint64_t> bytesTotal, bytesPerSecond;
+    std::optional<std::size_t> files, filesTotal;
+    std::string current;
+    bool estimating = false; // The source size scan still runs.
+    bool partial = false;    // Totals are lower bounds of a bounded scan.
+  };
 
   // One serial native-filesystem or verified-provider job. Workers never access browser models or UI.
   class TransferService {
@@ -58,9 +69,12 @@ namespace luciole {
     // Cancels worker work unconditionally during service or application teardown, including post-flush history capture.
     void shutdown();
     bool busy() const;
+    // Duration of the attempt that just finished; unknown while running and for history loads.
+    std::optional<std::chrono::milliseconds> elapsed() const;
     std::size_t total() const;
     std::size_t completed() const;
     std::uint64_t bytes() const;
+    TransferProgress progress() const; // Byte, file and item measurement of the running transfer.
     TransferAction action() const;
     const std::vector<TransferResult>& results() const;
     std::optional<TransferConflict> conflict() const;

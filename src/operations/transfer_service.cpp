@@ -14,11 +14,14 @@
 #include "operations/operation_history.h"
 #include "operations/provider_transfer.h"
 #include "operations/transfer_copy.h"
+#include "operations/transfer_estimate.h"
 #include "operations/transfer_staging.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <deque>
 #include <fcntl.h>
 #include <filesystem>
 #include <glib.h>
@@ -94,6 +97,58 @@ namespace {
     return report;
   }
 
+  // Cumulative progress written by a transfer worker and read by the main loop.
+  struct Meter {
+    std::atomic<std::size_t> completed{0}, expectedFiles{0}, filesDone{0};
+    std::atomic<std::uint64_t> expectedBytes{0};
+    std::atomic<bool> totalsKnown{false}, totalsPartial{false}, estimating{false};
+    std::atomic<std::shared_ptr<const std::string>> currentName;
+    // Clears every counter. History replay measures nothing, so it passes `measuring` false.
+    void reset(bool measuring) {
+      completed.store(0);
+      expectedBytes.store(0);
+      expectedFiles.store(0);
+      filesDone.store(0);
+      totalsKnown.store(false);
+      totalsPartial.store(false);
+      estimating.store(measuring);
+      currentName.store(nullptr);
+    }
+  };
+
+  // Estimates bytes per second from reader-side samples of the byte counter. Reads closer together
+  // than kSampleGap reuse the last estimate, so several pages observing one job cannot collapse the
+  // measurement window. Main loop only.
+  class RateMeter {
+  public:
+    std::optional<std::uint64_t> sample(std::uint64_t bytes) {
+      const auto now = Clock::now();
+      if (!m_samples.empty() && now - m_samples.back().first < kSampleGap) {
+        return m_rate;
+      }
+      m_samples.emplace_back(now, bytes);
+      while (m_samples.size() > 1 && now - m_samples.front().first > kWindow) {
+        m_samples.pop_front();
+      }
+      const auto span = std::chrono::duration_cast<std::chrono::microseconds>(now - m_samples.front().first).count();
+      if (m_samples.size() > 1 && span >= 400000) {
+        m_rate = (bytes - m_samples.front().second) * 1000000U / static_cast<std::uint64_t>(span);
+      }
+      return m_rate;
+    }
+    void reset() {
+      m_samples.clear();
+      m_rate.reset();
+    }
+
+  private:
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto kSampleGap = std::chrono::milliseconds(100);
+    static constexpr auto kWindow = std::chrono::seconds(3);
+    std::deque<std::pair<Clock::time_point, std::uint64_t>> m_samples;
+    std::optional<std::uint64_t> m_rate;
+  };
+
   luciole::FileError cancelledError() {
     return {.kind = luciole::FileErrorKind::Cancelled, .message = "Transfer cancelled."};
   }
@@ -104,10 +159,12 @@ struct luciole::TransferService::State {
   bool active = false;
   TransferAction action = TransferAction::Move;
   std::size_t total = 0;
-  std::atomic<std::size_t> completed{0};
   transfer::WritebackOps writeback;
   std::atomic<TransferFlush> flush{TransferFlush::None};
+  std::optional<std::chrono::steady_clock::time_point> startedAt, finishedAt;
   std::atomic<std::uint64_t> bytes{0};
+  Meter meter;
+  RateMeter rate;
   CancelToken token;
   std::vector<TransferResult> results;
   Gate gate;
@@ -120,12 +177,26 @@ struct luciole::TransferService::State {
   bool historyRetired = false;
   bool operationHistory = false;
 
+  // Clears the worker counters and the reader-side rate.
+  void resetProgress(bool measuring) {
+    meter.reset(measuring);
+    rate.reset();
+  }
   void beginTransfer(const TransferRequest& request, bool retry) {
     active = true;
+    // Elapsed time covers the attempt being started now, so a retry measures the retry.
+    startedAt = std::chrono::steady_clock::now();
+    finishedAt.reset();
     action = request.action;
     total = request.sources.size();
-    completed.store(0);
     bytes.store(0);
+    // Providers, administrator locations and link transfers have no measurable source size, so no
+    // scan runs and the byte totals stay unknown.
+    resetProgress(
+        !retry
+        && request.action != TransferAction::Link
+        && std::ranges::all_of(request.sources, [](const auto& source) { return source.nativePath().has_value(); })
+    );
     flush.store(TransferFlush::None);
     token = CancelToken{};
     receipt.reset();
@@ -224,14 +295,14 @@ namespace {
     }
   }
 
-  std::vector<luciole::TransferResult> retryJob(Job& job, Work& work, std::atomic<std::size_t>& completed) {
+  std::vector<luciole::TransferResult> retryJob(Job& job, Work& work, Meter& meter) {
     auto outcomes = job.outcomes;
     for (const auto& node : job.nodes) {
       if (node) {
         execute(*node, job.request.action, work, true);
         outcomes.at(node->source.index) = snapshot(*node);
       }
-      completed.fetch_add(1);
+      meter.completed.fetch_add(1);
     }
     finishTransfers(job, work, outcomes);
     return outcomes;
@@ -298,7 +369,79 @@ namespace {
     };
   }
 
-  std::vector<luciole::TransferResult> runFirst(Job& job, Work& work, std::atomic<std::size_t>& completed) {
+  // A move that stays on one device renames instead of streaming bytes.
+  bool renameOnlyMove(const luciole::TransferRequest& request) {
+    if (request.action != luciole::TransferAction::Move) {
+      return false;
+    }
+    const auto destination = request.destination.nativePath();
+    struct stat target{};
+    if (!destination || ::stat(destination->c_str(), &target) != 0) {
+      return false;
+    }
+    return std::ranges::all_of(request.sources, [&](const auto& source) {
+      const auto path = source.nativePath();
+      struct stat value{};
+      return path && ::lstat(path->c_str(), &value) == 0 && value.st_dev == target.st_dev;
+    });
+  }
+
+  // Measures every source before the transfer runs so progress can be shown.
+  void measureSources(Meter& meter, const luciole::TransferRequest& request, const luciole::CancelToken& token) {
+    if (!meter.estimating.load()) {
+      return;
+    }
+    if (renameOnlyMove(request)) {
+      meter.estimating.store(false);
+      return;
+    }
+    luciole::SourceEstimate measured;
+    const auto publish = [&meter](const luciole::SourceEstimate& value) {
+      meter.expectedBytes.store(value.bytes);
+      meter.expectedFiles.store(value.files);
+      meter.totalsPartial.store(value.partial);
+    };
+    for (const auto& source : request.sources) {
+      if (token.cancelled()) {
+        measured.partial = true;
+        break;
+      }
+      const auto finished = measured;
+      const auto one = luciole::estimateSource(source, token, [&publish, &finished](const auto& value) {
+        auto running = finished;
+        running.bytes += value.bytes;
+        running.files += value.files;
+        running.partial |= value.partial;
+        publish(running);
+      });
+      if (!one) {
+        // One source without a size makes every total unknown.
+        meter.expectedBytes.store(0);
+        meter.expectedFiles.store(0);
+        meter.totalsPartial.store(false);
+        meter.estimating.store(false);
+        return;
+      }
+      measured.bytes += one->bytes;
+      measured.files += one->files;
+      measured.partial |= one->partial;
+      publish(*one);
+    }
+    meter.expectedBytes.store(measured.bytes);
+    meter.expectedFiles.store(measured.files);
+    meter.totalsPartial.store(measured.partial);
+    meter.estimating.store(false);
+    meter.totalsKnown.store(true);
+  }
+  void noteCurrentName(Meter& meter, const std::string& name) {
+    meter.currentName.store(std::make_shared<const std::string>(name));
+  }
+  // Names the source the worker is about to process.
+  void noteCurrent(Meter& meter, const luciole::Location& location) {
+    noteCurrentName(meter, location.displayName().value_or(std::string{}));
+  }
+
+  std::vector<luciole::TransferResult> runFirst(Job& job, Work& work, Meter& meter) {
     using luciole::TransferOutcome;
     const auto& request = job.request;
     std::vector<luciole::TransferResult> outcomes;
@@ -345,11 +488,11 @@ namespace {
         } catch (const TransferCancelled&) {
           outcomes[index] = {location, TransferOutcome::Cancelled, cancelledError()};
           processed[index] = true;
-          completed.fetch_add(1);
+          meter.completed.fetch_add(1);
         } catch (const std::exception&) {
           outcomes[index] = {location, TransferOutcome::Failed, luciole::currentFileError()};
           processed[index] = true;
-          completed.fetch_add(1);
+          meter.completed.fetch_add(1);
         }
       }
       std::set<std::pair<dev_t, ino_t>> selectedDirectories;
@@ -388,11 +531,11 @@ namespace {
         } catch (const TransferCancelled&) {
           outcomes[source.index] = {source.location, TransferOutcome::Cancelled, cancelledError()};
           processed[source.index] = true;
-          completed.fetch_add(1);
+          meter.completed.fetch_add(1);
         } catch (const std::exception&) {
           outcomes[source.index] = {source.location, TransferOutcome::Failed, luciole::currentFileError()};
           processed[source.index] = true;
-          completed.fetch_add(1);
+          meter.completed.fetch_add(1);
         }
         source.parent = luciole::Fd{};
       }
@@ -404,6 +547,7 @@ namespace {
         if (processed[source.index]) {
           continue;
         }
+        noteCurrent(meter, source.location);
         try {
           if (included[i]) {
             outcomes[source.index].outcome = TransferOutcome::Skipped;
@@ -420,8 +564,9 @@ namespace {
         }
         source.parent = luciole::Fd{};
         processed[source.index] = true;
-        completed.fetch_add(1);
+        meter.completed.fetch_add(1);
       }
+      meter.currentName.store(nullptr);
     } catch (const std::exception&) {
       const auto error = luciole::currentFileError();
       for (std::size_t i = 0; i < outcomes.size(); ++i) {
@@ -431,7 +576,7 @@ namespace {
       }
     }
     finishTransfers(job, work, outcomes);
-    completed.store(outcomes.size());
+    meter.completed.store(outcomes.size());
     return outcomes;
   }
 } // namespace
@@ -446,6 +591,14 @@ luciole::TransferService::TransferService(transfer::WritebackOps ops) : Transfer
   m_state->writeback = std::move(ops);
 }
 luciole::TransferFlush luciole::TransferService::flushPhase() const { return m_state->flush.load(); }
+
+std::optional<std::chrono::milliseconds> luciole::TransferService::elapsed() const {
+  // A transfer loaded from history never ran here, so it has no measured duration.
+  if (!m_state->startedAt || !m_state->finishedAt) {
+    return {};
+  }
+  return std::chrono::duration_cast<std::chrono::milliseconds>(*m_state->finishedAt - *m_state->startedAt);
+}
 luciole::TransferService::~TransferService() {
   m_state->changed = {};
   shutdown();
@@ -455,8 +608,31 @@ void luciole::TransferService::setChangedCallback(std::function<void()> callback
 }
 bool luciole::TransferService::busy() const { return m_state->active; }
 std::size_t luciole::TransferService::total() const { return m_state->total; }
-std::size_t luciole::TransferService::completed() const { return m_state->completed.load(); }
+std::size_t luciole::TransferService::completed() const { return m_state->meter.completed.load(); }
 std::uint64_t luciole::TransferService::bytes() const { return m_state->bytes.load(); }
+luciole::TransferProgress luciole::TransferService::progress() const {
+  State& state = *m_state;
+  TransferProgress out;
+  out.bytes = state.bytes.load();
+  out.completed = state.meter.completed.load();
+  out.total = state.total;
+  out.estimating = state.meter.estimating.load();
+  out.partial = state.meter.totalsPartial.load();
+  if (state.meter.totalsKnown.load()) {
+    out.bytesTotal = state.meter.expectedBytes.load();
+    out.filesTotal = state.meter.expectedFiles.load();
+    // A tree that grew after the scan can finish with more entries than were measured.
+    out.files = std::min(state.meter.filesDone.load(), *out.filesTotal);
+  }
+  if (const auto name = state.meter.currentName.load()) {
+    out.current = *name;
+  }
+  // Only a running job has a rate and stops at completion.
+  if (state.active) {
+    out.bytesPerSecond = state.rate.sample(out.bytes);
+  }
+  return out;
+}
 luciole::TransferAction luciole::TransferService::action() const { return m_state->action; }
 const std::vector<luciole::TransferResult>& luciole::TransferService::results() const { return m_state->results; }
 void luciole::TransferService::cancel() {
@@ -987,6 +1163,9 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
           }
         };
         work.allowMerge = allowMerge;
+        // The copy threads report their own entries, so a folder copy counts files, not source roots.
+        work.nameObserver = [owner](const std::string& name) { noteCurrentName(owner->meter, name); };
+        work.fileObserver = [owner] { owner->meter.filesDone.fetch_add(1); };
         auto revisions = std::make_shared<HistoryRevisions>();
         work.history = revisions;
         const bool administrator = job->request.destination.isAdmin()
@@ -1077,6 +1256,8 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         }
         work.changedLinks = job->changedLinks;
         work.mergedItems = job->mergedItems;
+        // Measure the sources, so the running transfer shows a byte total, file count and remaining time.
+        measureSources(owner->meter, job->request, token);
         const bool remote = !job->request.destination.isNative()
             || std::ranges::any_of(job->request.sources, [](const auto& source) { return !source.isNative(); });
         if (remote && !job->provider) {
@@ -1084,15 +1265,15 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
         }
         auto outcomes = remote
             ? job->provider->run(
-                  token, owner->bytes, owner->completed,
+                  token, owner->bytes, owner->meter.completed,
                   [&](TransferConflict conflict) {
                     const auto answer = owner->gate.ask(std::move(conflict), token, [owner] { State::notify(owner); });
                     return answer ? answer->choice : TransferConflictChoice::Cancel;
                   },
                   &work, !retry && !administrator && !job->request.destination.isNative() && !operationHistory
               )
-            : retry ? retryJob(*job, work, owner->completed)
-                    : runFirst(*job, work, owner->completed);
+            : retry ? retryJob(*job, work, owner->meter)
+                    : runFirst(*job, work, owner->meter);
         job->changedLinks = std::move(work.changedLinks);
         job->mergedItems = work.mergedItems;
         std::shared_ptr<const MoveReceipt> receipt;
@@ -1188,6 +1369,7 @@ bool luciole::TransferService::launch(TransferRequest request, bool retry) {
           owner->job.reset();
         }
         owner->flush = TransferFlush::None;
+        owner->finishedAt = std::chrono::steady_clock::now();
         owner->active = false;
         const auto callback = owner->changed;
         if (callback) {
@@ -1209,8 +1391,8 @@ bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& 
   m_state->active = true;
   m_state->action = TransferAction::Move;
   m_state->total = receipt->size();
-  m_state->completed.store(0);
   m_state->bytes.store(0);
+  m_state->resetProgress(false);
   m_state->token = CancelToken{};
   m_state->results.clear();
   m_state->report.clear();
@@ -1221,7 +1403,7 @@ bool luciole::TransferService::replay(const std::shared_ptr<const MoveReceipt>& 
   m_state->job.reset();
   ++m_state->jobId;
   runJob<MoveReplayResult>(
-      [owner = m_state, receipt, token = m_state->token] { return receipt->reverse(token, owner->completed); },
+      [owner = m_state, receipt, token = m_state->token] { return receipt->reverse(token, owner->meter.completed); },
       [owner = m_state, receipt](JobResult<MoveReplayResult>&& result) {
         if (result) {
           owner->results = std::move(result->results);
@@ -1253,8 +1435,8 @@ bool luciole::TransferService::replayCopy(const std::shared_ptr<const CopyReceip
   m_state->active = true;
   m_state->action = receipt->action();
   m_state->total = receipt->size();
-  m_state->completed.store(0);
   m_state->bytes.store(0);
+  m_state->resetProgress(false);
   m_state->token = CancelToken{};
   m_state->results.clear();
   m_state->report.clear();
@@ -1265,7 +1447,7 @@ bool luciole::TransferService::replayCopy(const std::shared_ptr<const CopyReceip
   m_state->job.reset();
   ++m_state->jobId;
   runJob<CopyReplayResult>(
-      [owner = m_state, receipt, token = m_state->token] { return receipt->reverse(token, owner->completed); },
+      [owner = m_state, receipt, token = m_state->token] { return receipt->reverse(token, owner->meter.completed); },
       [owner = m_state, receipt](JobResult<CopyReplayResult>&& result) {
         if (result) {
           owner->results = std::move(result->results);
@@ -1319,13 +1501,13 @@ std::vector<luciole::TransferResult> luciole::runHistoryTransfer(
   work.revisionObserver = [&history](const struct stat& value, bool removed) { history.observed(value, removed); };
   work.operationHistory = &history;
   work.exactTarget = destination;
-  std::atomic<std::size_t> completed{0};
+  Meter meter;
   if (!source.isNative() || !destination.isNative()) {
     ProviderTransfer provider(job.request, destination);
     return provider.run(
-        token, bytes, completed, [&](const TransferConflict& conflict) { return choose(conflict.destination); }, &work,
-        false
+        token, bytes, meter.completed, [&](const TransferConflict& conflict) { return choose(conflict.destination); },
+        &work, false
     );
   }
-  return runFirst(job, work, completed);
+  return runFirst(job, work, meter);
 }

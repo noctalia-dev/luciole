@@ -46,7 +46,10 @@ public:
   }
   void bind(const luciole::JobActivity& activity) {
     m_title->setText(activity.title);
-    m_summary->setText(activity.summary);
+    // A running transfer carries a meters line with the measured speed and totals
+    const std::string& line =
+        activity.detail && !activity.detail->meters.empty() ? activity.detail->meters : activity.summary;
+    m_summary->setText(line);
     m_summary->setColor(colorSpecFromRole(activity.failed() ? ColorRole::Error : ColorRole::OnSurfaceVariant));
     m_glyph->setGlyph(
         activity.failed()                                         ? "alert-circle"

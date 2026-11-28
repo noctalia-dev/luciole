@@ -246,6 +246,55 @@ namespace {
       TEST_CHECK(archWorkspace.hub.activities().front().state == ActivityState::Succeeded);
     }
   }
+  // A running transfer row carries measured meters: bytes, file counts and an advancing bar, so the
+  // user sees work happening instead of an indeterminate spinner.
+  void transferProgressActivity(Pump& pump) {
+    Fixture fixture;
+    fixture.write("payload");
+    std::binary_semaphore release(0);
+    Workspace workspace;
+    luciole::transfer::WritebackOps ops{
+        .removable = [](int, dev_t) { return true; },
+        .sync = [&](int) { TEST_CHECK(release.try_acquire_for(std::chrono::seconds(10))); }
+    };
+    auto job = workspace.hub.create<luciole::TransferService>(workspace.page, JobScope::Follow, std::move(ops));
+    auto& service = job->service<luciole::TransferService>();
+    TEST_CHECK(service.start({{fixture.at("payload")}, fixture.at("destination"), luciole::TransferAction::Copy}));
+    pump.until([&] { return service.flushPhase() == luciole::TransferFlush::Final; });
+    const auto activity = workspace.hub.activities().front();
+    TEST_CHECK(activity.detail.has_value());
+    TEST_CHECK(activity.detail && activity.detail->itemsTotal == 1 && activity.detail->items == 1);
+    TEST_CHECK(activity.detail && activity.detail->filesTotal == 1 && activity.detail->files == 1);
+    TEST_CHECK(
+        activity.detail
+        && activity.detail->bytesTotal == activity.detail->bytes
+        && activity.detail->bytes > 0
+        && !activity.detail->estimating
+    );
+    TEST_CHECK(activity.detail && activity.detail->meters.contains("transferred"));
+    TEST_CHECK(activity.detail && activity.detail->meters.contains("1 of 1 files"));
+    // Nothing is in flight while the device write lands, so the item line is absent at that moment;
+    // whenever the field does appear it starts its own line.
+    TEST_CHECK(activity.detail && !activity.detail->meters.contains("Now:"));
+    TEST_CHECK(
+        activity.detail
+        && (activity.detail->meters.contains("Now:") ? activity.detail->meters.contains("\nNow:") : true)
+    );
+    TEST_CHECK(activity.detail && activity.detail->info.contains("Transferred"));
+    // The writeback phase has no measurable denominator: meters stay visible, the bar stays
+    // indeterminate, because a full bar would claim a write that has not landed yet.
+    TEST_CHECK(!activity.progress);
+    release.release();
+    pump.until([&] { return !service.busy(); });
+    // A finished job keeps its measured fields and gains the elapsed time; live meters belong to
+    // a running job, so its row still shows the summary.
+    const auto done = workspace.hub.activities().front();
+    TEST_CHECK(done.detail.has_value() && done.state == ActivityState::Succeeded);
+    TEST_CHECK(done.detail && done.detail->meters.empty());
+    TEST_CHECK(done.detail && done.detail->elapsedMs.has_value());
+    TEST_CHECK(done.detail && done.detail->info.contains("Elapsed") && done.detail->info.contains("Transferred"));
+  }
+
   void batchRenameHistory(Pump& pump) {
     Fixture fixture;
     fixture.write("a");
@@ -1367,6 +1416,7 @@ int main(int argc, char** argv) {
   TEST_CHECK(argc == 1);
   activityAttention();
   removableFlushActivity(pump);
+  transferProgressActivity(pump);
   overwriteHistory(pump);
   trashMoveNotifications(pump, false);
   transferLifecycle(pump);

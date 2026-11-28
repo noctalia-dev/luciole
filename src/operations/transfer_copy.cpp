@@ -202,6 +202,9 @@ namespace luciole::transfer {
         int from, const std::string& name, int to, const std::string& target, const struct stat& source, CopyWork& work,
         std::vector<char>& buffer
     ) {
+      if (work.nameObserver) {
+        work.nameObserver(name);
+      }
       auto input = opened(::openat(from, name.c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
       requireUnchanged(source, statFd(input.get()));
       auto output = opened(::openat(to, target.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
@@ -211,9 +214,17 @@ namespace luciole::transfer {
       if (closeOutput(output, work.writebackOps) != 0) {
         fail("Could not close copied file");
       }
+      if (work.fileObserver) {
+        work.fileObserver();
+      }
     }
 
-    void copyLink(int from, const std::string& name, int to, const std::string& target, const struct stat& source) {
+    void copyLink(
+        int from, const std::string& name, int to, const std::string& target, const struct stat& source, CopyWork& work
+    ) {
+      if (work.nameObserver) {
+        work.nameObserver(name);
+      }
       std::vector<char> buffer(256);
       for (;;) {
         const auto size = ::readlinkat(from, name.c_str(), buffer.data(), buffer.size());
@@ -236,6 +247,9 @@ namespace luciole::transfer {
       const timespec times[]{source.st_atim, source.st_mtim};
       if (::utimensat(to, target.c_str(), times, AT_SYMLINK_NOFOLLOW) != 0) {
         fail("Could not preserve link metadata");
+      }
+      if (work.fileObserver) {
+        work.fileObserver();
       }
     }
 
@@ -560,7 +574,7 @@ namespace luciole::transfer {
             finish();
           }
         } else if (S_ISLNK(source.st_mode)) {
-          copyLink(from, tree.name, to, target, source);
+          copyLink(from, tree.name, to, target, source, m_work);
         } else {
           throwFileError(FileErrorKind::Unsupported, "Special files cannot be transferred.");
         }
@@ -638,7 +652,7 @@ namespace luciole::transfer {
       }
       finishFolder(input.get(), output.get(), source, work);
     } else if (S_ISLNK(source.st_mode)) {
-      copyLink(from, name, to, target, source);
+      copyLink(from, name, to, target, source, work);
     } else {
       throwFileError(FileErrorKind::Unsupported, "Special files cannot be transferred.");
     }

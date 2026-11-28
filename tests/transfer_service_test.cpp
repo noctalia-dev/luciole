@@ -1,10 +1,12 @@
 #include "event_loop/glib_poll_source.h"
+#include "fs/cancel_token.h"
 #include "fs/posix_fd.h"
 #include "fs/system_mounts.h"
 #include "operations/copy_receipt.h"
 #include "operations/creation_stage.h"
 #include "operations/history_revisions.h"
 #include "operations/move_receipt.h"
+#include "operations/transfer_estimate.h"
 #include "operations/transfer_pacing.h"
 #include "operations/transfer_service.h"
 #include "operations/transfer_staging.h"
@@ -131,6 +133,51 @@ namespace {
   private:
     GlibPollSource m_source;
   };
+  // Progress meters are measured before the first byte moves: byte and file totals are known while
+  // a job runs, a bounded scan stays an honest lower bound, and a transfer with no measurable
+  // payload reports no totals at all.
+  void testProgress(Pump& pump) {
+    Fixture fixture;
+    write(fixture.source("plain"), std::string(4096, 'a'));
+    fs::create_directories(fixture.source("tree/nested"));
+    write(fixture.source("tree/inner"), std::string(1024, 'c'));
+    write(fixture.source("tree/nested/leaf"), std::string(2048, 'b'));
+    luciole::CancelToken token;
+    const auto folder = luciole::estimateSource(location(fixture.source("tree")), token, {});
+    TEST_CHECK(folder && folder->bytes == 1024 + 2048 && folder->files == 2 && !folder->partial);
+    const auto single = luciole::estimateSource(location(fixture.source("plain")), token, {});
+    TEST_CHECK(single && single->bytes == 4096 && single->files == 1);
+    // A folder publishes running totals as it is scanned instead of one answer at the end.
+    std::vector<std::uint64_t> samples;
+    const auto counted = luciole::estimateSource(location(fixture.source("tree")), token, [&](const auto& value) {
+      samples.push_back(value.bytes);
+    });
+    TEST_CHECK(samples.size() >= 2 && samples.front() == 0 && samples.back() == counted->bytes);
+    luciole::TransferService service;
+    pump.run(
+        service, {location(fixture.source("plain")), location(fixture.source("tree"))}, fixture.destination(""),
+        TransferAction::Copy
+    );
+    const auto copied = service.progress();
+    TEST_CHECK(copied.bytesTotal == 4096 + 1024 + 2048 && copied.bytes == copied.bytesTotal);
+    TEST_CHECK(copied.filesTotal == 3 && copied.files == 3);
+    TEST_CHECK(copied.total == 2 && copied.completed == 2);
+    TEST_CHECK(!copied.estimating && !copied.partial);
+    // A finished job has no live speed, and a link transfer has no payload to measure.
+    TEST_CHECK(!copied.bytesPerSecond);
+    luciole::TransferService links;
+    pump.run(links, {location(fixture.source("plain"))}, fixture.destination("tree"), TransferAction::Link);
+    const auto linked = links.progress();
+    TEST_CHECK(!linked.bytesTotal && !linked.filesTotal && !linked.estimating && linked.completed == 1);
+    // A same-device move renames, so it writes no payload bytes and must claim no byte total.
+    write(fixture.source("later"), "renamed later");
+    luciole::TransferService moved;
+    pump.run(moved, {location(fixture.source("later"))}, fixture.destination(""), TransferAction::Move);
+    const auto renamed = moved.progress();
+    TEST_CHECK(!renamed.bytesTotal && !renamed.filesTotal && !renamed.estimating);
+    TEST_CHECK(renamed.completed == 1 && renamed.total == 1 && renamed.bytes == 0);
+    TEST_CHECK(fs::exists(fixture.destination("later")) && !fs::exists(fixture.source("later")));
+  }
   void testWriteback(Pump& pump) {
     Fixture fixture;
     const auto group = fixture.source("tree"), merged = fixture.destination("tree");
@@ -6039,6 +6086,7 @@ int main(int argc, char** argv) {
     testReplacementTimestampGuards(pump);
     testSymbolicLinkDrops(pump);
     testRemovableDevices();
+    testProgress(pump);
     testWriteback(pump);
     testWritebackPacing(pump);
     testCopyHistory(pump);

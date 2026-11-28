@@ -17,6 +17,7 @@ struct LayoutRect;
 class OperationHub;
 class OperationsView;
 class PageContext;
+class ProgressBar;
 class ScrollView;
 enum class ActivityAction;
 
@@ -36,6 +37,7 @@ public:
 private:
   void act(std::uint64_t id, ActivityAction action);
   void details(std::uint64_t id);
+  void refreshDetails();
   void closed();
   float popupHeight(std::size_t count) const;
   // The toolbar button, or the main menu button while the toolbar button is hidden.
@@ -48,6 +50,10 @@ private:
   OperationsView* m_view = nullptr;
   ScrollView* m_detailsScroll = nullptr;
   Label* m_reportLabel = nullptr;
+  Label* m_infoLabel = nullptr;
+  ProgressBar* m_detailsBar = nullptr;
+  std::optional<std::uint64_t> m_detailsId;
+  bool m_detailsLive = false;
   Timer m_progress;
   std::size_t m_count = 0;
   std::optional<std::array<int, 4>> m_anchor;

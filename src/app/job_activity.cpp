@@ -154,6 +154,148 @@ namespace {
     }
     report.publish(activity, details);
   }
+  // Minutes and seconds for a remaining-time estimate, hours appear when needed.
+  std::string timeText(std::uint64_t seconds) {
+    if (seconds >= 3600) {
+      return std::format("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60);
+    }
+    if (seconds >= 60) {
+      return std::format("{}m {:02}s", seconds / 60, seconds % 60);
+    }
+    return std::format("{}s", seconds);
+  }
+  // One compact line with everything a running transfer is known to be doing.
+  std::string metersText(const luciole::TransferProgress& measured) {
+    std::string text;
+    const auto add = [&text](const std::string& part) {
+      if (!text.empty()) {
+        text += " · ";
+      }
+      text += part;
+    };
+    if (measured.bytesTotal && *measured.bytesTotal) {
+      add(std::format(
+          "{} of {} transferred", sizeText(measured.bytes),
+          std::string(measured.partial ? "at least " : "") + sizeText(*measured.bytesTotal)
+      ));
+    } else if (measured.estimating) {
+      add(std::format("Measuring size · {} transferred so far", sizeText(measured.bytes)));
+    } else {
+      add(std::format("{} transferred", sizeText(measured.bytes)));
+    }
+    // Item counts carry the job when no byte total was measured.
+    if (!(measured.bytesTotal && *measured.bytesTotal) && measured.total) {
+      add(std::format("{} of {} items", measured.completed, measured.total));
+    }
+    if (measured.bytesPerSecond && *measured.bytesPerSecond) {
+      add(sizeText(*measured.bytesPerSecond) + "/s");
+    }
+    if (measured.filesTotal && *measured.filesTotal) {
+      add(
+          std::format("{} of {}{} files", measured.files.value_or(0), *measured.filesTotal, measured.partial ? "+" : "")
+      );
+    }
+    // The estimate needs a measured total and a current speed, while updating with speed changes.
+    if (measured.bytesTotal
+        && measured.bytesPerSecond
+        && *measured.bytesPerSecond
+        && *measured.bytesTotal > measured.bytes) {
+      const auto left = (*measured.bytesTotal - measured.bytes) / *measured.bytesPerSecond;
+      add(left ? timeText(left) + " left" : "Almost done");
+    }
+    if (!measured.current.empty()) {
+      // The item being worked on is the one field that does not fit beside the totals.
+      if (!text.empty()) {
+        text += '\n';
+      }
+      text += "Now: " + measured.current;
+    }
+    return text;
+  }
+  // One measured field per line, labels padded to a column, for the details dialog.
+  void addField(std::string& text, const std::string& label, const std::string& value) {
+    if (value.empty()) {
+      return;
+    }
+    if (!text.empty()) {
+      text += '\n';
+    }
+    text += std::format("{:<13}{}", label, value);
+  }
+  // Everything the transfer measured, including the elapsed time of a finished attempt.
+  std::string infoText(const luciole::TransferProgress& measured, bool done, std::optional<std::int64_t> elapsedMs) {
+    std::string text;
+    if (measured.estimating) {
+      addField(text, "Measuring", std::format("{} transferred so far", sizeText(measured.bytes)));
+    } else if (measured.bytesTotal && *measured.bytesTotal) {
+      addField(
+          text, "Transferred",
+          std::format(
+              "{} of {}{}", sizeText(measured.bytes), measured.partial ? "at least " : "",
+              sizeText(*measured.bytesTotal)
+          )
+      );
+    } else {
+      addField(text, "Transferred", sizeText(measured.bytes));
+    }
+    const std::optional<std::uint64_t> speed = done && elapsedMs && *elapsedMs > 0 && measured.bytes
+        ? std::optional<std::uint64_t>(measured.bytes * 1000U / static_cast<std::uint64_t>(*elapsedMs))
+        : measured.bytesPerSecond;
+    if (speed && *speed) {
+      addField(text, "Speed", sizeText(*speed) + "/s");
+    }
+    if (measured.filesTotal && *measured.filesTotal) {
+      addField(
+          text, "Files",
+          std::format("{} of {}{} files", measured.files.value_or(0), *measured.filesTotal, measured.partial ? "+" : "")
+      );
+    }
+    if (measured.total) {
+      // Selected sources, so a folder is one item until it finishes; the file count is the live one.
+      addField(text, "Source items", std::format("{} of {}", measured.completed, measured.total));
+    }
+    if (done) {
+      if (elapsedMs) {
+        addField(text, "Elapsed", timeText(static_cast<std::uint64_t>(*elapsedMs / 1000)));
+      }
+    } else if (
+        measured.bytesTotal
+        && measured.bytesPerSecond
+        && *measured.bytesPerSecond
+        && *measured.bytesTotal > measured.bytes
+    ) {
+      const auto left = (*measured.bytesTotal - measured.bytes) / *measured.bytesPerSecond;
+      addField(text, "Remaining", left ? timeText(left) : "less than a second");
+    }
+    if (!measured.current.empty()) {
+      addField(text, "Current", measured.current);
+    }
+    return text;
+  }
+  // Meters for a transfer: live line for the row while running, full info for the dialog once done.
+  std::optional<luciole::JobDetail> transferDetail(const luciole::TransferService& service, bool done) {
+    const auto measured = service.progress();
+    luciole::JobDetail detail;
+    detail.bytes = measured.bytes;
+    detail.bytesTotal = measured.bytesTotal;
+    detail.bytesPerSecond = measured.bytesPerSecond;
+    detail.files = measured.files;
+    detail.filesTotal = measured.filesTotal;
+    detail.items = measured.completed;
+    detail.itemsTotal = measured.total;
+    detail.current = measured.current;
+    detail.estimating = measured.estimating;
+    detail.partial = measured.partial;
+    if (done) {
+      if (const auto elapsed = service.elapsed()) {
+        detail.elapsedMs = elapsed->count();
+      }
+    }
+    detail.info = infoText(measured, done, detail.elapsedMs);
+    // A finished row keeps its summary text; the meters line only describes live work.
+    detail.meters = done ? std::string() : metersText(measured);
+    return detail;
+  }
   void transfer(const OperationJob& job, JobActivity& activity, bool details) {
     const auto& service = job.service<luciole::TransferService>();
     activity.title = service.action() == luciole::TransferAction::Copy ? "Copy files"
@@ -163,6 +305,7 @@ namespace {
       activity.title = (job.historyReplay() == HistoryReplay::Undo ? "Undo: " : "Redo: ") + activity.title;
     }
     if (job.running()) {
+      activity.detail = transferDetail(service, false);
       if (service.flushPhase() != luciole::TransferFlush::None) {
         activity.state = ActivityState::Working;
         activity.summary = "Writing to device…";
@@ -172,7 +315,17 @@ namespace {
       activity.summary = std::format(
           "{} transferred · {} of {} source items", sizeText(service.bytes()), service.completed(), service.total()
       );
+      // A measured byte total divides the job far more finely than item counts, but a fraction only
+      // appears once bytes have actually moved.
+      const bool moving = activity.detail && activity.detail->bytes > 0;
+      if (moving && activity.detail->bytesTotal && *activity.detail->bytesTotal) {
+        const auto total = static_cast<double>(*activity.detail->bytesTotal);
+        activity.progress = std::min(1.0F, static_cast<float>(static_cast<double>(*activity.detail->bytes) / total));
+      } else if (service.completed() && service.total()) {
+        activity.progress = static_cast<float>(service.completed()) / static_cast<float>(service.total());
+      }
     } else {
+      activity.detail = transferDetail(service, true);
       transferResults(activity, service.results(), details);
       activity.canRetry = service.retryable() > 0;
       if (details && !service.report().empty()) {

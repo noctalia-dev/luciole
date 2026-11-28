@@ -51,6 +51,10 @@ namespace luciole::transfer {
     std::map<std::pair<dev_t, ino_t>, struct stat> changedLinks;
     std::shared_ptr<HistoryRevisions> history;
     std::function<void(const struct stat&, bool)> revisionObserver;
+    // Per-entry presentation progress: the entry being copied, and each entry finished. A folder
+    // copy runs these from its walking and copy threads, so counts advance file by file.
+    std::function<void(const std::string&)> nameObserver;
+    std::function<void()> fileObserver;
     std::vector<char> buffer;
     std::atomic<bool> metadataIncomplete{false};
     // Kernel copy paths the destination filesystem rejected; later files skip straight to the next one.

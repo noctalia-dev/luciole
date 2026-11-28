@@ -97,11 +97,19 @@ void OperationsController::onFrame() {
       m_page.popupDispatcher().cancelPointerCapture();
     }
     m_page.popupSurface()->requestLayout();
-    if (progressing && !m_progress.active()) {
-      m_progress.startRepeating(std::chrono::milliseconds(200), [this] { markDirty(); });
-    } else if (!progressing) {
-      m_progress.stop();
+  }
+  // The details dialog follows the same job as the list, so it refreshes from the same snapshot.
+  if (m_detailsId) {
+    refreshDetails();
+    if (m_page.popupSurface()) {
+      m_page.popupSurface()->requestLayout();
     }
+  }
+  const bool polling = progressing || m_detailsLive;
+  if (polling && !m_progress.active()) {
+    m_progress.startRepeating(std::chrono::milliseconds(200), [this] { markDirty(); });
+  } else if (!polling) {
+    m_progress.stop();
   }
 }
 
@@ -161,6 +169,10 @@ void OperationsController::closed() {
   m_clear = nullptr;
   m_detailsScroll = nullptr;
   m_reportLabel = nullptr;
+  m_infoLabel = nullptr;
+  m_detailsBar = nullptr;
+  m_detailsId.reset();
+  m_detailsLive = false;
 }
 
 void OperationsController::act(std::uint64_t id, ActivityAction action) {
@@ -176,19 +188,37 @@ void OperationsController::act(std::uint64_t id, ActivityAction action) {
   }
 }
 
+// The hub's snapshot for one job: live, or the captured one once it finished.
+const luciole::JobActivity* findActivity(const std::vector<luciole::JobActivity>& activities, std::uint64_t id) {
+  const auto found = std::ranges::find(activities, id, &luciole::JobActivity::id);
+  return found == activities.end() ? nullptr : &*found;
+}
+
 void OperationsController::details(std::uint64_t id) {
   const auto report = m_hub.activityReport(id);
-  if (!report) {
+  if (!report && !findActivity(m_hub.activities(), id)) {
     return;
   }
   ScrollView* scroll = nullptr;
+  ProgressBar* bar = nullptr;
+  Label* info = nullptr;
   Label* label = nullptr;
   auto body = ui::scrollView(
       {.out = &scroll, .viewportPaddingH = 0.0F, .viewportPaddingV = 0.0F, .fillWidth = true, .flexGrow = 1.0F}
   );
   body->content()->setAlign(FlexAlign::Stretch);
+  body->content()->setGap(Style::spaceSm);
+  body->content()->addChild(ui::progressBar({.out = &bar, .height = 6.0F}));
+  // The meters column is monospace so its labels line up, as the report below it reads line by line.
   body->content()->addChild(
-      ui::label({.out = &label, .text = *report, .maxWidth = 500.0F, .maxLines = 8192, .configure = [](Label& text) {
+      ui::label(
+          {.out = &info, .fontFamily = "monospace", .maxWidth = 500.0F, .maxLines = 8192, .configure = [](Label& text) {
+             text.setUseMarkup(false);
+           }}
+      )
+  );
+  body->content()->addChild(
+      ui::label({.out = &label, .maxWidth = 500.0F, .maxLines = 8192, .configure = [](Label& text) {
                    text.setUseMarkup(false);
                  }})
   );
@@ -211,7 +241,12 @@ void OperationsController::details(std::uint64_t id) {
               {.text = "Copy Report",
                .enabled = m_page.clipboard().available(),
                .variant = ButtonVariant::Ghost,
-               .onClick = [this, report] { m_page.clipboard().setClipboardText(*report); }}
+               .onClick = [this, id] {
+                 const auto text = m_hub.activityReport(id);
+                 if (text) {
+                   m_page.clipboard().setClipboardText(*text);
+                 }
+               }}
           )
       )
   );
@@ -219,9 +254,41 @@ void OperationsController::details(std::uint64_t id) {
   m_page.showDialog(std::move(root), DialogWidth::Medium);
   if (m_page.popupSurface()) {
     m_detailsScroll = scroll;
+    m_detailsBar = bar;
+    m_infoLabel = info;
     m_reportLabel = label;
+    m_detailsId = id;
     m_page.activePopup().bind(ActivePopup::Kind::OperationDetails, [this] { closed(); });
+    refreshDetails();
   }
+}
+
+// Pushes the current snapshot into the open dialog: progress, every measured field, and the report.
+void OperationsController::refreshDetails() {
+  if (!m_detailsId || !m_infoLabel || !m_reportLabel || !m_detailsBar) {
+    return;
+  }
+  const auto activities = m_hub.activities();
+  const auto* shown = findActivity(activities, *m_detailsId);
+  if (!shown) {
+    return;
+  }
+  m_detailsLive = !shown->finished;
+  const std::string info = shown->detail && !shown->detail->info.empty() ? shown->detail->info : shown->summary;
+  m_infoLabel->setText(info);
+  m_infoLabel->setVisible(!info.empty());
+  m_infoLabel->setParticipatesInLayout(!info.empty());
+  const bool bar = m_detailsLive && shown->progress.has_value();
+  m_detailsBar->setVisible(bar);
+  m_detailsBar->setParticipatesInLayout(bar);
+  if (bar) {
+    m_detailsBar->setProgress(shown->progress.value_or(0.0F));
+  }
+  const auto report = m_hub.activityReport(*m_detailsId);
+  const bool hasReport = report && !report->empty();
+  m_reportLabel->setText(hasReport ? *report : std::string());
+  m_reportLabel->setVisible(hasReport);
+  m_reportLabel->setParticipatesInLayout(hasReport);
 }
 
 void OperationsController::layoutDialog() {
@@ -254,9 +321,15 @@ void OperationsController::layoutDialog() {
       );
     }
   }
-  if (m_reportLabel) {
+  if (m_reportLabel || m_infoLabel) {
     // The dialog's own width; the popup surface also holds its shadow.
-    m_reportLabel->setMaxWidth(std::max(1.0F, m_page.activePopup().root()->width() - 48.0F));
+    const float width = std::max(1.0F, m_page.activePopup().root()->width() - 48.0F);
+    if (m_reportLabel) {
+      m_reportLabel->setMaxWidth(width);
+    }
+    if (m_infoLabel) {
+      m_infoLabel->setMaxWidth(width);
+    }
   }
 }
 
